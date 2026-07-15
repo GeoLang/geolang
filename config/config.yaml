@@ -1,0 +1,4 @@
+app:
+  tool_exec_dir: /app/geolang
+logging:
+  level: INFO

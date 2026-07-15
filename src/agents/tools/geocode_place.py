@@ -1,0 +1,113 @@
+from pydantic import BaseModel, Field
+
+
+class GeocodePlaceArgs(BaseModel):
+    place_name: str = Field(
+        ...,
+        description="Name of a city, town, or place to look up (e.g. 'Paris', 'London', 'Tokyo').",
+    )
+
+
+def geocode_place(place_name: str) -> str:
+    """
+    Look up the coordinates of a named place. Tries the platform's geokode
+    service first (precise addresses within its loaded extract), then falls back
+    to the Natural Earth populated places dataset for global coverage.
+    Returns longitude, latitude, and country. Call this whenever the user mentions a location by name.
+    """
+    import os
+    import traceback
+
+    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
+
+    # platform geokode first: authoritative for addresses in the loaded extract
+    geokode_url = os.environ.get("GEOKODE_URL")
+    if geokode_url:
+        try:
+            import requests
+
+            resp = requests.get(
+                f"{geokode_url.rstrip('/')}/forward",
+                params={"q": place_name},
+                timeout=10,
+            )
+            if resp.ok:
+                results = resp.json().get("results", [])
+                if results:
+                    top = results[0]
+                    addr = top.get("address", {})
+                    label = addr.get("full") or ", ".join(
+                        str(p)
+                        for p in (
+                            addr.get("street"),
+                            addr.get("city"),
+                            addr.get("state"),
+                        )
+                        if p
+                    ) or place_name
+                    lon = round(float(top["lon"]), 5)
+                    lat = round(float(top["lat"]), 5)
+                    return f"✅ {label} (geokode): lon={lon}, lat={lat}"
+        except Exception:
+            pass  # geokode unavailable or no match: fall back to Natural Earth
+
+    # Search across available Natural Earth populated places datasets
+    search_paths = [
+        os.path.join(exec_dir, "natural_earth_10m", "ne_10m_populated_places.shp"),
+        os.path.join(exec_dir, "natural_earth_50m", "ne_50m_populated_places.shp"),
+        os.path.join(exec_dir, "natural_earth_110m", "ne_110m_populated_places.shp"),
+        os.path.join(exec_dir, "natural_earth", "ne_110m_populated_places.shp"),
+    ]
+
+    try:
+        import geopandas as gpd
+        import pandas as pd
+
+        gdf = None
+        for path in search_paths:
+            if os.path.exists(path):
+                gdf = gpd.read_file(path)
+                break
+
+        if gdf is None:
+            return (
+                "❌ No populated places dataset found. "
+                "Run download_natural_earth_dataset first."
+            )
+
+        # Try exact match on NAME, then case-insensitive, then partial
+        name_col = next(
+            (c for c in gdf.columns if c.upper() in ("NAME", "NAME_EN")), None
+        )
+        if name_col is None:
+            return f"❌ Could not find name column. Columns: {list(gdf.columns)}"
+
+        query = place_name.strip()
+        match = gdf[gdf[name_col].str.upper() == query.upper()]
+        if match.empty:
+            match = gdf[gdf[name_col].str.contains(query, case=False, na=False)]
+
+        if match.empty:
+            return f"❌ Place '{place_name}' not found in dataset."
+
+        # Use the most populous match if there are multiple
+        pop_col = next((c for c in match.columns if "POP" in c.upper()), None)
+        if pop_col and len(match) > 1:
+            match = match.nlargest(1, pop_col)
+        else:
+            match = match.iloc[[0]]
+
+        row = match.iloc[0]
+        lon = round(row.geometry.x, 4)
+        lat = round(row.geometry.y, 4)
+        country = row.get("SOV0NAME", row.get("ADM0NAME", "Unknown"))
+        name = row[name_col]
+
+        return f"✅ {name}, {country}: lon={lon}, lat={lat}"
+
+    except Exception as e:
+        return f"❌ Geocoding failed: {str(e)}\n{traceback.format_exc()}"
+
+
+TOOL_FUNCTION = geocode_place
+TOOL_SCHEMA = GeocodePlaceArgs

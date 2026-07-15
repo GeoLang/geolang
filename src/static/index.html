@@ -1,0 +1,2538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GeoLang Agent</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      padding: 12px 20px;
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3148;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #a78bfa;
+    }
+
+    header .status {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-left: auto;
+    }
+
+    header .status.ok { color: #34d399; }
+
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Chat Panel ─────────────────────────────── */
+    .chat-panel {
+      width: 380px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #2d3148;
+      background: #13161f;
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 100%;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.875rem;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+
+    .message.user {
+      background: #312e81;
+      align-self: flex-end;
+      border-bottom-right-radius: 3px;
+    }
+
+    .message.agent {
+      background: #1e2235;
+      align-self: flex-start;
+      border-bottom-left-radius: 3px;
+      border: 1px solid #2d3148;
+    }
+
+    .message.system {
+      background: transparent;
+      color: #475569;
+      font-size: 0.75rem;
+      text-align: center;
+      align-self: center;
+    }
+
+    .message .sender {
+      font-size: 0.7rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+      opacity: 0.6;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .copy-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      color: #475569;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+      line-height: 1;
+    }
+
+    .message:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { color: #a78bfa; }
+    .copy-btn.copied { color: #34d399; opacity: 1; }
+    .message.has-spec { cursor: pointer; }
+    .message.has-spec:hover { box-shadow: inset 0 0 0 1px rgba(167,139,250,0.35); }
+    .message.active-spec { box-shadow: inset 0 0 0 2px #7c3aed; }
+
+    .typing {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: 10px 14px;
+    }
+
+    .typing { display: flex; flex-direction: column; gap: 6px; }
+
+    .typing-dots { display: flex; gap: 4px; align-items: center; }
+
+    .typing-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #a78bfa;
+      animation: bounce 1.2s infinite;
+    }
+
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    .typing-status {
+      font-size: 0.75rem;
+      color: #64748b;
+      font-style: italic;
+      min-height: 1em;
+    }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40% { transform: translateY(-6px); opacity: 1; }
+    }
+
+    .input-area {
+      padding: 12px;
+      border-top: 1px solid #2d3148;
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-area textarea {
+      flex: 1;
+      background: #1a1d2e;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      color: #e2e8f0;
+      padding: 10px 12px;
+      font-size: 0.875rem;
+      resize: none;
+      height: 44px;
+      max-height: 120px;
+      font-family: inherit;
+      line-height: 1.4;
+      overflow-y: auto;
+    }
+
+    .input-area textarea:focus {
+      outline: none;
+      border-color: #7c3aed;
+    }
+
+    .input-area button {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0 16px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 600;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+
+    .input-area button:hover { background: #6d28d9; }
+    .input-area button:disabled { background: #374151; cursor: not-allowed; }
+
+    /* ── Visualization Panel ─────────────────────── */
+    .viz-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #0f1117;
+      overflow: hidden;
+    }
+
+    .viz-toolbar {
+      padding: 8px 16px;
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3148;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: #64748b;
+      flex-shrink: 0;
+    }
+
+    .viz-toolbar .tab {
+      padding: 4px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .viz-toolbar .tab.active {
+      background: #312e81;
+      color: #a78bfa;
+    }
+
+    .viz-content {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    #image-view {
+      width: 100%;
+      height: 100%;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      padding: 20px;
+      overflow: auto;
+    }
+
+    #image-view img {
+      max-width: 100%;
+      max-height: calc(100% - 40px);
+      border-radius: 8px;
+      border: 1px solid #2d3148;
+    }
+
+    #image-view .img-title {
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+
+    #table-view {
+      width: 100%;
+      height: 100%;
+      display: none;
+      overflow: auto;
+      padding: 20px;
+    }
+
+    #table-view h3 {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      margin-bottom: 12px;
+    }
+
+    #table-view table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    #table-view th {
+      background: #1a1d2e;
+      color: #a78bfa;
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid #2d3148;
+      position: sticky;
+      top: 0;
+    }
+
+    #table-view td {
+      padding: 7px 12px;
+      border-bottom: 1px solid #1e2235;
+      color: #cbd5e1;
+    }
+
+    #table-view tr:hover td { background: #1a1d2e; }
+
+    .placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      color: #334155;
+      pointer-events: none;
+    }
+
+    .placeholder svg { opacity: 0.3; }
+    .placeholder p { font-size: 0.9rem; }
+
+    /* ── Data Panel ──────────────────────────────── */
+    .data-section {
+      border-bottom: 1px solid #2d3148;
+      flex-shrink: 0;
+    }
+
+    .data-header {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #64748b;
+      user-select: none;
+    }
+
+    .data-header:hover { background: #1a1d2e; }
+
+    .data-count { flex: 1; color: #94a3b8; font-size: 0.8rem; }
+
+    .upload-label {
+      padding: 3px 8px;
+      background: #1e2235;
+      border: 1px solid #2d3148;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      color: #a78bfa;
+      transition: background 0.15s;
+    }
+
+    .upload-label:hover { background: #312e81; }
+
+    .data-list {
+      padding: 4px 12px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .dataset-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      background: #1a1d2e;
+    }
+
+    .dataset-item .ds-name {
+      font-weight: 500;
+      color: #e2e8f0;
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dataset-item .ds-meta { color: #475569; font-size: 0.7rem; white-space: nowrap; }
+
+    .dataset-empty { color: #475569; font-size: 0.75rem; text-align: center; padding: 8px; }
+
+    .upload-progress { font-size: 0.75rem; color: #f59e0b; padding: 4px 8px; }
+
+    /* ── Stats Floating Window ───────────────────── */
+    /* ── Attribute table modal ── */
+    #attr-table-modal {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 1200;
+      background: rgba(13,15,22,0.97);
+      border-top: 1px solid #2d3148;
+      backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      max-height: 45%;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
+    }
+
+    #attr-table-header {
+      display: flex;
+      align-items: center;
+      padding: 7px 12px;
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3148;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #attr-table-title {
+      flex: 1;
+      font-weight: 600;
+      color: #a78bfa;
+      font-size: 0.75rem;
+    }
+
+    #attr-table-close {
+      background: none;
+      border: none;
+      color: #475569;
+      cursor: pointer;
+      font-size: 1.2rem;
+      line-height: 1;
+      padding: 0 2px;
+    }
+
+    #attr-table-close:hover { color: #e2e8f0; }
+
+    #attr-table-wrap {
+      overflow: auto;
+      flex: 1;
+    }
+
+    #attr-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.72rem;
+    }
+
+    #attr-table thead th {
+      background: #1a1d2e;
+      color: #94a3b8;
+      padding: 5px 8px;
+      text-align: left;
+      position: sticky;
+      top: 0;
+      border-bottom: 1px solid #2d3148;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+
+    #attr-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    #attr-table tbody tr:hover { background: rgba(167,139,250,0.07); }
+
+    #attr-table tbody td {
+      padding: 4px 8px;
+      color: #cbd5e1;
+      border-bottom: 1px solid rgba(45,49,72,0.5);
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Share toast ── */
+    #share-toast {
+      position: absolute;
+      top: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1300;
+      background: #1a1d2e;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 0.8rem;
+      color: #e2e8f0;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      max-width: 340px;
+      text-align: center;
+      word-break: break-all;
+    }
+
+    #stats-window {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 260px;
+      z-index: 1100;
+      background: rgba(19,22,31,0.96);
+      border: 1px solid #2d3148;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      overflow: hidden;
+    }
+
+    #stats-win-header {
+      display: flex;
+      align-items: center;
+      padding: 8px 10px 8px 12px;
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3148;
+      cursor: move;
+      gap: 8px;
+      user-select: none;
+    }
+
+    #stats-win-title {
+      flex: 1;
+      font-weight: 600;
+      color: #a78bfa;
+      font-size: 0.75rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #stats-win-close {
+      background: none;
+      border: none;
+      color: #475569;
+      cursor: pointer;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0 2px;
+      flex-shrink: 0;
+    }
+
+    #stats-win-close:hover { color: #e2e8f0; }
+
+    #stats-win-layers {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 6px 10px;
+      border-bottom: 1px solid #2d3148;
+      background: #13161f;
+    }
+
+    .sw-layer-btn {
+      padding: 2px 8px;
+      border-radius: 8px;
+      border: 1px solid #2d3148;
+      background: #1e2235;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 0.71rem;
+      white-space: nowrap;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .sw-layer-btn:hover { background: #2d3148; color: #94a3b8; }
+    .sw-layer-btn.active { background: #312e81; color: #a78bfa; border-color: #4c1d95; }
+
+    #stats-win-body {
+      padding: 10px 12px 12px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .sw-summary {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 10px;
+    }
+
+    .sw-summary span { color: #a78bfa; }
+
+    .sw-section-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 10px 0 6px;
+    }
+
+    .sw-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 5px;
+    }
+
+    .sw-bar-label {
+      color: #94a3b8;
+      width: 76px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .sw-bar-track { flex: 1; height: 4px; background: #1e2235; border-radius: 2px; }
+    .sw-bar-fill  { height: 100%; border-radius: 2px; background: #7c3aed; }
+    .sw-bar-count { color: #64748b; width: 30px; text-align: right; flex-shrink: 0; font-size: 0.72rem; }
+
+    .sw-num-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3px 0;
+      border-bottom: 1px solid #1e2235;
+    }
+
+    .sw-num-col { color: #94a3b8; }
+    .sw-num-val { color: #e2e8f0; font-weight: 500; }
+    .sw-num-range { color: #475569; font-size: 0.71rem; }
+
+    /* ── Viz label ───────────────────────────────── */
+    #viz-label {
+      margin-left: auto;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #94a3b8;
+      font-size: 0.75rem;
+    }
+
+    /* ── Example queries ─────────────────────────── */
+    .example-query {
+      background: #1e2235;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 6px 12px;
+      text-align: left;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .example-query:hover { background: #312e81; color: #e2e8f0; border-color: #4c1d95; }
+
+    /* Leaflet dark overrides */
+    .leaflet-container { background: #1a1d2e; }
+    .leaflet-interactive { cursor: pointer !important; }
+    .leaflet-tile { filter: brightness(0.7) saturate(0.6); }
+    .leaflet-control-zoom a { background: #1a1d2e; color: #e2e8f0; border-color: #2d3148; }
+    .leaflet-control-zoom a:hover { background: #2d3148; }
+    .leaflet-bar { border-color: #2d3148 !important; }
+
+    /* ── Layer Panel ─────────────────────────────── */
+    #layer-panel {
+      flex-shrink: 0;
+      background: #0f1117;
+      border-bottom: 1px solid #2d3148;
+      max-height: 160px;
+      overflow-y: auto;
+      display: none;
+    }
+    .layer-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-bottom: 1px solid #1a1d2e;
+      font-size: 0.75rem;
+    }
+    .layer-row:last-child { border-bottom: none; }
+    .layer-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+    .layer-name { flex: 1; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .layer-btn {
+      background: none; border: none; color: #475569; cursor: pointer;
+      padding: 2px 5px; border-radius: 4px; font-size: 0.75rem; line-height: 1;
+      transition: color 0.15s, background 0.15s; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .layer-btn:hover { color: #a78bfa; background: #1e2235; }
+    .layer-btn.active { color: #a78bfa; }
+    .layer-opacity { width: 56px; accent-color: #7c3aed; flex-shrink: 0; cursor: pointer; }
+    .layer-style-select {
+      background: #1a1d2e; border: 1px solid #2d3148; border-radius: 4px;
+      color: #64748b; font-size: 0.7rem; padding: 2px 4px; max-width: 88px;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .layer-style-select:focus { outline: none; border-color: #7c3aed; }
+
+    /* ── Choropleth legend ───────────────────────── */
+    #choropleth-legend {
+      position: absolute;
+      bottom: 24px;
+      left: 16px;
+      z-index: 1100;
+      background: rgba(19,22,31,0.92);
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.72rem;
+      max-width: 180px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    .legend-title { font-weight: 600; color: #a78bfa; margin-bottom: 6px; font-size: 0.74rem; }
+    .legend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; color: #94a3b8; }
+    .legend-swatch { width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+    /* ── Map labels ──────────────────────────────── */
+    .map-label {
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: #e2e8f0 !important;
+      font-size: 0.68rem !important;
+      font-weight: 600 !important;
+      text-shadow: 0 0 4px #000, 0 0 2px #000 !important;
+      padding: 0 !important;
+      white-space: nowrap !important;
+    }
+    .map-label::before { display: none !important; }
+
+    /* ── Feature popup ───────────────────────────── */
+    .feat-popup { font-size: 0.75rem; max-height: 220px; overflow-y: auto; }
+    .feat-popup table { border-collapse: collapse; width: 100%; }
+    .feat-popup td { padding: 2px 6px; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .feat-popup td:first-child { font-weight: 600; color: #555; white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+    .feat-popup td:last-child { color: #222; max-width: 160px; overflow: hidden; text-overflow: ellipsis; word-break: break-word; }
+    .leaflet-popup-content-wrapper { border-radius: 8px !important; }
+    .leaflet-popup-content { margin: 10px 12px !important; }
+
+    /* ── Map search box ──────────────────────────── */
+    #map-search-wrap {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      display: flex;
+      gap: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #map-search-input {
+      background: rgba(19,22,31,0.92);
+      border: 1px solid #2d3148;
+      border-right: none;
+      border-radius: 8px 0 0 8px;
+      color: #e2e8f0;
+      font-size: 0.78rem;
+      font-family: inherit;
+      padding: 6px 10px;
+      width: 190px;
+      outline: none;
+      backdrop-filter: blur(8px);
+    }
+    #map-search-input::placeholder { color: #475569; }
+    #map-search-input:focus { border-color: #7c3aed; }
+    #map-search-btn {
+      background: rgba(30,27,60,0.95);
+      border: 1px solid #2d3148;
+      border-radius: 0 8px 8px 0;
+      color: #a78bfa;
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 6px 10px;
+    }
+    #map-search-btn:hover { background: #2d3148; color: #e2e8f0; }
+
+    /* ── Session controls ────────────────────────── */
+    .session-name {
+      background: transparent; border: none; border-bottom: 1px solid transparent;
+      color: #94a3b8; font-size: 0.8rem; font-family: inherit;
+      padding: 2px 4px; width: 150px; transition: border-color 0.15s, color 0.15s;
+    }
+    .session-name:focus { outline: none; border-bottom-color: #7c3aed; color: #e2e8f0; }
+    .session-name::placeholder { color: #475569; }
+    .clear-btn {
+      background: none; border: 1px solid #2d3148; border-radius: 6px;
+      color: #475569; cursor: pointer; font-size: 0.72rem; padding: 3px 8px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s; white-space: nowrap;
+    }
+    .clear-btn:hover { background: rgba(239,68,68,0.1); border-color: #7f1d1d; color: #fca5a5; }
+
+    /* ── Follow-up suggestions ───────────────────── */
+    .followup-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+    .followup-btn {
+      background: #1e2235;
+      border: 1px solid #2d3148;
+      border-radius: 12px;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      text-align: left;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .followup-btn:hover { background: #312e81; color: #e2e8f0; border-color: #4c1d95; }
+
+    /* ── Draw toolbar dark override ──────────────── */
+    .leaflet-draw-toolbar a,
+    .leaflet-draw-actions a {
+      background-color: #1a1d2e !important;
+      color: #e2e8f0 !important;
+      border-color: #2d3148 !important;
+    }
+    .leaflet-draw-toolbar a:hover,
+    .leaflet-draw-actions a:hover { background-color: #2d3148 !important; }
+    .leaflet-draw-guide-dash { border-color: #a78bfa !important; }
+
+    /* ── Map toolbar action buttons ──────────────── */
+    .map-action-btn {
+      background: #1a1d2e;
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 0.72rem;
+      padding: 3px 9px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      line-height: 1.4;
+    }
+    .map-action-btn:hover { background: rgba(124,58,237,0.1); border-color: #4c1d95; color: #a78bfa; }
+    .map-action-btn.active { background: #312e81; border-color: #4c1d95; color: #a78bfa; }
+
+    /* ── Basemap selector ────────────────────────── */
+    .basemap-select {
+      background: #1a1d2e;
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      color: #64748b;
+      font-size: 0.72rem;
+      font-family: inherit;
+      padding: 3px 6px;
+      cursor: pointer;
+    }
+    .basemap-select:focus { outline: none; border-color: #7c3aed; }
+
+    /* ── Map click query toast ───────────────────── */
+    #map-click-toast {
+      position: absolute;
+      bottom: 56px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(26,29,46,0.95);
+      border: 1px solid #7c3aed;
+      border-radius: 8px;
+      color: #a78bfa;
+      font-size: 0.78rem;
+      padding: 6px 14px;
+      z-index: 1200;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    /* ── Session selector ────────────────────────── */
+    .session-select {
+      background: #1a1d2e; border: 1px solid #2d3148; border-radius: 6px;
+      color: #94a3b8; font-size: 0.75rem; font-family: inherit;
+      padding: 3px 8px; max-width: 180px; cursor: pointer;
+    }
+    .session-select:focus { outline: none; border-color: #7c3aed; }
+    .new-session-btn {
+      background: none; border: 1px solid #2d3148; border-radius: 6px;
+      color: #64748b; cursor: pointer; font-size: 0.72rem; padding: 3px 8px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s; white-space: nowrap;
+    }
+    .new-session-btn:hover { background: rgba(124,58,237,0.1); border-color: #4c1d95; color: #a78bfa; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2">
+    <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+  </svg>
+  <h1>GeoLang Agent</h1>
+  <select class="session-select" id="session-select" onchange="switchSession(this.value)"></select>
+  <input type="text" class="session-name" id="session-name" placeholder="Session name…" autocomplete="off" />
+  <button class="new-session-btn" onclick="newSession()">+ New</button>
+  <button class="clear-btn" onclick="deleteInactiveSession()">Delete</button>
+  <button class="clear-btn" onclick="clearSession()">Clear</button>
+  <span class="status" id="status">connecting...</span>
+</header>
+
+<div class="main">
+
+  <!-- Chat Panel -->
+  <div class="chat-panel">
+
+    <!-- Data Section -->
+    <div class="data-section">
+      <div class="data-header" onclick="toggleDataSection()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span class="data-count" id="data-count">My Data</span>
+        <label for="file-input" class="upload-label" onclick="event.stopPropagation()">+ Upload</label>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             id="data-chevron" style="transition:transform 0.2s; flex-shrink:0">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+      <div class="data-list" id="data-list" style="display:none">
+        <div class="dataset-empty">No datasets yet — upload a file to get started</div>
+      </div>
+    </div>
+    <input type="file" id="file-input" hidden
+           accept=".gpkg,.geojson,.zip,.csv,.shp"
+           onchange="uploadFile(this)" />
+
+    <div class="messages" id="messages">
+      <div class="message system" id="welcome-msg">
+        <div style="margin-bottom:10px">What would you like to find?</div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">
+          <button class="example-query" onclick="useExample(this)">Coffee shops near Central Park, New York</button>
+          <button class="example-query" onclick="useExample(this)">Pharmacies within 10 min walk of Waterloo Station, London</button>
+          <button class="example-query" onclick="useExample(this)">Restaurants near the Eiffel Tower</button>
+          <button class="example-query" onclick="useExample(this)">Supermarkets within 15 min walk of Times Square</button>
+        </div>
+      </div>
+    </div>
+    <div class="input-area">
+      <textarea id="input" placeholder="Ask me to find anything, anywhere…" rows="1" autofocus></textarea>
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- Visualization Panel -->
+  <div class="viz-panel">
+    <div class="viz-toolbar">
+      <span class="tab active" id="tab-map" onclick="showTab('map')">Map</span>
+      <span class="tab" id="tab-image" onclick="showTab('image')">Image</span>
+      <span class="tab" id="tab-table" onclick="showTab('table')">Table</span>
+      <span id="viz-label"></span>
+      <button class="map-action-btn" id="draw-btn" onclick="toggleDraw()" title="Draw a polygon or point on the map — the agent will use it as an area of interest">✏ Draw</button>
+      <button class="map-action-btn" id="click-query-btn" onclick="toggleClickQuery()" title="Click anywhere on the map to query what is at that location">⊕ Click to query</button>
+      <select class="basemap-select" id="basemap-select" onchange="switchBasemap(this.value)" title="Switch background map">
+        <option value="osm">OSM</option>
+        <option value="satellite">Satellite</option>
+        <option value="topo">Topo</option>
+        <option value="dark">Dark</option>
+      </select>
+      <button class="map-action-btn" onclick="exportPDF()" title="Export current analysis as a PDF report">⬇ PDF</button>
+      <button class="map-action-btn" onclick="exportPNG()" title="Export map as PNG (captures satellite/tile imagery)">⬇ PNG</button>
+      <button class="map-action-btn" id="share-btn" onclick="shareMap()" title="Create a shareable link to this map view">↗ Share</button>
+    </div>
+    <div id="layer-panel"></div>
+    <div class="viz-content">
+      <div id="map">
+        <div id="map-search-wrap">
+          <input id="map-search-input" type="text" placeholder="Fly to place…" autocomplete="off"
+            onkeydown="if(event.key==='Enter') mapSearch()" />
+          <button id="map-search-btn" onclick="mapSearch()" title="Fly to place">⌕</button>
+        </div>
+      </div>
+
+      <div id="image-view">
+        <span class="img-title" id="img-title"></span>
+        <img id="img-el" src="" alt="Output" />
+      </div>
+
+      <div id="table-view">
+        <h3 id="table-title"></h3>
+        <table id="data-table"><thead></thead><tbody></tbody></table>
+      </div>
+
+      <div id="map-click-toast">Querying location…</div>
+
+      <div class="placeholder" id="placeholder">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+        <p>Visualizations will appear here</p>
+      </div>
+
+      <!-- Attribute Table Modal -->
+      <div id="attr-table-modal" style="display:none">
+        <div id="attr-table-header">
+          <span id="attr-table-title">Attribute Table</span>
+          <button id="attr-table-close" onclick="closeAttrTable()" title="Close">×</button>
+        </div>
+        <div id="attr-table-wrap">
+          <table id="attr-table"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
+
+      <!-- Share Toast -->
+      <div id="share-toast" style="display:none"></div>
+
+      <!-- Floating Stats Window -->
+      <div id="stats-window" style="display:none">
+        <div id="stats-win-header">
+          <span id="stats-win-title">Layer Stats</span>
+          <button id="stats-win-close" onclick="closeStatsWindow()" title="Close">×</button>
+        </div>
+        <div id="stats-win-layers" style="display:none"></div>
+        <div id="stats-win-body"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const API = '';  // same origin
+  const LAYER_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
+  const YLORRD = ['#ffffb2','#fecc5c','#fd8d3c','#f03b20','#bd0026'];
+  const SESSION_NAME_KEY = 'geolang_session_name';
+
+  let map = null;
+  let activeLayers = [];
+  // layerMeta: [{name, file, color, leafletLayer, visible, opacity, geojsonCache}]
+  let layerMeta = [];
+  let currentTab = 'map';
+
+  // ── Init map ───────────────────────────────────
+  function initMap(center, zoom) {
+    if (map) return;
+    map = L.map('map', { center, zoom });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
+      maxZoom: 19,
+    }).addTo(map);
+  }
+
+  function clearLayers() {
+    layerMeta.forEach(lm => {
+      if (map && lm.leafletLayer) map.removeLayer(lm.leafletLayer);
+      if (map && lm.labelLayer) map.removeLayer(lm.labelLayer);
+    });
+    activeLayers.forEach(l => map && map.removeLayer(l));
+    activeLayers = [];
+    layerMeta = [];
+    removeLegend();
+    const panel = document.getElementById('layer-panel');
+    if (panel) { panel.innerHTML = ''; panel.style.display = 'none'; }
+  }
+
+  // ── Layer panel: toggle, opacity, download ─────
+  function rebuildLayerPanel() {
+    const panel = document.getElementById('layer-panel');
+    if (!panel) return;
+    panel.innerHTML = '';
+    if (layerMeta.length === 0) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+
+    layerMeta.forEach((lm, idx) => {
+      const row = document.createElement('div');
+      row.className = 'layer-row';
+
+      // Colour swatch
+      const swatch = document.createElement('span');
+      swatch.className = 'layer-swatch';
+      swatch.style.background = lm.color;
+      row.appendChild(swatch);
+
+      // Name
+      const name = document.createElement('span');
+      name.className = 'layer-name';
+      name.textContent = lm.name;
+      name.title = lm.name;
+      row.appendChild(name);
+
+      // Visibility toggle
+      const visBtn = document.createElement('button');
+      visBtn.className = 'layer-btn' + (lm.visible ? ' active' : '');
+      visBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+      visBtn.title = 'Toggle visibility';
+      visBtn.onclick = () => {
+        lm.visible = !lm.visible;
+        visBtn.classList.toggle('active', lm.visible);
+        if (lm.visible) { if (map && lm.leafletLayer) map.addLayer(lm.leafletLayer); }
+        else { if (map && lm.leafletLayer) map.removeLayer(lm.leafletLayer); }
+      };
+      row.appendChild(visBtn);
+
+      // Zoom-to-layer button
+      const zoomBtn = document.createElement('button');
+      zoomBtn.className = 'layer-btn';
+      zoomBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+      zoomBtn.title = 'Zoom to layer';
+      zoomBtn.onclick = () => {
+        if (!map || !lm.leafletLayer) return;
+        try {
+          const b = lm.leafletLayer.getBounds();
+          if (b && b.isValid()) map.fitBounds(b, { padding: [40, 40], maxZoom: 16 });
+        } catch (e) { /* no bounds available */ }
+      };
+      row.appendChild(zoomBtn);
+
+      // Opacity slider
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = 0;
+      slider.max = 1;
+      slider.step = 0.05;
+      slider.value = lm.opacity;
+      slider.className = 'layer-opacity';
+      slider.title = 'Opacity';
+      slider.oninput = () => {
+        lm.opacity = parseFloat(slider.value);
+        if (lm.leafletLayer) {
+          if (lm.leafletLayer.setStyle) lm.leafletLayer.setStyle({ fillOpacity: lm.opacity * 0.8, opacity: lm.opacity });
+          if (lm.leafletLayer.eachLayer) lm.leafletLayer.eachLayer(sub => {
+            if (sub.setOpacity) sub.setOpacity(lm.opacity);
+          });
+        }
+      };
+      row.appendChild(slider);
+
+      // Download button
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'layer-btn';
+      dlBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+      dlBtn.title = 'Download layer';
+      dlBtn.onclick = () => {
+        const a = document.createElement('a');
+        a.href = `${API}/download/${encodeURIComponent(lm.file)}`;
+        a.download = lm.file;
+        a.click();
+      };
+      row.appendChild(dlBtn);
+
+      // Choropleth style dropdown
+      const numericFields = getNumericFields(lm.geojsonCache);
+      if (numericFields.length > 0) {
+        const sel = document.createElement('select');
+        sel.className = 'layer-style-select';
+        sel.title = 'Colour by field';
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Flat fill';
+        sel.appendChild(defaultOpt);
+        numericFields.forEach(f => {
+          const opt = document.createElement('option');
+          opt.value = f;
+          opt.textContent = f;
+          if (lm.styleField === f) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        sel.onchange = () => {
+          lm.styleField = sel.value;
+          applyChoropleth(lm, idx);
+        };
+        row.appendChild(sel);
+      }
+
+      // Label toggle
+      const textFields = getTextFields(lm.geojsonCache);
+      if (textFields.length > 0) {
+        const lblBtn = document.createElement('button');
+        lblBtn.className = 'layer-btn' + (lm.labels ? ' active' : '');
+        lblBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><line x1="12" y1="4" x2="12" y2="20"/><path d="M8 20h8"/></svg>';
+        lblBtn.title = 'Toggle labels';
+        lblBtn.onclick = () => {
+          lm.labels = !lm.labels;
+          lblBtn.classList.toggle('active', lm.labels);
+          toggleLabels(lm);
+        };
+        row.appendChild(lblBtn);
+      }
+
+      // Attribute table button
+      if (lm.geojsonCache && lm.geojsonCache.features && lm.geojsonCache.features.length) {
+        const attrBtn = document.createElement('button');
+        attrBtn.className = 'layer-btn';
+        attrBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg>';
+        attrBtn.title = 'Show attribute table';
+        attrBtn.onclick = () => openAttrTable(lm);
+        row.appendChild(attrBtn);
+      }
+
+      panel.appendChild(row);
+    });
+  }
+
+  // ── Choropleth + label helpers ─────────────────
+  function getNumericFields(geojson) {
+    if (!geojson || !geojson.features || !geojson.features.length) return [];
+    const sample = geojson.features.slice(0, 50);
+    const props = Object.keys(geojson.features[0].properties || {});
+    return props.filter(k => sample.some(f => typeof f.properties[k] === 'number' && isFinite(f.properties[k])));
+  }
+
+  function getTextFields(geojson) {
+    if (!geojson || !geojson.features || !geojson.features.length) return [];
+    const props = Object.keys(geojson.features[0].properties || {});
+    return props.filter(k => {
+      const v = geojson.features[0].properties[k];
+      return typeof v === 'string' && v.length > 0;
+    });
+  }
+
+  function quantileBreaks(values, n) {
+    const sorted = values.filter(v => isFinite(v)).sort((a, b) => a - b);
+    if (sorted.length === 0) return [];
+    const breaks = [];
+    for (let i = 1; i < n; i++) {
+      const idx = Math.floor((i / n) * sorted.length);
+      breaks.push(sorted[Math.min(idx, sorted.length - 1)]);
+    }
+    return breaks;
+  }
+
+  function applyChoropleth(lm, layerIdx) {
+    const field = lm.styleField;
+    removeLegend();
+
+    if (!field) {
+      // Reset to flat fill
+      if (lm.leafletLayer && lm.leafletLayer.setStyle) {
+        lm.leafletLayer.setStyle({ color: lm.color, fillColor: lm.color, fillOpacity: lm.opacity * 0.8, weight: 1.5 });
+      }
+      if (lm.leafletLayer && lm.leafletLayer.eachLayer) {
+        lm.leafletLayer.eachLayer(sub => {
+          if (sub.setStyle) sub.setStyle({ fillColor: lm.color, color: '#fff', fillOpacity: 0.8 });
+        });
+      }
+      return;
+    }
+
+    const values = (lm.geojsonCache.features || []).map(f => f.properties[field]).filter(v => typeof v === 'number' && isFinite(v));
+    if (values.length === 0) return;
+
+    const ramp = YLORRD;
+    const breaks = quantileBreaks(values, ramp.length);
+
+    function getColor(v) {
+      if (v == null || !isFinite(v)) return '#666';
+      for (let i = 0; i < breaks.length; i++) {
+        if (v <= breaks[i]) return ramp[i];
+      }
+      return ramp[ramp.length - 1];
+    }
+
+    if (lm.leafletLayer && lm.leafletLayer.eachLayer) {
+      lm.leafletLayer.eachLayer(sub => {
+        const v = sub.feature && sub.feature.properties[field];
+        const c = getColor(v);
+        if (sub.setStyle) sub.setStyle({ fillColor: c, color: c, fillOpacity: lm.opacity * 0.8, weight: 1.5 });
+        if (sub.setRadius) sub.setStyle({ fillColor: c, color: '#fff', fillOpacity: 0.8 });
+      });
+    }
+
+    showLegend(field, breaks, ramp, values);
+  }
+
+  function showLegend(field, breaks, ramp, values) {
+    removeLegend();
+    const container = document.querySelector('.viz-content');
+    if (!container) return;
+    const legend = document.createElement('div');
+    legend.id = 'choropleth-legend';
+    const min = Math.min(...values);
+    let html = `<div class="legend-title">${field}</div>`;
+    let prev = min;
+    for (let i = 0; i < ramp.length; i++) {
+      const upper = i < breaks.length ? breaks[i] : Math.max(...values);
+      html += `<div class="legend-row"><span class="legend-swatch" style="background:${ramp[i]}"></span><span>${prev.toFixed(1)} – ${upper.toFixed(1)}</span></div>`;
+      prev = upper;
+    }
+    legend.innerHTML = html;
+    container.appendChild(legend);
+  }
+
+  function removeLegend() {
+    const el = document.getElementById('choropleth-legend');
+    if (el) el.remove();
+  }
+
+  function toggleLabels(lm) {
+    if (!map) return;
+    if (lm.labelLayer) {
+      map.removeLayer(lm.labelLayer);
+      lm.labelLayer = null;
+    }
+    if (!lm.labels || !lm.geojsonCache) return;
+
+    const textFields = getTextFields(lm.geojsonCache);
+    const labelField = textFields[0];
+    if (!labelField) return;
+
+    lm.labelLayer = L.geoJSON(lm.geojsonCache, {
+      pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 0, opacity: 0, fillOpacity: 0 }),
+      style: { opacity: 0, fillOpacity: 0, weight: 0 },
+      onEachFeature: (feature, layer) => {
+        const label = feature.properties[labelField];
+        if (label != null && String(label).trim() !== '' && !/^(nan|none|null)$/i.test(String(label))) {
+          layer.bindTooltip(String(label), {
+            permanent: true,
+            direction: 'center',
+            className: 'map-label',
+          });
+        }
+      },
+    }).addTo(map);
+  }
+
+  // ── Clear session ──────────────────────────────
+  function clearSession() {
+    if (!confirm('Clear chat history and start fresh?')) return;
+    localStorage.removeItem(getSessionKey());
+    messageHistory = [];
+    document.getElementById('messages').innerHTML = '';
+    clearLayers();
+    document.getElementById('placeholder').style.display = '';
+    const welcome = document.getElementById('welcome-msg');
+    if (welcome) welcome.style.display = '';
+  }
+
+  // ── Session management ─────────────────────────
+  let currentSessionId = null;
+
+  async function loadSessions() {
+    try {
+      const res = await fetch(`${API}/sessions`);
+      if (!res.ok) return;
+      const sessions = await res.json();
+      const sel = document.getElementById('session-select');
+      sel.innerHTML = '';
+      sessions.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        if (s.active) {
+          opt.selected = true;
+          currentSessionId = s.id;
+          const nameEl = document.getElementById('session-name');
+          if (nameEl && !nameEl.value) nameEl.value = s.name;
+        }
+        sel.appendChild(opt);
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  async function switchSession(sessionId) {
+    if (sessionId === currentSessionId) return;
+    // Save current session's chat history before switching
+    saveSession();
+    try {
+      const res = await fetch(`${API}/sessions/switch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      currentSessionId = data.id;
+      // Clear frontend state and restore target session's history
+      messageHistory = [];
+      document.getElementById('messages').innerHTML = '';
+      document.getElementById('session-name').value = data.name || '';
+      localStorage.setItem(SESSION_NAME_KEY, data.name || '');
+      clearLayers();
+      document.getElementById('placeholder').style.display = '';
+      const welcome = document.getElementById('welcome-msg');
+      if (welcome) welcome.style.display = '';
+      restoreSession();
+      checkHealth();
+    } catch (e) { /* ignore */ }
+  }
+
+  async function newSession() {
+    // Save current session's chat history
+    saveSession();
+    try {
+      const res = await fetch(`${API}/sessions/new`, { method: 'POST' });
+      if (!res.ok) return;
+      const data = await res.json();
+      currentSessionId = data.id;
+      messageHistory = [];
+      document.getElementById('messages').innerHTML = '';
+      document.getElementById('session-name').value = data.name || '';
+      localStorage.setItem(SESSION_NAME_KEY, data.name || '');
+      clearLayers();
+      document.getElementById('placeholder').style.display = '';
+      const welcome = document.getElementById('welcome-msg');
+      if (welcome) welcome.style.display = '';
+      await loadSessions();
+      checkHealth();
+    } catch (e) { /* ignore */ }
+  }
+
+  async function deleteInactiveSession() {
+    const sel = document.getElementById('session-select');
+    const options = Array.from(sel.options).filter(o => o.value !== currentSessionId);
+    if (options.length === 0) {
+      alert('No inactive sessions to delete. Switch away from a session before deleting it.');
+      return;
+    }
+    // Build a simple choice list
+    const names = options.map((o, i) => `${i + 1}. ${o.textContent}`).join('\n');
+    const choice = prompt(`Delete which session?\n${names}\n\nEnter number:`);
+    if (!choice) return;
+    const idx = parseInt(choice, 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= options.length) return;
+    const sessionId = options[idx].value;
+    const sessionName = options[idx].textContent;
+    if (!confirm(`Delete session "${sessionName}"? This will permanently remove the agent and its memory.`)) return;
+    try {
+      const res = await fetch(`${API}/sessions/${sessionId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Delete failed');
+        return;
+      }
+      // Remove per-session chat from localStorage
+      localStorage.removeItem(SESSION_KEY_PREFIX + sessionId);
+      await loadSessions();
+    } catch (e) { /* ignore */ }
+  }
+
+  // Session name persistence — rename on the backend when edited
+  (function () {
+    const nameEl = document.getElementById('session-name');
+    if (!nameEl) return;
+    const saved = localStorage.getItem(SESSION_NAME_KEY);
+    if (saved) nameEl.value = saved;
+    let debounce = null;
+    nameEl.addEventListener('input', () => {
+      localStorage.setItem(SESSION_NAME_KEY, nameEl.value);
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        if (currentSessionId && nameEl.value.trim()) {
+          fetch(`${API}/sessions/${currentSessionId}/rename`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: nameEl.value.trim() }),
+          }).then(() => loadSessions()).catch(() => {});
+        }
+      }, 500);
+    });
+  })();
+
+  // ── Render based on UI spec ────────────────────
+  async function renderUISpec(spec) {
+    document.getElementById('placeholder').style.display = 'none';
+
+    if (spec.type === 'map') {
+      showTab('map');
+      if (!map) initMap([20, 0], 2);
+      if (spec.basemap) switchBasemap(spec.basemap);
+      clearLayers();
+
+      const layers = spec.layers || [];
+      const seenFiles = new Set();
+      for (let i = 0; i < layers.length; i++) {
+        const layerDef = layers[i];
+        const filename = layerDef.file.replace(/^.*\//, '');  // strip path prefix
+        if (seenFiles.has(filename)) continue;
+        seenFiles.add(filename);
+        const color = layerDef.color || LAYER_COLORS[i % LAYER_COLORS.length];
+        try {
+          const res = await fetch(`${API}/geojson/${filename}`);
+          if (!res.ok) { console.warn(`Could not load ${filename}`); continue; }
+          const geojson = await res.json();
+          const firstFeat = geojson.features && geojson.features.find(f => f.geometry);
+          const isPoint = firstFeat && /^(Point|MultiPoint)$/.test(firstFeat.geometry.type);
+          const geoLayer = L.geoJSON(geojson, {
+            style: { color, weight: 1.5, fillOpacity: 0.2 },
+            pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+              radius: 5, fillColor: color, color: '#fff',
+              weight: 1, opacity: 1, fillOpacity: 0.8,
+            }),
+            onEachFeature: (feature, layer) => {
+              const props = feature.properties || {};
+              const isNan = v => v == null || v === '' || (typeof v === 'number' && !isFinite(v)) || /^(nan|none|null)$/i.test(String(v));
+              const entries = Object.entries(props).filter(([k, v]) => !isNan(v));
+              if (entries.length === 0) return;
+              const rows = entries.map(([k, v]) =>
+                `<tr><td>${k}</td><td>${typeof v === 'number' ? Number(v.toFixed(4)) : v}</td></tr>`
+              ).join('');
+              const html = `<div class="feat-popup"><table>${rows}</table></div>`;
+              layer.on('click', e => {
+                L.popup({ maxWidth: 320, maxHeight: 250, autoPanPadding: [20, 20] })
+                  .setLatLng(e.latlng)
+                  .setContent(html)
+                  .openOn(map);
+              });
+            },
+          });
+          let layer;
+          if (isPoint && typeof L.markerClusterGroup === 'function') {
+            const cluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 50, showCoverageOnHover: false });
+            cluster.addLayer(geoLayer);
+            cluster.addTo(map);
+            layer = cluster;
+          } else {
+            geoLayer.addTo(map);
+            layer = geoLayer;
+          }
+          activeLayers.push(layer);
+          layerMeta.push({ name: layerDef.name || filename, file: filename, color, leafletLayer: layer, visible: true, opacity: 1, geojsonCache: geojson });
+        } catch (e) {
+          console.error('Layer load error:', e);
+        }
+      }
+
+      // Rebuild layer panel with toggle, opacity, download
+      if (layerMeta.length > 0) rebuildLayerPanel();
+
+      if (activeLayers.length > 0) {
+        try {
+          // Merge bounds across all loaded layers
+          let bounds = null;
+          for (const layer of activeLayers) {
+            try {
+              const b = layer.getBounds();
+              if (b.isValid()) bounds = bounds ? bounds.extend(b) : b;
+            } catch (e) { /* skip layers without bounds */ }
+          }
+          if (bounds && bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [40, 40], maxZoom: spec.zoom || 14 });
+          } else if (spec.center) {
+            map.setView([spec.center[1], spec.center[0]], spec.zoom || 13);
+          }
+        } catch (e) { /* ignore */ }
+      } else if (spec.center) {
+        map.setView([spec.center[1], spec.center[0]], spec.zoom || 13);
+      }
+
+      document.getElementById('viz-label').textContent =
+        layers.map(l => (l.name || l.file).replace(/^.*\//, '').replace(/\.\w+$/, '').replace(/_/g, ' ')).join(' · ');
+
+      // Build layer list for stats window and auto-load the last layer
+      if (layers.length > 0) {
+        const filenames = layers.map(l => l.file.replace(/^.*\//, ''));
+        setStatsLayers(filenames);
+        // Pick last layer — most likely to be the feature layer (not the boundary polygon)
+        fetchStats(filenames[filenames.length - 1], filenames);
+      }
+
+    } else if (spec.type === 'image') {
+      showTab('image');
+      const filename = (spec.path || '').replace(/^.*\//, '');
+      document.getElementById('img-el').src = `${API}/outputs/${filename}`;
+      document.getElementById('img-title').textContent = spec.title || filename;
+      document.getElementById('viz-label').textContent = spec.title || filename;
+
+    } else if (spec.type === 'table') {
+      showTab('table');
+      document.getElementById('table-title').textContent = spec.title || 'Results';
+      document.getElementById('viz-label').textContent = spec.title || 'Table';
+
+      const thead = document.querySelector('#data-table thead');
+      const tbody = document.querySelector('#data-table tbody');
+      thead.innerHTML = '';
+      tbody.innerHTML = '';
+
+      const headerRow = document.createElement('tr');
+      (spec.columns || []).forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+
+      (spec.rows || []).forEach(row => {
+        const tr = document.createElement('tr');
+        row.forEach(cell => {
+          const td = document.createElement('td');
+          td.textContent = cell;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+  }
+
+  // ── Tab switching ──────────────────────────────
+  function showTab(tab) {
+    currentTab = tab;
+    ['map', 'image', 'table'].forEach(t => {
+      document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+    });
+    document.getElementById('map').style.display = tab === 'map' ? 'block' : 'none';
+    document.getElementById('image-view').style.display = tab === 'image' ? 'flex' : 'none';
+    document.getElementById('table-view').style.display = tab === 'table' ? 'block' : 'none';
+    if (tab === 'map' && map) { setTimeout(() => map.invalidateSize(), 10); }
+  }
+
+  // ── Chat history spec attachment ───────────────
+  function attachSpecToMessage(el, spec) {
+    el.classList.add('has-spec');
+    el.addEventListener('click', function(e) {
+      if (e.target.closest('.copy-btn')) return;
+      document.querySelectorAll('.message.active-spec').forEach(m => m.classList.remove('active-spec'));
+      el.classList.add('active-spec');
+      renderUISpec(spec);
+    });
+  }
+
+  function updateLastSpec(el, spec) {
+    spec.basemap = document.getElementById('basemap-select')?.value || 'osm';
+    if (messageHistory.length > 0) {
+      messageHistory[messageHistory.length - 1].spec = spec;
+    }
+    attachSpecToMessage(el, spec);
+    saveSession();
+    document.querySelectorAll('.message.active-spec').forEach(m => m.classList.remove('active-spec'));
+    el.classList.add('active-spec');
+  }
+
+  // ── Chat ───────────────────────────────────────
+  function addMessage(role, content, fromHistory = false, spec = null) {
+    // Hide welcome block on first real message
+    const welcome = document.getElementById('welcome-msg');
+    if (welcome) welcome.style.display = 'none';
+
+    // Clean technical jargon from agent responses
+    if (role === 'agent') content = cleanAgentText(content);
+
+    const messages = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = `message ${role}`;
+    if (role !== 'system') {
+      const sender = document.createElement('div');
+      sender.className = 'sender';
+      const label = document.createElement('span');
+      label.textContent = role === 'user' ? 'You' : 'Agent';
+      sender.appendChild(label);
+      if (role === 'agent') {
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.title = 'Copy';
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        btn.onclick = () => {
+          navigator.clipboard.writeText(content);
+          btn.classList.add('copied');
+          btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+          }, 2000);
+        };
+        sender.appendChild(btn);
+      }
+      div.appendChild(sender);
+    }
+    const text = document.createElement('div');
+    text.textContent = content;
+    div.appendChild(text);
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    if (!fromHistory && role !== 'system') {
+      messageHistory.push({ role, text: content, spec });
+      saveSession();
+    }
+    if (spec) attachSpecToMessage(div, spec);
+    return div;
+  }
+
+  function showTyping() {
+    const messages = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = 'message agent';
+    div.id = 'typing-indicator';
+    div.innerHTML = '<div class="typing"><div class="typing-dots"><span></span><span></span><span></span></div><div class="typing-status" id="typing-status"></div></div>';
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function setProgress(text) {
+    const el = document.getElementById('typing-status');
+    if (el) el.textContent = text;
+  }
+
+  function removeTyping() {
+    const el = document.getElementById('typing-indicator');
+    if (el) el.remove();
+  }
+
+  async function sendMessage() {
+    const input = document.getElementById('input');
+    const btn = document.getElementById('send-btn');
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    input.style.height = '44px';
+    btn.disabled = true;
+
+    addMessage('user', text);
+    showTyping();
+
+    try {
+      const res = await fetch(`${API}/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+
+      if (!res.ok) {
+        removeTyping();
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        addMessage('agent', `Error: ${err.detail || res.statusText}`);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let lastAgentEl = null;
+      let lastAgentText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep any incomplete line
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let event;
+          try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (event.type === 'progress') {
+            setProgress(event.text);
+          } else if (event.type === 'text') {
+            removeTyping();
+            lastAgentText = event.text;
+            lastAgentEl = addMessage('agent', event.text);
+          } else if (event.type === 'ui_spec') {
+            renderUISpec(event.spec);
+            if (lastAgentEl) updateLastSpec(lastAgentEl, event.spec);
+          } else if (event.type === 'error') {
+            removeTyping();
+            addMessage('agent', `Error: ${event.text}`);
+          } else if (event.type === 'done') {
+            removeTyping();
+          }
+        }
+      }
+
+      if (lastAgentEl && lastAgentText) {
+        addFollowupSuggestions(lastAgentEl, lastAgentText);
+      }
+
+    } catch (e) {
+      removeTyping();
+      addMessage('agent', `Network error: ${e.message}`);
+    } finally {
+      btn.disabled = false;
+      input.focus();
+    }
+  }
+
+  // ── Auto-resize textarea ───────────────────────
+  document.getElementById('input').addEventListener('input', function () {
+    this.style.height = '44px';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  });
+
+  document.getElementById('input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // ── Data panel ─────────────────────────────────
+  let dataOpen = false;
+  let messageHistory = []; // [{role, text, spec}] — spec is the ui_spec or null
+
+  function toggleDataSection() {
+    dataOpen = !dataOpen;
+    document.getElementById('data-list').style.display = dataOpen ? 'flex' : 'none';
+    document.getElementById('data-chevron').style.transform = dataOpen ? 'rotate(180deg)' : '';
+  }
+
+  async function loadDatasets() {
+    try {
+      const res = await fetch(`${API}/datasets`);
+      if (!res.ok) return;
+      const datasets = await res.json();
+      const countEl = document.getElementById('data-count');
+      const listEl = document.getElementById('data-list');
+      countEl.textContent = datasets.length > 0 ? `My Data (${datasets.length})` : 'My Data';
+      listEl.innerHTML = '';
+      if (datasets.length === 0) {
+        listEl.innerHTML = '<div class="dataset-empty">No datasets yet — upload a file to get started</div>';
+      } else {
+        datasets.forEach(ds => {
+          const div = document.createElement('div');
+          div.className = 'dataset-item';
+          div.innerHTML = `
+            <span class="ds-name" title="${ds.name}">${ds.name}</span>
+            <span class="ds-meta">${ds.geometry_type} · ${ds.row_count.toLocaleString()}</span>
+          `;
+          listEl.appendChild(div);
+        });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  async function uploadFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    if (!dataOpen) toggleDataSection();
+
+    const listEl = document.getElementById('data-list');
+    const prog = document.createElement('div');
+    prog.className = 'upload-progress';
+    prog.textContent = `Uploading ${file.name}…`;
+    listEl.prepend(prog);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(`${API}/upload`, { method: 'POST', body: formData });
+      prog.remove();
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        addMessage('system', `Upload failed: ${err.detail || res.statusText}`);
+        return;
+      }
+      const ds = await res.json();
+      addMessage('system', `Uploaded "${ds.name}" — ${ds.geometry_type}, ${ds.row_count.toLocaleString()} features`);
+      loadDatasets();
+    } catch (e) {
+      prog.remove();
+      addMessage('system', `Upload error: ${e.message}`);
+    }
+  }
+
+  // ── Stats floating window ──────────────────────
+  let _statsLayers = [];
+
+  function closeStatsWindow() {
+    document.getElementById('stats-window').style.display = 'none';
+  }
+
+  function setStatsLayers(filenames) {
+    _statsLayers = filenames;
+    const el = document.getElementById('stats-win-layers');
+    if (filenames.length <= 1) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    el.style.display = 'flex';
+    el.innerHTML = filenames.map(f => {
+      const label = f.replace(/\.\w+$/, '').replace(/_/g, ' ');
+      return `<button class="sw-layer-btn" onclick="fetchStats('${f}', _statsLayers)" title="${label}">${label}</button>`;
+    }).join('');
+  }
+
+  async function fetchStats(filename, allLayers) {
+    document.getElementById('stats-window').style.display = 'none';
+    // Highlight active layer button
+    document.querySelectorAll('.sw-layer-btn').forEach(b => {
+      b.classList.toggle('active', b.title === filename.replace(/\.\w+$/, '').replace(/_/g, ' '));
+    });
+    try {
+      const res = await fetch(`${API}/stats/${filename}`);
+      if (!res.ok) return;
+      const s = await res.json();
+      renderStats(s, filename);
+    } catch (e) { /* ignore */ }
+  }
+
+  function renderStats(s, filename) {
+    const win = document.getElementById('stats-window');
+    const title = document.getElementById('stats-win-title');
+    const body = document.getElementById('stats-win-body');
+
+    // Title: layer name derived from filename
+    title.textContent = (filename || '').replace(/\.\w+$/, '').replace(/_/g, ' ');
+
+    let html = '';
+
+    // Summary
+    const areaStr = s.area_km2 ? ` &nbsp;·&nbsp; ${s.area_km2} km²` : '';
+    html += `<div class="sw-summary"><span>${s.count.toLocaleString()}</span> ${s.geometry_type}s${areaStr}</div>`;
+
+    // Breakdown bars
+    if (s.breakdown && s.breakdown.values.length > 0) {
+      html += `<div class="sw-section-title">${s.breakdown.column}</div>`;
+      const max = s.breakdown.values[0].count || 1;
+      html += s.breakdown.values.map(v => `
+        <div class="sw-bar-row">
+          <span class="sw-bar-label" title="${v.label}">${v.label}</span>
+          <div class="sw-bar-track"><div class="sw-bar-fill" style="width:${Math.round(v.count/max*100)}%"></div></div>
+          <span class="sw-bar-count">${v.count}</span>
+        </div>`).join('');
+    }
+
+    // Numeric fields
+    if (s.numeric && s.numeric.length > 0) {
+      html += `<div class="sw-section-title">Numeric fields</div>`;
+      html += s.numeric.map(n => `
+        <div class="sw-num-row">
+          <span class="sw-num-col">${n.column}</span>
+          <span class="sw-num-val">avg ${n.mean}</span>
+          <span class="sw-num-range">${n.min}–${n.max}</span>
+        </div>`).join('');
+    }
+
+    body.innerHTML = html;
+    win.style.display = 'block';
+  }
+
+  // Drag the stats window
+  (function () {
+    const win = document.getElementById('stats-window');
+    const hdr = document.getElementById('stats-win-header');
+    let dragging = false, ox = 0, oy = 0;
+
+    hdr.addEventListener('mousedown', e => {
+      if (e.target.id === 'stats-win-close') return;
+      dragging = true;
+      const r = win.getBoundingClientRect();
+      ox = e.clientX - r.left;
+      oy = e.clientY - r.top;
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const parent = win.parentElement;
+      const pr = parent.getBoundingClientRect();
+      let x = e.clientX - pr.left - ox;
+      let y = e.clientY - pr.top - oy;
+      x = Math.max(0, Math.min(x, pr.width  - win.offsetWidth));
+      y = Math.max(0, Math.min(y, pr.height - win.offsetHeight));
+      win.style.left   = x + 'px';
+      win.style.top    = y + 'px';
+      win.style.right  = 'auto';
+      win.style.bottom = 'auto';
+    });
+
+    document.addEventListener('mouseup', () => { dragging = false; });
+  })();
+
+  // ── Health check ───────────────────────────────
+  async function checkHealth() {
+    try {
+      const res = await fetch(`${API}/health`);
+      const data = await res.json();
+      const el = document.getElementById('status');
+      el.textContent = data.agent_id ? `agent ready` : 'no agent';
+      el.className = `status ${data.agent_id ? 'ok' : ''}`;
+    } catch (e) {
+      document.getElementById('status').textContent = 'server offline';
+    }
+  }
+
+  // ── Clean agent text ───────────────────────────
+  function cleanAgentText(text) {
+    return text
+      // Friendly replace for "saved to outputs/foo.gpkg"
+      .replace(/[,;.]?\s*saved\s+(?:as|to)\s+(?:outputs\/)?[\w\-]+\.gpkg/gi, '')
+      // Remove bare outputs/foo.gpkg paths
+      .replace(/outputs\/[\w\-]+\.gpkg/gi, 'the map')
+      // Tool/format jargon
+      .replace(/\bGeoPackage\b/gi, 'map layer')
+      .replace(/\bGPKG\b/g, 'file')
+      .replace(/\blist_outputs\b/g, '')
+      .replace(/\bemit_ui_spec\b/g, '')
+      // Common failure message
+      .replace(/Map visualization failed to render[^.]*\./gi, 'Results shown on the map above.')
+      .replace(/check\s+(?:the\s+)?(?:GPKG\s+file|list_outputs)[^.]*\./gi, '')
+      // Tidy up leftover whitespace
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^\s*[,;.]\s*/, '')
+      .trim();
+  }
+
+  // ── Example queries ────────────────────────────
+  function useExample(btn) {
+    const input = document.getElementById('input');
+    input.value = btn.textContent;
+    input.focus();
+    sendMessage();
+  }
+
+  // ── Session persistence ────────────────────────
+  const SESSION_KEY_PREFIX = 'geolang_chat_';
+
+  function getSessionKey() {
+    return currentSessionId ? SESSION_KEY_PREFIX + currentSessionId : 'geolang_chat';
+  }
+
+  function saveSession() {
+    const key = getSessionKey();
+    try {
+      const json = JSON.stringify(messageHistory);
+      localStorage.setItem(key, json);
+      // Also keep a 'last known good' fallback so history survives session ID changes
+      localStorage.setItem('geolang_chat_last', json);
+      console.debug('[history] saved', messageHistory.length, 'messages under', key);
+    } catch (e) {
+      console.warn('[history] saveSession failed:', e);
+    }
+  }
+
+  function restoreSession() {
+    const key = getSessionKey();
+    let saved = null;
+    // Try current session key first, then last-known fallback
+    for (const k of [key, 'geolang_chat_last', 'geolang_chat']) {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) { saved = JSON.parse(raw); }
+      } catch (e) {}
+      if (saved && saved.length) {
+        console.debug('[history] restored', saved.length, 'messages from key:', k);
+        break;
+      }
+    }
+    if (!saved || !saved.length) {
+      console.debug('[history] nothing to restore for key:', key);
+      return;
+    }
+    const welcome = document.getElementById('welcome-msg');
+    if (welcome) welcome.style.display = 'none';
+    messageHistory = saved;
+    saved.forEach(m => {
+      try { addMessage(m.role, m.text, true, m.spec || null); }
+      catch (e) { console.warn('[history] could not restore message:', e, m); }
+    });
+  }
+
+  // ── Basemap switcher ───────────────────────────
+  let baseTile = null;
+
+  const BASEMAPS = {
+    osm: {
+      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '© OpenStreetMap',
+      maxZoom: 19,
+    },
+    satellite: {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'Tiles © Esri',
+      maxZoom: 19,
+    },
+    topo: {
+      url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+      attribution: '© OpenTopoMap',
+      maxZoom: 17,
+    },
+    dark: {
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      attribution: '© CartoDB',
+      maxZoom: 19,
+    },
+  };
+
+  function switchBasemap(key) {
+    if (!map) return;
+    if (baseTile) { map.removeLayer(baseTile); baseTile = null; }
+    const cfg = BASEMAPS[key];
+    if (!cfg) return;
+    baseTile = L.tileLayer(cfg.url, { attribution: cfg.attribution, maxZoom: cfg.maxZoom, noWrap: true });
+    baseTile.addTo(map);
+    baseTile.bringToBack();
+    // Toggle dim filter: OSM/dark dim for contrast; satellite/topo show full colour
+    let styleEl = document.getElementById('basemap-filter-style');
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'basemap-filter-style';
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = (key === 'satellite' || key === 'topo')
+      ? '.leaflet-tile { filter: none !important; }'
+      : '';
+  }
+
+  // Extended initMap: captures base tile and sets up draw/click-query
+  function initMap(center, zoom) {
+    if (map) return;
+    map = L.map('map', {
+      center, zoom,
+      maxBounds: [[-90, -180], [90, 180]],
+      maxBoundsViscosity: 1.0,
+    });
+    baseTile = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 19, noWrap: true,
+    }).addTo(map);
+    L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
+  }
+
+  // ── Leaflet.draw ───────────────────────────────
+  let drawControl = null;
+  let drawnItems = null;
+  let drawActive = false;
+
+  function initDrawControls() {
+    if (!map || !L.Control || !L.Control.Draw) return;
+    drawnItems = new L.FeatureGroup().addTo(map);
+    drawControl = new L.Control.Draw({
+      position: 'topleft',
+      draw: {
+        polygon: { shapeOptions: { color: '#a78bfa', fillOpacity: 0.15 } },
+        rectangle: { shapeOptions: { color: '#a78bfa', fillOpacity: 0.15 } },
+        circle: false,
+        polyline: false,
+        circlemarker: false,
+        marker: { icon: L.divIcon({ className: '', html: '<div style="width:12px;height:12px;background:#a78bfa;border-radius:50%;border:2px solid #fff"></div>', iconSize: [12, 12], iconAnchor: [6, 6] }) },
+      },
+      edit: { featureGroup: drawnItems, remove: true },
+    });
+    // Don't add to map yet — toggled by button
+    map.on(L.Draw.Event.CREATED, async (e) => {
+      drawnItems.clearLayers();
+      drawnItems.addLayer(e.layer);
+
+      const geojson = e.layer.toGeoJSON();
+      const geomType = geojson.geometry.type;
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+      const name = `drawn_${geomType.toLowerCase()}_${ts}`;
+
+      // POST to /draw
+      try {
+        const res = await fetch(`${API}/draw`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ geojson, name }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          // Inject a user message so the agent knows and can act on it
+          const userMsg = `I drew a ${geomType} on the map (saved as ${data.filename}). What can you tell me about this area? Show me what's inside it.`;
+          document.getElementById('input').value = userMsg;
+          // Keep draw mode off after drawing
+          if (drawActive) toggleDraw();
+        }
+      } catch (err) {
+        console.error('Draw save failed:', err);
+      }
+    });
+  }
+
+  function toggleDraw() {
+    if (!map) return;
+    drawActive = !drawActive;
+    const btn = document.getElementById('draw-btn');
+    btn.classList.toggle('active', drawActive);
+    if (drawActive) {
+      map.addControl(drawControl);
+    } else {
+      map.removeControl(drawControl);
+    }
+  }
+
+  // ── Map click to query ─────────────────────────
+  let clickQueryActive = false;
+  let mapClickHandler = null;
+
+  function initClickQuery() {
+    // Stub — handler installed when toggled on
+  }
+
+  function toggleClickQuery() {
+    if (!map) return;
+    clickQueryActive = !clickQueryActive;
+    const btn = document.getElementById('click-query-btn');
+    btn.classList.toggle('active', clickQueryActive);
+
+    if (clickQueryActive) {
+      map.getContainer().style.cursor = 'crosshair';
+      mapClickHandler = async (e) => {
+        const lat = e.latlng.lat.toFixed(5);
+        const lon = e.latlng.lng.toFixed(5);
+
+        // Flash toast
+        const toast = document.getElementById('map-click-toast');
+        toast.textContent = `Querying ${lat}, ${lon}…`;
+        toast.style.opacity = '1';
+        setTimeout(() => { toast.style.opacity = '0'; }, 2500);
+
+        // Inject into chat
+        const msg = `I clicked the map at latitude ${lat}, longitude ${lon}. Use query_elevation to get the elevation and flood risk. Use assess_environmental_risk with place_name="${lat},${lon}" and radius_km=1. Use download_osm_data to find nearby amenities (restaurants, shops, hospitals) within 500m. Then summarise what is at this location.`;
+        document.getElementById('input').value = msg;
+        // Turn off click query mode
+        toggleClickQuery();
+        sendMessage();
+      };
+      map.on('click', mapClickHandler);
+    } else {
+      map.getContainer().style.cursor = '';
+      if (mapClickHandler) { map.off('click', mapClickHandler); mapClickHandler = null; }
+    }
+  }
+
+  // ── Suggested follow-ups ───────────────────────
+  const FOLLOWUP_SETS = [
+    // Triggered by keywords in agent response (checked in order)
+    { keywords: ['isochrone', 'catchment', 'travel time', 'walk', 'drive', 'cycle'],
+      suggestions: ['How many people live within this area?', 'Find hospitals inside this catchment', 'Show restaurants within this zone'] },
+    { keywords: ['population', 'people live'],
+      suggestions: ['Show as a choropleth map', 'Compare with a different location', 'Export as PDF report'] },
+    { keywords: ['restaurant', 'cafe', 'shop', 'amenity', 'hospital', 'school'],
+      suggestions: ['Show a heatmap of these locations', 'Which ones fall inside my drawn area?', 'Find the nearest one to a point'] },
+    { keywords: ['flood', 'elevation', 'risk', 'environmental'],
+      suggestions: ['Compare with a different location', 'Show the admin boundary for this area', 'Export as PDF report'] },
+    { keywords: ['score', 'rank', 'best location', 'site'],
+      suggestions: ['Show these on a heatmap', 'Add competition as a criterion', 'Export results as PDF'] },
+    { keywords: ['boundary', 'outline', 'district', 'region', 'county'],
+      suggestions: ['Download OSM data inside this boundary', 'How many people live here?', 'Clip my data to this boundary'] },
+    { keywords: ['route', 'directions', 'travel'],
+      suggestions: ['Show alternative routes', 'What is the travel time catchment from here?', 'Export as PDF report'] },
+    { keywords: ['geocoded', 'address', 'addresses'],
+      suggestions: ['Show a heatmap of these locations', 'Find the nearest hospital to each', 'Export as PDF report'] },
+  ];
+  const DEFAULT_FOLLOWUPS = ['Show a heatmap of these results', 'Export as PDF report', 'Get the admin boundary for this area'];
+
+  function getFollowups(agentText) {
+    const lower = agentText.toLowerCase();
+    for (const set of FOLLOWUP_SETS) {
+      if (set.keywords.some(kw => lower.includes(kw))) {
+        return set.suggestions;
+      }
+    }
+    return DEFAULT_FOLLOWUPS;
+  }
+
+  function addFollowupSuggestions(agentEl, agentText) {
+    const suggestions = getFollowups(agentText);
+    const row = document.createElement('div');
+    row.className = 'followup-row';
+    suggestions.forEach(s => {
+      const btn = document.createElement('button');
+      btn.className = 'followup-btn';
+      btn.textContent = s;
+      btn.onclick = () => {
+        row.remove();
+        document.getElementById('input').value = s;
+        sendMessage();
+      };
+      row.appendChild(btn);
+    });
+    agentEl.appendChild(row);
+  }
+
+  // ── PDF export ─────────────────────────────────
+  async function exportPDF() {
+    const layers = layerMeta.map(lm => lm.file);
+    const summaryEl = document.querySelector('.message.agent:last-of-type div:last-child');
+    const summary = summaryEl ? summaryEl.textContent : '';
+
+    const btn = document.querySelector('.map-action-btn[onclick="exportPDF()"]');
+    if (btn) { btn.textContent = '⏳ Exporting…'; btn.disabled = true; }
+
+    try {
+      const res = await fetch(`${API}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: document.getElementById('session-name')?.value || 'GeoLang Analysis Report',
+          summary,
+          layers,
+          center: map ? [map.getCenter().lat, map.getCenter().lng] : [20, 0],
+          zoom: map ? map.getZoom() : 2,
+          basemap: document.getElementById('basemap-select')?.value || 'osm',
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const a = document.createElement('a');
+      a.href = `${API}${data.download_url}`;
+      a.download = data.pdf_filename;
+      a.click();
+    } catch (e) {
+      alert('PDF export failed: ' + e.message);
+    } finally {
+      if (btn) { btn.textContent = '⬇ PDF'; btn.disabled = false; }
+    }
+  }
+
+  // ── PNG export (Playwright server-side screenshot) ────────────────────
+  async function exportPNG() {
+    const center = map ? [map.getCenter().lat, map.getCenter().lng] : [20, 0];
+    const zoom = map ? map.getZoom() : 2;
+    const basemap = document.getElementById('basemap-select')?.value || 'osm';
+    const layers = layerMeta.map(lm => lm.file);
+    const btn = document.querySelector('.map-action-btn[onclick="exportPNG()"]');
+    if (btn) { btn.textContent = '⏳ Capturing…'; btn.disabled = true; }
+    try {
+      const res = await fetch(`${API}/export-png`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ center, zoom, basemap, layers }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const a = document.createElement('a');
+      a.href = `${API}${data.download_url}`;
+      a.download = data.png_filename;
+      a.click();
+    } catch (e) {
+      alert('PNG export failed: ' + e.message);
+    } finally {
+      if (btn) { btn.textContent = '⬇ PNG'; btn.disabled = false; }
+    }
+  }
+
+  // ── Map search box ─────────────────────────────
+  async function mapSearch() {
+    const input = document.getElementById('map-search-input');
+    const q = input.value.trim();
+    if (!q) return;
+
+    // Try lat,lon first
+    const coordM = q.match(/^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$/);
+    if (coordM) {
+      const lat = parseFloat(coordM[1]), lon = parseFloat(coordM[2]);
+      if (map) map.setView([lat, lon], 13);
+      input.value = '';
+      return;
+    }
+
+    // Nominatim geocode
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const { lat, lon, display_name } = data[0];
+        if (map) map.setView([parseFloat(lat), parseFloat(lon)], 13);
+        input.value = '';
+        // Brief marker
+        const marker = L.marker([parseFloat(lat), parseFloat(lon)])
+          .bindPopup(display_name.split(',').slice(0, 3).join(', '))
+          .addTo(map)
+          .openPopup();
+        setTimeout(() => map && map.removeLayer(marker), 4000);
+      } else {
+        input.style.borderColor = '#ef4444';
+        setTimeout(() => { input.style.borderColor = ''; }, 1500);
+      }
+    } catch (e) {
+      console.warn('Map search failed:', e);
+    }
+  }
+
+  // ── Attribute table ────────────────────────────
+  function openAttrTable(lm) {
+    const modal = document.getElementById('attr-table-modal');
+    const title = document.getElementById('attr-table-title');
+    const thead = document.querySelector('#attr-table thead');
+    const tbody = document.querySelector('#attr-table tbody');
+
+    if (!lm.geojsonCache || !lm.geojsonCache.features || !lm.geojsonCache.features.length) return;
+
+    title.textContent = `Attribute Table — ${lm.name} (${lm.geojsonCache.features.length} rows)`;
+
+    const features = lm.geojsonCache.features;
+    const cols = features.length ? Object.keys(features[0].properties || {}) : [];
+
+    thead.innerHTML = '<tr>' + cols.map(c => `<th title="${c}">${c}</th>`).join('') + '</tr>';
+
+    // Show first 500 rows max
+    const rows = features.slice(0, 500).map(f => {
+      const props = f.properties || {};
+      return '<tr>' + cols.map(c => {
+        const v = props[c];
+        const str = v === null || v === undefined ? '' : String(v);
+        return `<td title="${str.replace(/"/g, '&quot;')}">${str}</td>`;
+      }).join('') + '</tr>';
+    });
+    tbody.innerHTML = rows.join('');
+
+    modal.style.display = 'flex';
+  }
+
+  function closeAttrTable() {
+    document.getElementById('attr-table-modal').style.display = 'none';
+  }
+
+  // ── Shareable links ────────────────────────────
+  async function shareMap() {
+    const btn = document.getElementById('share-btn');
+    if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
+
+    try {
+      const summaryEl = document.querySelector('.message.agent:last-of-type div:last-child');
+      const summary = summaryEl ? summaryEl.textContent.slice(0, 500) : '';
+      const center = map ? [map.getCenter().lng, map.getCenter().lat] : [];
+      const zoom = map ? map.getZoom() : 12;
+
+      const res = await fetch(`${API}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: document.getElementById('session-name')?.value || 'GeoLang Analysis',
+          summary,
+          layers: layerMeta.map(lm => lm.file),
+          center,
+          zoom,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      const shareUrl = `${window.location.origin}${data.url}`;
+      await navigator.clipboard.writeText(shareUrl).catch(() => {});
+
+      const toast = document.getElementById('share-toast');
+      toast.innerHTML = `Link copied to clipboard!<br><a href="${shareUrl}" target="_blank" style="color:#a78bfa">${shareUrl}</a>`;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 5000);
+    } catch (e) {
+      alert('Share failed: ' + e.message);
+    } finally {
+      if (btn) { btn.textContent = '↗ Share'; btn.disabled = false; }
+    }
+  }
+
+  // ── On load: check for ?share= param ──────────
+  (async function checkShareParam() {
+    const path = window.location.pathname;
+    const m = path.match(/\/share\/([a-f0-9\-]+)/i);
+    if (!m) return;
+    const shareId = m[1];
+    try {
+      const res = await fetch(`${API}/share/${shareId}/data`);
+      if (!res.ok) return;
+      const data = await res.json();
+      // Restore view
+      if (data.center && data.center.length === 2) {
+        initMap(data.center.slice().reverse(), data.zoom || 12);
+        if (map) map.setView([data.center[1], data.center[0]], data.zoom || 12);
+      }
+      if (data.layers && data.layers.length) {
+        await renderUISpec({ type: 'map', layers: data.layers.map(f => ({ file: f, name: f.replace('outputs/', '').replace('.gpkg', '') })), center: data.center, zoom: data.zoom });
+      }
+      if (data.title) document.title = data.title + ' — GeoLang';
+      if (data.summary) {
+        const chat = document.getElementById('messages');
+        if (chat) {
+          const el = document.createElement('div');
+          el.className = 'message agent';
+          el.innerHTML = `<strong>Shared analysis:</strong> ${data.summary}`;
+          chat.appendChild(el);
+        }
+      }
+    } catch (e) {
+      // silently ignore
+    }
+  })();
+
+  // ── Screenshot mode (used by /export-png Playwright) ─────────────────
+  (function handleScreenshotParam() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('screenshot')) return;
+    document.querySelector('header').style.display = 'none';
+    document.querySelector('.chat-panel') && (document.querySelector('.chat-panel').style.display = 'none');
+    document.getElementById('layer-panel') && (document.getElementById('layer-panel').style.display = 'none');
+    const lat = parseFloat(params.get('lat') || '20');
+    const lon = parseFloat(params.get('lon') || '0');
+    const zoom = parseInt(params.get('zoom') || '10', 10);
+    const basemap = params.get('basemap') || 'osm';
+    const layersParam = params.get('layers') || '';
+    const title = params.get('title') || '';
+    const summary = params.get('summary') || '';
+    initMap([lat, lon], zoom);
+    if (basemap !== 'osm') switchBasemap(basemap);
+    if (layersParam) {
+      const files = layersParam.split(',').filter(Boolean);
+      renderUISpec({
+        type: 'map',
+        layers: files.map(f => ({ file: f, name: f.replace(/\.gpkg$/i, '').replace(/_/g, ' ') })),
+        center: [lon, lat],
+        zoom,
+      });
+    }
+    if (title || summary) {
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:absolute;bottom:0;left:0;right:0;z-index:1000;background:rgba(15,17,23,0.88);padding:10px 16px;font-family:sans-serif;';
+      if (title) {
+        const h = document.createElement('div');
+        h.style.cssText = 'color:#e2e8f0;font-size:13px;font-weight:600;margin-bottom:4px;';
+        h.textContent = title;
+        bar.appendChild(h);
+      }
+      if (summary) {
+        const p = document.createElement('div');
+        p.style.cssText = 'color:#94a3b8;font-size:11px;line-height:1.4;';
+        p.textContent = summary.slice(0, 400) + (summary.length > 400 ? '…' : '');
+        bar.appendChild(p);
+      }
+      const ts = document.createElement('div');
+      ts.style.cssText = 'color:#475569;font-size:10px;margin-top:4px;';
+      ts.textContent = `Generated by GeoLang · ${new Date().toLocaleString()}`;
+      bar.appendChild(ts);
+      document.getElementById('map').appendChild(bar);
+    }
+  })();
+
+  // ── Startup ────────────────────────────────────
+  initMap([20, 0], 2);
+  initDrawControls();
+  checkHealth();
+  loadDatasets();
+  // Load sessions first (sets currentSessionId), then restore history for that session
+  loadSessions().then(() => restoreSession());
+  setInterval(checkHealth, 15000);
+  document.getElementById('input').focus();
+</script>
+</body>
+</html>

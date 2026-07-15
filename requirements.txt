@@ -1,0 +1,10 @@
+numpy==1.26.4
+pandas==2.2.2
+geopandas==1.0.1
+matplotlib==3.8.4
+shapely==2.0.1
+pydantic
+osmnx
+scikit-learn
+rasterio
+rasterstats

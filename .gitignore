@@ -1,0 +1,12 @@
+env/
+.env
+.env.local
+*.pyc
+cache/
+outputs/
+user_data/
+.agent_id
+natural_earth*/
+.sessions.json
+.shares.json
+ghsl_pop.tif

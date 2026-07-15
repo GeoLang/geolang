@@ -1,0 +1,4 @@
+vllm
+sentence-transformers
+torchao
+torch-c-dlpack-ext
