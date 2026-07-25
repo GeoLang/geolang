@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import uuid
 
 import asyncio
 import zipfile
@@ -8,11 +9,24 @@ from datetime import datetime
 from pathlib import Path
 from threading import Thread
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from ag_ui.core import (
+    CustomEvent,
+    EventType,
+    RunAgentInput,
+    RunErrorEvent,
+    RunFinishedEvent,
+    RunStartedEvent,
+    TextMessageContentEvent,
+    TextMessageEndEvent,
+    TextMessageStartEvent,
+)
+from ag_ui.encoder import EventEncoder
 
 from letta_client import Letta
 
@@ -166,139 +180,247 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def agent_event_stream(message: str):
+    """Run the Letta agent stream and yield normalized (kind, payload) events.
+
+    Single source of truth for the marker parsing. kinds:
+    "text", "progress", "viewer_cmd", "ui_spec", "error", "keepalive".
+    /chat/stream renders these as legacy JSON, /chat/agui as AG-UI events.
+    """
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+
+    def run_in_thread():
+        try:
+            stream = client.agents.messages.stream(
+                agent_id=agent_id,
+                messages=[{"role": "user", "content": message}],
+            )
+            for event in stream:
+                loop.call_soon_threadsafe(q.put_nowait, event)
+        except Exception as e:
+            loop.call_soon_threadsafe(q.put_nowait, {"__error__": str(e)})
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, None)
+
+    Thread(target=run_in_thread, daemon=True).start()
+
+    all_content = []
+    assistant_texts = []
+    ui_spec = None
+
+    while True:
+        try:
+            event = await asyncio.wait_for(q.get(), timeout=15.0)
+        except asyncio.TimeoutError:
+            # Send keepalive comment to prevent browser SSE timeout
+            yield ("keepalive", None)
+            continue
+        if event is None:
+            break
+
+        if isinstance(event, dict) and "__error__" in event:
+            yield ("error", event["__error__"])
+            break
+
+        msg_type = str(getattr(event, "message_type", "") or "")
+        content = str(getattr(event, "content", "") or "")
+        tool_call = getattr(event, "tool_call", None)
+        tool_return = str(getattr(event, "tool_return", "") or "")
+
+        # Debug: log every tool call and return
+        if tool_call and msg_type in TOOL_MESSAGE_TYPES:
+            tool_name = str(getattr(tool_call, "name", "") or "")
+            tool_args = str(getattr(tool_call, "arguments", "") or "")
+            logger.info(f"TOOL CALL: {tool_name}({tool_args[:200]})")
+        if tool_return and tool_return.strip():
+            logger.info(f"TOOL RETURN: {tool_return[:300]}")
+            # Surface tool errors as progress events so the user sees them
+            if tool_return.startswith("❌") or tool_return.startswith("ERROR"):
+                short = tool_return[:200].split("\n")[0]
+                yield ("progress", short)
+
+        all_content.extend([content, tool_return])
+
+        # Real-time tool progress
+        if tool_call and msg_type in TOOL_MESSAGE_TYPES:
+            tool_name = str(getattr(tool_call, "name", "") or "")
+            tool_args = str(getattr(tool_call, "arguments", "") or "")
+            yield ("progress", get_progress_text(tool_name, tool_args))
+
+        # UI spec from emit_ui_spec tool — check both content and tool_return
+        if ui_spec is None:
+            for candidate in (tool_return, content):
+                if "__UI_SPEC__:" in candidate:
+                    try:
+                        ui_spec = json.loads(candidate.split("__UI_SPEC__:", 1)[1])
+                        break
+                    except Exception:
+                        pass
+
+        # Viewer commands from viewer_control tool
+        for candidate in (tool_return, content):
+            if "__VIEWER_CMD__:" in candidate:
+                for part in candidate.split("__VIEWER_CMD__:")[1:]:
+                    try:
+                        cmd = json.loads(part.split("\n")[0].strip())
+                        yield ("viewer_cmd", cmd)
+                    except Exception:
+                        pass
+
+        # Assistant text
+        if msg_type in ("assistant_message", "assistant") and content:
+            assistant_texts.append(content)
+            yield ("text", content)
+
+    if ui_spec is None:
+        import re as _re
+
+        # Primary: infer from full content, filter to files the agent mentioned
+        ui_spec = infer_ui_spec_from_text(" ".join(all_content))
+        if ui_spec and ui_spec.get("layers") and assistant_texts:
+            agent_text = " ".join(assistant_texts)
+            filtered = [
+                l
+                for l in ui_spec["layers"]
+                if l["file"] in agent_text
+                or l["file"].replace("outputs/", "") in agent_text
+            ]
+            if filtered:
+                ui_spec["layers"] = filtered
+
+        # Fallback: scan tool returns for explicit "Saved to outputs/foo.gpkg" lines
+        if not ui_spec or not ui_spec.get("layers"):
+            saved = _re.findall(
+                r"[Ss]aved to outputs/([\w\-]+\.gpkg)", " ".join(all_content)
+            )
+            if saved:
+                seen = {}
+                for fname in saved:
+                    seen[fname] = {
+                        "name": fname.replace("_", " ").replace(".gpkg", ""),
+                        "file": f"outputs/{fname}",
+                    }
+                coord_spec = infer_ui_spec_from_text(" ".join(assistant_texts))
+                center = coord_spec.get("center") if coord_spec else None
+                ui_spec = {"type": "map", "layers": list(seen.values())}
+                if center:
+                    ui_spec["center"] = center
+                    ui_spec["zoom"] = 13
+    if ui_spec:
+        yield ("ui_spec", ui_spec)
+
+
+def render_legacy_event(kind: str, payload) -> str:
+    """Render one normalized (kind, payload) event as a legacy SSE JSON frame."""
+    if kind == "keepalive":
+        return ": keepalive\n\n"
+    if kind == "text":
+        return f"data: {json.dumps({'type': 'text', 'text': payload})}\n\n"
+    if kind == "progress":
+        return f"data: {json.dumps({'type': 'progress', 'text': payload})}\n\n"
+    if kind == "viewer_cmd":
+        return f"data: {json.dumps({'type': 'viewer_cmd', 'cmd': payload})}\n\n"
+    if kind == "ui_spec":
+        return f"data: {json.dumps({'type': 'ui_spec', 'spec': payload})}\n\n"
+    if kind == "error":
+        return f"data: {json.dumps({'type': 'error', 'text': payload})}\n\n"
+    return ""
+
+
+async def legacy_stream(events):
+    """Render a normalized (kind, payload) async stream as legacy SSE, ending with done."""
+    async for kind, payload in events:
+        yield render_legacy_event(kind, payload)
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+def render_agui_event(encoder: EventEncoder, kind: str, payload) -> str:
+    """Render one normalized (kind, payload) event as AG-UI SSE frame(s)."""
+    if kind == "keepalive":
+        return ": keepalive\n\n"
+    if kind == "text":
+        # one message_id per assistant message: start, content, end
+        message_id = str(uuid.uuid4())
+        return (
+            encoder.encode(
+                TextMessageStartEvent(message_id=message_id, role="assistant")
+            )
+            + encoder.encode(
+                TextMessageContentEvent(message_id=message_id, delta=payload)
+            )
+            + encoder.encode(TextMessageEndEvent(message_id=message_id))
+        )
+    if kind == "progress":
+        return encoder.encode(
+            CustomEvent(type=EventType.CUSTOM, name="progress", value={"text": payload})
+        )
+    if kind == "viewer_cmd":
+        return encoder.encode(
+            CustomEvent(type=EventType.CUSTOM, name="viewer_cmd", value=payload)
+        )
+    if kind == "ui_spec":
+        return encoder.encode(
+            CustomEvent(type=EventType.CUSTOM, name="ui_spec", value=payload)
+        )
+    if kind == "error":
+        return encoder.encode(
+            RunErrorEvent(type=EventType.RUN_ERROR, message=str(payload))
+        )
+    return ""
+
+
+async def agui_stream(events, thread_id: str, run_id: str, accept: str | None = None):
+    """Render a normalized (kind, payload) async stream as AG-UI SSE.
+
+    RUN_STARTED first, RUN_FINISHED last (replaces the legacy done).
+    """
+    encoder = EventEncoder(accept=accept)
+    yield encoder.encode(
+        RunStartedEvent(type=EventType.RUN_STARTED, thread_id=thread_id, run_id=run_id)
+    )
+    try:
+        async for kind, payload in events:
+            yield render_agui_event(encoder, kind, payload)
+    except Exception as e:
+        yield encoder.encode(RunErrorEvent(type=EventType.RUN_ERROR, message=str(e)))
+    yield encoder.encode(
+        RunFinishedEvent(
+            type=EventType.RUN_FINISHED, thread_id=thread_id, run_id=run_id
+        )
+    )
+
+
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     if not agent_id:
         raise HTTPException(status_code=503, detail="Agent not initialized")
 
-    async def generate():
-        loop = asyncio.get_running_loop()
-        q: asyncio.Queue = asyncio.Queue()
+    return StreamingResponse(
+        legacy_stream(agent_event_stream(request.message)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
-        def run_in_thread():
-            try:
-                stream = client.agents.messages.stream(
-                    agent_id=agent_id,
-                    messages=[{"role": "user", "content": request.message}],
-                )
-                for event in stream:
-                    loop.call_soon_threadsafe(q.put_nowait, event)
-            except Exception as e:
-                loop.call_soon_threadsafe(q.put_nowait, {"__error__": str(e)})
-            finally:
-                loop.call_soon_threadsafe(q.put_nowait, None)
 
-        Thread(target=run_in_thread, daemon=True).start()
+@app.post("/chat/agui")
+async def chat_agui(input: RunAgentInput, request: Request):
+    """AG-UI event endpoint: same agent pipeline as /chat/stream, AG-UI SSE out."""
+    if not agent_id:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
 
-        all_content = []
-        assistant_texts = []
-        ui_spec = None
-
-        while True:
-            try:
-                event = await asyncio.wait_for(q.get(), timeout=15.0)
-            except asyncio.TimeoutError:
-                # Send keepalive comment to prevent browser SSE timeout
-                yield ": keepalive\n\n"
-                continue
-            if event is None:
-                break
-
-            if isinstance(event, dict) and "__error__" in event:
-                yield f"data: {json.dumps({'type': 'error', 'text': event['__error__']})}\n\n"
-                break
-
-            msg_type = str(getattr(event, "message_type", "") or "")
-            content = str(getattr(event, "content", "") or "")
-            tool_call = getattr(event, "tool_call", None)
-            tool_return = str(getattr(event, "tool_return", "") or "")
-
-            # Debug: log every tool call and return
-            if tool_call and msg_type in TOOL_MESSAGE_TYPES:
-                tool_name = str(getattr(tool_call, "name", "") or "")
-                tool_args = str(getattr(tool_call, "arguments", "") or "")
-                logger.info(f"TOOL CALL: {tool_name}({tool_args[:200]})")
-            if tool_return and tool_return.strip():
-                logger.info(f"TOOL RETURN: {tool_return[:300]}")
-                # Surface tool errors as progress events so the user sees them
-                if tool_return.startswith("❌") or tool_return.startswith("ERROR"):
-                    short = tool_return[:200].split("\n")[0]
-                    yield f"data: {json.dumps({'type': 'progress', 'text': short})}\n\n"
-
-            all_content.extend([content, tool_return])
-
-            # Real-time tool progress
-            if tool_call and msg_type in TOOL_MESSAGE_TYPES:
-                tool_name = str(getattr(tool_call, "name", "") or "")
-                tool_args = str(getattr(tool_call, "arguments", "") or "")
-                yield f"data: {json.dumps({'type': 'progress', 'text': get_progress_text(tool_name, tool_args)})}\n\n"
-
-            # UI spec from emit_ui_spec tool — check both content and tool_return
-            if ui_spec is None:
-                for candidate in (tool_return, content):
-                    if "__UI_SPEC__:" in candidate:
-                        try:
-                            ui_spec = json.loads(candidate.split("__UI_SPEC__:", 1)[1])
-                            break
-                        except Exception:
-                            pass
-
-            # Viewer commands from viewer_control tool
-            for candidate in (tool_return, content):
-                if "__VIEWER_CMD__:" in candidate:
-                    for part in candidate.split("__VIEWER_CMD__:")[1:]:
-                        try:
-                            cmd = json.loads(part.split("\n")[0].strip())
-                            yield f"data: {json.dumps({'type': 'viewer_cmd', 'cmd': cmd})}\n\n"
-                        except Exception:
-                            pass
-
-            # Assistant text
-            if msg_type in ("assistant_message", "assistant") and content:
-                assistant_texts.append(content)
-                yield f"data: {json.dumps({'type': 'text', 'text': content})}\n\n"
-
-        if ui_spec is None:
-            import re as _re
-
-            # Primary: infer from full content, filter to files the agent mentioned
-            ui_spec = infer_ui_spec_from_text(" ".join(all_content))
-            if ui_spec and ui_spec.get("layers") and assistant_texts:
-                agent_text = " ".join(assistant_texts)
-                filtered = [
-                    l
-                    for l in ui_spec["layers"]
-                    if l["file"] in agent_text
-                    or l["file"].replace("outputs/", "") in agent_text
-                ]
-                if filtered:
-                    ui_spec["layers"] = filtered
-
-            # Fallback: scan tool returns for explicit "Saved to outputs/foo.gpkg" lines
-            if not ui_spec or not ui_spec.get("layers"):
-                saved = _re.findall(
-                    r"[Ss]aved to outputs/([\w\-]+\.gpkg)", " ".join(all_content)
-                )
-                if saved:
-                    seen = {}
-                    for fname in saved:
-                        seen[fname] = {
-                            "name": fname.replace("_", " ").replace(".gpkg", ""),
-                            "file": f"outputs/{fname}",
-                        }
-                    coord_spec = infer_ui_spec_from_text(" ".join(assistant_texts))
-                    center = coord_spec.get("center") if coord_spec else None
-                    ui_spec = {"type": "map", "layers": list(seen.values())}
-                    if center:
-                        ui_spec["center"] = center
-                        ui_spec["zoom"] = 13
-        if ui_spec:
-            yield f"data: {json.dumps({'type': 'ui_spec', 'spec': ui_spec})}\n\n"
-
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+    user_messages = [m for m in input.messages if getattr(m, "role", None) == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="No user message in input")
+    prompt = user_messages[-1].content or ""
 
     return StreamingResponse(
-        generate(),
+        agui_stream(
+            agent_event_stream(prompt),
+            thread_id=input.thread_id,
+            run_id=input.run_id,
+            accept=request.headers.get("accept"),
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

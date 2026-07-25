@@ -4,3 +4,4 @@ fastapi
 uvicorn[standard]
 python-multipart
 playwright
+ag-ui-protocol==0.1.19

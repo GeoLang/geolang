@@ -37,6 +37,12 @@ RUN mkdir -p /app/geolang/outputs && \
     chmod 777 /app/geolang/outputs && \
     chown -R root:root /app/geolang
 
+# host-server extra: server.py runs in the base image's uv-managed /app/.venv
+# (no pip). PATH points python3 at that venv, so use the system interpreter to
+# get uv, then install the AG-UI SDK into the server venv with it.
+RUN /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages uv && \
+    uv pip install --python /app/.venv/bin/python --no-cache ag-ui-protocol==0.1.19
+
 # Entrypoint: populate Letta tool-exec venv on first start (survives the host
 # volume mount that shadows anything baked into the image), then chain to the base
 # image's /usr/local/bin/docker-entrypoint.sh (the postgres init script).
