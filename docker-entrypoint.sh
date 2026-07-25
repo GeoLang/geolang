@@ -24,5 +24,5 @@ else
   echo "[entrypoint] Venv already populated ($MARKER present), skipping."
 fi
 
-# Chain to the base Letta image's original entrypoint (postgres init + server startup)
-exec /usr/local/bin/letta-docker-entrypoint.sh "$@"
+# Chain to the base Letta image's own entrypoint (postgres init + server startup)
+exec /usr/local/bin/docker-entrypoint.sh "$@"

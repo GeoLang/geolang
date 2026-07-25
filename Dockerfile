@@ -38,11 +38,10 @@ RUN mkdir -p /app/geolang/outputs && \
     chown -R root:root /app/geolang
 
 # Entrypoint: populate Letta tool-exec venv on first start (survives the host
-# volume mount that shadows anything baked into the image). The base Letta image
-# already has an entrypoint at /usr/local/bin/docker-entrypoint.sh (the postgres
-# init script), so we preserve it and chain to it from ours.
-RUN mv /usr/local/bin/docker-entrypoint.sh /usr/local/bin/letta-docker-entrypoint.sh
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# volume mount that shadows anything baked into the image), then chain to the base
+# image's /usr/local/bin/docker-entrypoint.sh (the postgres init script).
+# Ours gets its own path: letta/server/startup.sh starts postgres by calling
+# /usr/local/bin/docker-entrypoint.sh directly, so that name has to stay theirs.
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/geolang-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/geolang-entrypoint.sh"]
 CMD ["./letta/server/startup.sh"]
