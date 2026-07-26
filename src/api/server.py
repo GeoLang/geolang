@@ -28,7 +28,7 @@ from ag_ui.core import (
 )
 from ag_ui.encoder import EventEncoder
 
-from letta_client import Letta
+from letta_client import Letta, NotFoundError
 
 from src.agents.agent_manager import PERSONA, load_external_tools, register_tool
 from src.agents.workflows import (
@@ -950,10 +950,28 @@ class SwitchSessionRequest(BaseModel):
     session_id: str
 
 
+def _prune_dead_sessions(sessions: dict) -> dict:
+    """Drop sessions whose Letta agent is gone, e.g. after a pgdata wipe.
+
+    Only a 404 counts as dead: a letta outage must not erase the file.
+    """
+    live = {}
+    for sid, info in sessions.items():
+        try:
+            client.agents.retrieve(agent_id=sid)
+        except NotFoundError:
+            logger.info(f"pruning session {sid}: agent no longer exists")
+            continue
+        live[sid] = info
+    if len(live) != len(sessions):
+        save_sessions(live)
+    return live
+
+
 @app.get("/sessions")
 async def list_sessions():
     _ensure_current_session()
-    sessions = load_sessions()
+    sessions = _prune_dead_sessions(load_sessions())
     result = []
     for sid, info in sessions.items():
         result.append(
@@ -1037,7 +1055,9 @@ async def switch_session(request: SwitchSessionRequest):
 
     try:
         client.agents.retrieve(agent_id=request.session_id)
-    except Exception:
+    except NotFoundError:
+        del sessions[request.session_id]
+        save_sessions(sessions)
         raise HTTPException(status_code=404, detail="Agent no longer exists")
 
     agent_id = request.session_id
