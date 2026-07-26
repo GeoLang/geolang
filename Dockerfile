@@ -43,6 +43,11 @@ RUN mkdir -p /app/geolang/outputs && \
 RUN /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages uv && \
     uv pip install --python /app/.venv/bin/python --no-cache ag-ui-protocol==0.1.19
 
+# Letta rebuilds the tool-exec venv from scratch on every server start
+# (prepare_local_sandbox with force_recreate=True), ~40s. Our entrypoint already
+# populates it from requirements.txt, so turn Letta's copy off.
+ENV TOOL_EXEC_AUTORELOAD_VENV=false
+
 # Entrypoint: populate Letta tool-exec venv on first start (survives the host
 # volume mount that shadows anything baked into the image), then chain to the base
 # image's /usr/local/bin/docker-entrypoint.sh (the postgres init script).
