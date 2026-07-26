@@ -12,7 +12,7 @@ Base URL in development: `http://localhost:8080`. In the bundled platform deploy
 ## Chat
 
 ### `POST /chat`
-One-shot request/response. Use for non-interactive scripting; prefer `/chat/stream` for UIs.
+One-shot request/response. Use for non-interactive scripting; prefer `/chat/agui` for UIs.
 
 Request:
 ```json
@@ -28,10 +28,10 @@ Response:
 }
 ```
 
-### `POST /chat/stream`
-SSE stream of agent events. See [architecture.md](architecture.md#sse-event-vocabulary) for the event type table and [viewer_integration.md](viewer_integration.md) for `viewer_cmd` semantics.
+### `POST /chat/agui`
+SSE stream of [AG-UI protocol](https://docs.ag-ui.com/) events. Accepts a `RunAgentInput` body (`threadId`, `runId`, `messages`); the last user message is the prompt. See [architecture.md](architecture.md#sse-event-vocabulary) for the event mapping and [viewer_integration.md](viewer_integration.md) for `viewer_cmd` semantics.
 
-Each line is a standard SSE `data: <json>` payload, terminated by a `done` event. Keepalive comments (`: keepalive`) are emitted every 15s of agent silence.
+Each line is a standard SSE `data: <json>` payload, wrapped in `RUN_STARTED`/`RUN_FINISHED`. Keepalive comments (`: keepalive`) are emitted every 15s of agent silence.
 
 ## Sessions
 

@@ -1715,10 +1715,18 @@
     showTyping();
 
     try {
-      const res = await fetch(`${API}/chat/stream`, {
+      const res = await fetch(`${API}/chat/agui`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          threadId: crypto.randomUUID(),
+          runId: crypto.randomUUID(),
+          messages: [{ id: crypto.randomUUID(), role: 'user', content: text }],
+          tools: [],
+          context: [],
+          state: {},
+          forwardedProps: {},
+        }),
       });
 
       if (!res.ok) {
@@ -1747,19 +1755,21 @@
           let event;
           try { event = JSON.parse(line.slice(6)); } catch { continue; }
 
-          if (event.type === 'progress') {
-            setProgress(event.text);
-          } else if (event.type === 'text') {
+          // AG-UI events: each assistant message arrives as one
+          // TEXT_MESSAGE_CONTENT delta; extras come as CUSTOM name/value.
+          if (event.type === 'CUSTOM' && event.name === 'progress') {
+            setProgress(event.value?.text || '');
+          } else if (event.type === 'TEXT_MESSAGE_CONTENT') {
             removeTyping();
-            lastAgentText = event.text;
-            lastAgentEl = addMessage('agent', event.text);
-          } else if (event.type === 'ui_spec') {
-            renderUISpec(event.spec);
-            if (lastAgentEl) updateLastSpec(lastAgentEl, event.spec);
-          } else if (event.type === 'error') {
+            lastAgentText = event.delta;
+            lastAgentEl = addMessage('agent', event.delta);
+          } else if (event.type === 'CUSTOM' && event.name === 'ui_spec') {
+            renderUISpec(event.value);
+            if (lastAgentEl) updateLastSpec(lastAgentEl, event.value);
+          } else if (event.type === 'RUN_ERROR') {
             removeTyping();
-            addMessage('agent', `Error: ${event.text}`);
-          } else if (event.type === 'done') {
+            addMessage('agent', `Error: ${event.message}`);
+          } else if (event.type === 'RUN_FINISHED') {
             removeTyping();
           }
         }

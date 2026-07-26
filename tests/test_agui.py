@@ -86,21 +86,7 @@ def test_agui_stream_maps_error_to_run_error():
     assert err["message"] == "boom"
 
 
-def test_legacy_stream_unchanged_for_same_sequence():
-    frames = _collect(server.legacy_stream(_aiter(SYNTHETIC_EVENTS)))
-    objs = _sse_data_objects(frames)
-    assert objs == [
-        {"type": "text", "text": "Here is your map."},
-        {"type": "progress", "text": "Geocoding Paris…"},
-        {"type": "viewer_cmd", "cmd": {"action": "flyTo",
-                                       "params": {"center": [2.35, 48.85], "zoom": 12}}},
-        {"type": "ui_spec", "spec": {"type": "map", "center": [2.35, 48.85], "zoom": 12,
-                                     "layers": [{"name": "cafes", "file": "outputs/cafes.gpkg"}]}},
-        {"type": "done"},
-    ]
-
-
 def test_routes_registered():
     paths = {r.path for r in server.app.routes}
-    assert "/chat/stream" in paths
+    assert "/chat/stream" not in paths  # legacy channel retired
     assert "/chat/agui" in paths

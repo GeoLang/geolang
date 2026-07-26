@@ -185,7 +185,7 @@ async def agent_event_stream(message: str):
 
     Single source of truth for the marker parsing. kinds:
     "text", "progress", "viewer_cmd", "ui_spec", "error", "keepalive".
-    /chat/stream renders these as legacy JSON, /chat/agui as AG-UI events.
+    /chat/agui renders these as AG-UI events.
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
@@ -311,30 +311,6 @@ async def agent_event_stream(message: str):
         yield ("ui_spec", ui_spec)
 
 
-def render_legacy_event(kind: str, payload) -> str:
-    """Render one normalized (kind, payload) event as a legacy SSE JSON frame."""
-    if kind == "keepalive":
-        return ": keepalive\n\n"
-    if kind == "text":
-        return f"data: {json.dumps({'type': 'text', 'text': payload})}\n\n"
-    if kind == "progress":
-        return f"data: {json.dumps({'type': 'progress', 'text': payload})}\n\n"
-    if kind == "viewer_cmd":
-        return f"data: {json.dumps({'type': 'viewer_cmd', 'cmd': payload})}\n\n"
-    if kind == "ui_spec":
-        return f"data: {json.dumps({'type': 'ui_spec', 'spec': payload})}\n\n"
-    if kind == "error":
-        return f"data: {json.dumps({'type': 'error', 'text': payload})}\n\n"
-    return ""
-
-
-async def legacy_stream(events):
-    """Render a normalized (kind, payload) async stream as legacy SSE, ending with done."""
-    async for kind, payload in events:
-        yield render_legacy_event(kind, payload)
-    yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-
 def render_agui_event(encoder: EventEncoder, kind: str, payload) -> str:
     """Render one normalized (kind, payload) event as AG-UI SSE frame(s)."""
     if kind == "keepalive":
@@ -391,21 +367,9 @@ async def agui_stream(events, thread_id: str, run_id: str, accept: str | None = 
     )
 
 
-@app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
-    if not agent_id:
-        raise HTTPException(status_code=503, detail="Agent not initialized")
-
-    return StreamingResponse(
-        legacy_stream(agent_event_stream(request.message)),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
 @app.post("/chat/agui")
 async def chat_agui(input: RunAgentInput, request: Request):
-    """AG-UI event endpoint: same agent pipeline as /chat/stream, AG-UI SSE out."""
+    """AG-UI event endpoint: the agent pipeline rendered as AG-UI SSE."""
     if not agent_id:
         raise HTTPException(status_code=503, detail="Agent not initialized")
 

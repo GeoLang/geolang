@@ -25,21 +25,20 @@ GeoLang is a thin FastAPI service that wraps a [Letta](https://github.com/letta-
 - **Letta** owns the conversation, working memory blocks, and tool-call orchestration. GeoLang never sees raw token streams — it sees structured events (text, tool calls, tool results).
 - **GeoLang API** ([`src/api/server.py`](../src/api/server.py)) is a single-file FastAPI app. On startup it scans `src/agents/tools/`, registers each tool with Letta, and either resumes an existing agent (via `.agent_id`) or creates a fresh one.
 - **Tools** are plain Python functions discovered by `pkgutil.iter_modules` of the `tools` package. Each module exports `TOOL_FUNCTION` and optionally `TOOL_SCHEMA` (pydantic) and `TOOL_HELPERS`. They run in the GeoLang process and may shell out to QGIS, GeoPandas, or downstream services.
-- **ViewTopia** consumes `/chat/stream` SSE and dispatches `viewer_cmd` events through [`viewer-commands.js`](https://github.com/GeoLang/viewtopia/blob/main/src/viewer-commands.js).
+- **ViewTopia** consumes `/chat/agui` (AG-UI protocol SSE) and dispatches `viewer_cmd` custom events through [`viewer/commands.ts`](https://github.com/GeoLang/viewtopia/blob/main/src/viewer/commands.ts).
 
 ## SSE event vocabulary
 
-`/chat/stream` emits newline-delimited `data: {...}` events. Types:
+`/chat/agui` emits newline-delimited `data: {...}` [AG-UI](https://docs.ag-ui.com/) events, wrapped in `RUN_STARTED`/`RUN_FINISHED`:
 
-| `type` | Shape | Meaning |
+| event | Shape | Meaning |
 |---|---|---|
-| `progress` | `{text}` | Human-readable status while a tool runs. |
-| `text` | `{text}` | An assistant message chunk. The viewer renders the last one received. |
-| `viewer_cmd` | `{cmd: {action, params}}` | Imperative instruction for the viewer. See [`viewer_integration.md`](viewer_integration.md). |
-| `ui_spec` | `{spec}` | Structured UI hint (e.g. `{type: "map", layers: [...]}`) — viewer-rendered. |
-| `followups` | `{items}` | Suggested next prompts to surface in the chat UI. |
-| `error` | `{text}` | Tool or LLM failure. |
-| `done` | — | End of stream. |
+| `CUSTOM` name=`progress` | `{value: {text}}` | Human-readable status while a tool runs. |
+| `TEXT_MESSAGE_START/CONTENT/END` | `{messageId, delta}` | An assistant message; the full text arrives as one CONTENT delta. |
+| `CUSTOM` name=`viewer_cmd` | `{value: {action, params}}` | Imperative instruction for the viewer. See [`viewer_integration.md`](viewer_integration.md). |
+| `CUSTOM` name=`ui_spec` | `{value}` | Structured UI hint (e.g. `{type: "map", layers: [...]}`) — viewer-rendered. |
+| `RUN_ERROR` | `{message}` | Tool or LLM failure. |
+| `RUN_FINISHED` | — | End of run. |
 
 ## Tool registration flow
 
