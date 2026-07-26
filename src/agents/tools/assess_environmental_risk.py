@@ -41,7 +41,9 @@ def assess_environmental_risk(
     4. Industrial site proximity (OSM industrial landuse)
     5. Major road proximity (noise/air pollution proxy)
 
-    Returns a risk summary with scores and saves a GPKG with all layers.
+    Returns a risk summary with scores and saves a polygon GPKG of the assessment
+    area (the radius_km buffer, or the supplied polygon) attributed with every
+    score, ready for choropleth on 'overall_risk'.
     Use this when the user asks about flood risk, environmental suitability,
     pollution, or green space for a location.
     """
@@ -57,7 +59,7 @@ def assess_environmental_risk(
         import osmnx as ox
         import geopandas as gpd
         import numpy as np
-        from shapely.geometry import Point, box
+        from shapely.geometry import Point
 
         # Geocode — if place_name looks like "lat,lon" or "lat lon", parse directly
         import re as _re
@@ -90,11 +92,14 @@ def assess_environmental_risk(
                 area_gdf = area_gdf.to_crs("EPSG:4326")
             analysis_poly = area_gdf.union_all()
         else:
-            center_gdf = gpd.GeoDataFrame(geometry=[center], crs="EPSG:4326").to_crs(
-                "EPSG:3857"
+            # buffer in local UTM so radius_km is true metres on the ground, not
+            # 3857 metres (which are stretched by 1/cos(lat))
+            center_gdf = gpd.GeoDataFrame(geometry=[center], crs="EPSG:4326")
+            utm = center_gdf.estimate_utm_crs()
+            buffer_geom = (
+                center_gdf.to_crs(utm).geometry.iloc[0].buffer(radius_km * 1000)
             )
-            buffer_geom = center_gdf.geometry.iloc[0].buffer(radius_km * 1000)
-            area_gdf = gpd.GeoDataFrame(geometry=[buffer_geom], crs="EPSG:3857").to_crs(
+            area_gdf = gpd.GeoDataFrame(geometry=[buffer_geom], crs=utm).to_crs(
                 "EPSG:4326"
             )
             analysis_poly = area_gdf.geometry.iloc[0]
@@ -303,15 +308,25 @@ def assess_environmental_risk(
         else:
             overall_label = "UNKNOWN"
 
-        # Save summary point GPKG
+        # Save the assessment AREA as the rendered geometry, attributed with every
+        # score. The centroid is kept as center_lon/center_lat properties.
         if not output_filename:
             safe = place_name.lower().replace(" ", "_").replace(",", "")[:20].strip("_")
             output_filename = f"{safe}_env_risk"
+
+        area_series = gpd.GeoSeries([analysis_poly], crs="EPSG:4326")
+        area_km2 = round(
+            area_series.to_crs(area_series.estimate_utm_crs()).area.iloc[0] / 1e6, 2
+        )
 
         summary_gdf = gpd.GeoDataFrame(
             [
                 {
                     "place": place_name,
+                    "area_km2": area_km2,
+                    "radius_km": radius_km,
+                    "center_lon": round(lon, 6),
+                    "center_lat": round(lat, 6),
                     "overall_risk": overall,
                     "overall_label": overall_label,
                     "flood_score": flood_score,
@@ -333,7 +348,7 @@ def assess_environmental_risk(
                     "water_dist_m": water_dist_m,
                 }
             ],
-            geometry=[center],
+            geometry=[analysis_poly],
             crs="EPSG:4326",
         )
         # Strip .gpkg if already present to avoid double extension
@@ -374,7 +389,10 @@ def assess_environmental_risk(
 
         parts.append("")
         parts.append(
-            f"Saved to outputs/{output_filename}.gpkg. Center: lon={lon:.4f}, lat={lat:.4f}"
+            f"Saved to outputs/{output_filename}.gpkg. "
+            f"That layer is the {area_km2} km2 assessment area polygon attributed "
+            f"with every score, so use choropleth on 'overall_risk' (0-10) to shade it. "
+            f"Center: lon={lon:.4f}, lat={lat:.4f}"
         )
         return "\n".join(parts)
 

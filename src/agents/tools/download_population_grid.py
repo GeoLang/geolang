@@ -36,7 +36,8 @@ def download_population_grid(
     """
     Estimate population within a radius or polygon using the GHS-POP (Global Human
     Settlement Population) grid via the WorldPop REST API. Returns total population
-    count and saves a point GPKG of population sample points with pop_count attribute.
+    count and saves a polygon GPKG of the queried area (the radius bbox, or the clip
+    polygon when given) attributed with the population estimate.
     Use this when the user asks about population catchment, how many people live within
     a drive/walk time, or demographic coverage of a service area.
     """
@@ -54,7 +55,7 @@ def download_population_grid(
         import osmnx as ox
         import geopandas as gpd
         import pandas as pd
-        from shapely.geometry import Point, box
+        from shapely.geometry import box
 
         lat, lon = ox.geocode(place_name)
 
@@ -156,23 +157,38 @@ def download_population_grid(
         else:
             clip_note = f" (within {radius_km}km radius)"
 
-        # Save a summary point GPKG
+        # Save the queried AREA as the rendered geometry, attributed with the
+        # population estimate. The centroid stays as the lat/lon properties.
         if not output_filename:
             safe = place_name.lower().replace(" ", "_").replace(",", "")[:18].strip("_")
             output_filename = f"{safe}_population"
+
+        if clip_gdf is not None:
+            area_poly = clip_gdf.union_all()
+            area_source = "clip_polygon"
+        else:
+            area_poly = bbox
+            area_source = "radius_bbox"
+
+        area_series = gpd.GeoSeries([area_poly], crs="EPSG:4326")
+        area_km2 = round(
+            area_series.to_crs(area_series.estimate_utm_crs()).area.iloc[0] / 1e6, 2
+        )
 
         result_data = {
             "place": place_name,
             "lat": round(lat, 6),
             "lon": round(lon, 6),
             "radius_km": radius_km,
+            "area_km2": area_km2,
+            "area_source": area_source,
             "population": int(pop_total) if pop_total is not None else -1,
             "source": source,
         }
 
         gdf = gpd.GeoDataFrame(
             [result_data],
-            geometry=[Point(lon, lat)],
+            geometry=[area_poly],
             crs="EPSG:4326",
         )
         # Strip .gpkg if already present to avoid double extension
@@ -187,6 +203,8 @@ def download_population_grid(
                 f"Estimated population{clip_note} around {place_name}: "
                 f"{pop_str} people (source: {source}). "
                 f"Saved to outputs/{output_filename}.gpkg. "
+                f"That layer is the {area_km2} km2 queried area polygon attributed "
+                f"with the population count. "
                 f"Center: lon={lon:.4f}, lat={lat:.4f}"
             )
         else:
