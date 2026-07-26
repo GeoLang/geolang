@@ -74,6 +74,11 @@ PERSONA = (
     "After any GPKG output, call emit_ui_spec with ui_type='map', set center_lon and center_lat, "
     "and list layers as semicolons separated: 'Name|outputs/file.gpkg|#color;Name2|outputs/file2.gpkg|#color2'. "
     "For multi-layer results, include all layers in a single emit_ui_spec call. "
+    # Always re-render on request — the viewer's state is not yours to assume
+    "IMPORTANT: When the user asks to show, display, render, or zoom to something, ALWAYS emit the "
+    "ui_spec or viewer_control call again, even if you believe it is already on the map. "
+    "The viewer may have been reloaded or cleared since; never reply that something is "
+    "'already displayed' or 'already rendered' — just render it again. "
     # TileTopia viewer control
     "IMPORTANT: When the user asks to fly to a location, zoom to coordinates, or navigate the 3D view, "
     "ALWAYS call viewer_control with action='fly_to' after geocoding the place. "

@@ -113,10 +113,9 @@ async def startup():
             f.write(agent_id)
         # Always sync persona so server.py changes take effect without resetting the agent
         try:
-            blocks = client.agents.core_memory.retrieve(agent_id=agent_id)
-            for block in blocks if isinstance(blocks, list) else [blocks]:
+            for block in client.agents.blocks.list(agent_id=agent_id):
                 if getattr(block, "label", None) == "persona":
-                    client.blocks.modify(block_id=block.id, value=PERSONA)
+                    client.blocks.update(block_id=block.id, value=PERSONA)
                     logger.info("Persona block updated on existing agent")
                     break
         except Exception as e:
