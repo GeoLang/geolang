@@ -24,5 +24,31 @@ else
   echo "[entrypoint] Venv ready."
 fi
 
-# Chain to the base Letta image's own entrypoint (postgres init + server startup)
-exec /usr/local/bin/docker-entrypoint.sh "$@"
+# Chain to the base Letta image's own entrypoint (postgres init + server startup).
+# Not exec'd: letta/server/startup.sh runs postgres as a background child and then
+# execs the letta server, so with exec only the server would see SIGTERM and postgres
+# would be SIGKILLed (crash recovery on the next boot). Stay as PID 1 and shut both down.
+/usr/local/bin/docker-entrypoint.sh "$@" &
+MAIN_PID=$!
+
+stop_postgres() {
+  [ -f "${PGDATA:-/var/lib/postgresql/data}/postmaster.pid" ] || return 0
+  echo "[entrypoint] Stopping postgres …"
+  gosu postgres pg_ctl -D "${PGDATA:-/var/lib/postgresql/data}" -m fast -w -t 5 stop || true
+}
+
+shutdown() {
+  echo "[entrypoint] Signal received, shutting down …"
+  kill -TERM "$MAIN_PID" 2>/dev/null || true
+  # postgres talks to letta until the end, so let the server go first (docker's
+  # default grace is 10s, so cap the wait well under it)
+  for _ in $(seq 20); do
+    kill -0 "$MAIN_PID" 2>/dev/null || break
+    sleep 0.2
+  done
+  stop_postgres
+  exit 0
+}
+trap shutdown TERM INT
+
+wait "$MAIN_PID"
