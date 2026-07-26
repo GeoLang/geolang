@@ -68,7 +68,30 @@ app.add_middleware(
 client = Letta(base_url=LETTA_URL, timeout=300)
 agent_id: str = None
 
+DEFAULT_AGENT_NAME = "gis-agent"
 
+
+def _resolve_default_agent() -> str | None:
+    """Id of the default agent to resume: the saved one, else the newest by name."""
+    if os.path.exists(AGENT_ID_FILE):
+        with open(AGENT_ID_FILE) as f:
+            saved_id = f.read().strip()
+        if saved_id:
+            try:
+                return client.agents.retrieve(agent_id=saved_id).id
+            except Exception as e:
+                logger.info(f"Saved agent {saved_id} not usable: {e}")
+
+    # agents.list is newest-first; exact name match skips per-session agents,
+    # which are named gis-agent-<timestamp>
+    try:
+        for agent in client.agents.list(name=DEFAULT_AGENT_NAME, limit=1):
+            if agent.name == DEFAULT_AGENT_NAME:
+                logger.info(f"Reusing existing agent by name: {agent.id}")
+                return agent.id
+    except Exception as e:
+        logger.warning(f"Could not look up agent by name: {e}")
+    return None
 
 
 @app.on_event("startup")
@@ -83,43 +106,40 @@ async def startup():
     logger.info(f"Registered {len(tool_names)} tools: {tool_names}")
 
     # Resume existing agent if available (tools already updated above)
-    if os.path.exists(AGENT_ID_FILE):
-        with open(AGENT_ID_FILE) as f:
-            saved_id = f.read().strip()
+    resume_id = _resolve_default_agent()
+    if resume_id:
+        agent_id = resume_id
+        with open(AGENT_ID_FILE, "w") as f:
+            f.write(agent_id)
+        # Always sync persona so server.py changes take effect without resetting the agent
         try:
-            client.agents.get(saved_id)
-            agent_id = saved_id
-            # Always sync persona so server.py changes take effect without resetting the agent
-            try:
-                blocks = client.agents.core_memory.retrieve(agent_id=agent_id)
-                for block in blocks if isinstance(blocks, list) else [blocks]:
-                    if getattr(block, "label", None) == "persona":
-                        client.blocks.modify(block_id=block.id, value=PERSONA)
-                        logger.info("Persona block updated on existing agent")
-                        break
-            except Exception as e:
-                logger.warning(f"Could not update persona block: {e}")
+            blocks = client.agents.core_memory.retrieve(agent_id=agent_id)
+            for block in blocks if isinstance(blocks, list) else [blocks]:
+                if getattr(block, "label", None) == "persona":
+                    client.blocks.modify(block_id=block.id, value=PERSONA)
+                    logger.info("Persona block updated on existing agent")
+                    break
+        except Exception as e:
+            logger.warning(f"Could not update persona block: {e}")
 
-            # Sync tool list so newly added tools are available without recreating the agent
-            try:
-                existing_tools = client.agents.tools.list(agent_id=agent_id)
-                existing_names = {t.name for t in existing_tools}
-                # Build name→id map from globally registered tools
-                all_tools = client.tools.list()
-                tool_id_map = {t.name: t.id for t in all_tools}
-                for name in tool_names:
-                    if name not in existing_names and name in tool_id_map:
-                        client.agents.tools.attach(
-                            tool_id=tool_id_map[name], agent_id=agent_id
-                        )
-                        logger.info(f"Attached new tool to agent: {name}")
-            except Exception as e:
-                logger.warning(f"Could not sync agent tools: {e}")
+        # Sync tool list so newly added tools are available without recreating the agent
+        try:
+            existing_tools = client.agents.tools.list(agent_id=agent_id)
+            existing_names = {t.name for t in existing_tools}
+            # Build name→id map from globally registered tools
+            all_tools = client.tools.list()
+            tool_id_map = {t.name: t.id for t in all_tools}
+            for name in tool_names:
+                if name not in existing_names and name in tool_id_map:
+                    client.agents.tools.attach(
+                        tool_id=tool_id_map[name], agent_id=agent_id
+                    )
+                    logger.info(f"Attached new tool to agent: {name}")
+        except Exception as e:
+            logger.warning(f"Could not sync agent tools: {e}")
 
-            logger.info(f"Resumed existing agent: {agent_id}")
-            return
-        except Exception:
-            logger.info("Saved agent not found, creating new one")
+        logger.info(f"Resumed existing agent: {agent_id}")
+        return
 
     shared_block = client.blocks.create(
         label="gis_workflow",
@@ -128,7 +148,7 @@ async def startup():
     )
 
     agent = client.agents.create(
-        name="gis-agent",
+        name=DEFAULT_AGENT_NAME,
         llm_config={
             "model": "grok-4-1-fast-reasoning",
             "model_endpoint_type": "openai",
@@ -1016,7 +1036,7 @@ async def switch_session(request: SwitchSessionRequest):
         raise HTTPException(status_code=404, detail="Session not found")
 
     try:
-        client.agents.get(request.session_id)
+        client.agents.retrieve(agent_id=request.session_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Agent no longer exists")
 
