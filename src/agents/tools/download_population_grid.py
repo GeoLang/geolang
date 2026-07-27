@@ -34,17 +34,18 @@ def download_population_grid(
     output_filename: str = None,
 ) -> str:
     """
-    Estimate population within a radius or polygon using the GHS-POP (Global Human
-    Settlement Population) grid via the WorldPop REST API. Returns total population
-    count and saves a polygon GPKG of the queried area (the radius bbox, or the clip
-    polygon when given) attributed with the population estimate. With a clip polygon
-    the count is a zonal sum of the local GHS-POP raster inside that polygon, so it
-    matches the rendered area.
+    Estimate population within a radius or polygon. The count is a zonal sum of the
+    local GHS-POP (Global Human Settlement Population) raster inside the queried area,
+    so it always matches the area that gets rendered. Falls back to the WorldPop REST
+    API when no local raster is present. Returns total population count and saves a
+    polygon GPKG of the queried area (the radius bbox, or the clip polygon when given)
+    attributed with the population estimate.
     Use this when the user asks about population catchment, how many people live within
     a drive/walk time, or demographic coverage of a service area.
     """
     import os
     import json
+    import time
     import traceback
     import math
 
@@ -65,21 +66,53 @@ def download_population_grid(
         deg = radius_km / 111.0
         bbox = box(lon - deg, lat - deg, lon + deg, lat + deg)
 
-        # Use WorldPop API — free, no key, returns population summary for a bounding box
+        # Use WorldPop API — free, no key, takes a geojson FeatureCollection and
+        # answers asynchronously: submit, then poll the task until it finishes
         # API: https://www.worldpop.org/rest/data
-        # We use the summary statistics endpoint for GHS population
-        def _worldpop_bbox(west, south, east, north):
-            url = (
-                "https://api.worldpop.org/v1/services/stats"
-                f"?dataset=wpgpas&year=2020&iso3=GBR"
-                f"&bbox={west:.4f},{south:.4f},{east:.4f},{north:.4f}"
+        def _worldpop_polygon(poly):
+            geojson = json.dumps(
+                {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "properties": {},
+                            "geometry": poly.__geo_interface__,
+                        }
+                    ],
+                }
             )
             try:
-                resp = requests.get(url, timeout=20)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("status") == "success" and "data" in data:
-                        return data["data"].get("total_population")
+                resp = requests.get(
+                    "https://api.worldpop.org/v1/services/stats",
+                    params={"dataset": "wpgpas", "year": 2020, "geojson": geojson},
+                    timeout=30,
+                )
+                if resp.status_code != 200:
+                    return None
+                taskid = resp.json().get("taskid")
+                if not taskid:
+                    return None
+                deadline = time.time() + 30
+                while True:
+                    task = requests.get(
+                        f"https://api.worldpop.org/v1/tasks/{taskid}", timeout=30
+                    )
+                    tj = task.json() if task.status_code == 200 else {}
+                    if tj.get("status") == "finished":
+                        # wpgpas reports people per age class and sex, never a total
+                        pyramid = (tj.get("data") or {}).get("agesexpyramid") or []
+                        if not pyramid:
+                            return None
+                        return sum(
+                            float(c.get("male") or 0) + float(c.get("female") or 0)
+                            for c in pyramid
+                        )
+                    if tj.get("status") in ("failed", "error"):
+                        return None
+                    if time.time() >= deadline:
+                        return None
+                    time.sleep(1.5)
             except Exception:
                 pass
             return None
@@ -98,8 +131,8 @@ def download_population_grid(
                         return candidate
             return None
 
-        def _ghsl_sum(polys_gdf):
-            """Sum GHS-POP cells inside the polygons, or None with no local raster."""
+        def _ghsl_sum(poly):
+            """Sum GHS-POP cells inside the polygon, or None with no local raster."""
             raster_path = next(
                 (
                     r
@@ -124,13 +157,9 @@ def download_population_grid(
             from shapely.geometry import mapping
 
             with rasterio.open(raster_path) as src:
-                # union first: overlapping rings (e.g. nested isochrones) must not
-                # count their shared cells twice
-                union = polys_gdf.to_crs(src.crs).union_all()
+                geom = gpd.GeoSeries([poly], crs="EPSG:4326").to_crs(src.crs).iloc[0]
                 nodata = src.nodata if src.nodata is not None else -9999
-                out_image, _ = rio_mask(
-                    src, [mapping(union)], crop=True, nodata=nodata
-                )
+                out_image, _ = rio_mask(src, [mapping(geom)], crop=True, nodata=nodata)
                 data = out_image[0].astype(float)
                 data[data == nodata] = np.nan
                 data[data < 0] = np.nan
@@ -149,23 +178,24 @@ def download_population_grid(
             else:
                 clip_missing = True
 
-        # Clipped: sum the GHS-POP raster in the polygon, WorldPop bbox only as a
-        # fallback. Unclipped: WorldPop over the radius bbox
-        pop_total = None
-        source = "WorldPop 2020"
-
-        if clip_gdf is not None:
-            clip_pop = _ghsl_sum(clip_gdf)
-            if clip_pop is not None:
-                pop_total = int(round(clip_pop))
-                source = "GHSL GHS-POP 2020 (zonal sum inside polygon)"
-            else:
-                pop_total = _worldpop_bbox(*clip_gdf.total_bounds)
-                source = "WorldPop 2020 (polygon bounding box, approximate)"
-        else:
-            pop_total = _worldpop_bbox(*bbox.bounds)
-
+        # union the clip features: overlapping rings (e.g. nested isochrones) must not
+        # count their shared cells twice
         query_poly = clip_gdf.union_all() if clip_gdf is not None else bbox
+
+        # The local GHS-POP raster is the primary source for both paths, so the count
+        # always covers exactly the area that gets rendered
+        pop_total = None
+        source = "unavailable"
+
+        raster_pop = _ghsl_sum(query_poly)
+        if raster_pop is not None:
+            pop_total = int(round(raster_pop))
+            source = "GHSL GHS-POP 2020 (zonal sum)"
+        else:
+            worldpop_pop = _worldpop_polygon(query_poly)
+            if worldpop_pop is not None:
+                pop_total = int(round(worldpop_pop))
+                source = "WorldPop wpgpas 2020 (age-sex pyramid sum)"
 
         # Fallback: use GeoJSON population estimate from Overture/OSM admin boundaries
         # via a simple approximation from Natural Earth populated places
@@ -257,7 +287,8 @@ def download_population_grid(
         else:
             return (
                 f"Could not retrieve population data for {place_name}. "
-                f"WorldPop API may not cover this region. "
+                f"No local GHS-POP raster was found (save one as ghsl_pop.tif in the "
+                f"project directory) and the WorldPop API returned nothing. "
                 f"Try using Natural Earth populated places via download_osm_data instead."
             )
 

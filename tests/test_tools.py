@@ -1,6 +1,7 @@
 # Tests for tools
 """Area tools must render the analysed AREA, not a summary point over it."""
 
+import json
 import sys
 from types import SimpleNamespace
 
@@ -8,7 +9,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 
 from src.agents.tools.assess_environmental_risk import assess_environmental_risk
 from src.agents.tools.download_population_grid import download_population_grid
@@ -26,6 +27,14 @@ HITS = [
         "osm_id": 200,
     },
 ]
+
+# canned WorldPop task payload: wpgpas answers per age class and sex, never a total
+PYRAMID = [
+    {"class": "0", "age": "0 to 1", "male": 2158.31, "female": 2057.88},
+    {"class": "1", "age": "1 to 5", "male": 8665.65, "female": 8255.97},
+    {"class": "5", "age": "5 to 10", "male": 11046.78, "female": 10611.40},
+]
+PYRAMID_TOTAL = 42796  # 2158.31 + 2057.88 + 8665.65 + 8255.97 + 11046.78 + 10611.40
 
 
 class _FakeOsmnx:
@@ -56,6 +65,39 @@ def _fake_requests(payload, status=200, geocode_hits=None):
         if "nominatim" in url:
             return SimpleNamespace(status_code=200, json=lambda: hits)
         return SimpleNamespace(status_code=status, json=lambda: payload)
+
+    return SimpleNamespace(get=get)
+
+
+def _fake_worldpop(pyramid=None, pending_polls=0, submits=None):
+    """WorldPop stand-in: async submit, then a finished age-sex pyramid."""
+    polls = {"n": 0}
+
+    def get(url, params=None, headers=None, timeout=None):
+        if "/v1/tasks/" in url:
+            polls["n"] += 1
+            if polls["n"] <= pending_polls:
+                return SimpleNamespace(status_code=200, json=lambda: {"status": "created"})
+            body = {
+                "status": "finished",
+                "data": {"agesexpyramid": PYRAMID if pyramid is None else pyramid},
+            }
+            return SimpleNamespace(status_code=200, json=lambda: body)
+        if "worldpop" in url:
+            if submits is not None:
+                submits.append(params)
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {"status": "created", "taskid": "task-1"},
+            )
+        raise AssertionError(f"unexpected request: {url}")
+
+    return SimpleNamespace(get=get)
+
+
+def _no_http():
+    def get(url, params=None, headers=None, timeout=None):
+        raise AssertionError(f"no HTTP expected, got {url}")
 
     return SimpleNamespace(get=get)
 
@@ -199,16 +241,15 @@ def test_env_risk_is_deterministic_across_geocoder_ordering(monkeypatch, stub_se
 
 
 def test_population_grid_renders_the_queried_bbox(monkeypatch, stub_services):
-    payload = {"status": "success", "data": {"total_population": 412345}}
-    monkeypatch.setitem(sys.modules, "requests", _fake_requests(payload))
+    monkeypatch.setitem(sys.modules, "requests", _fake_worldpop())
 
     out = download_population_grid("Leicester", radius_km=10.0, output_filename="pop")
-    assert "412,345" in out, out
+    assert f"{PYRAMID_TOTAL:,}" in out, out
 
     gdf = _read_output(stub_services, "pop")
     row = gdf.iloc[0]
     assert gdf.geometry.iloc[0].geom_type == "Polygon"
-    assert row["population"] == 412345
+    assert row["population"] == PYRAMID_TOTAL
     assert row["area_source"] == "radius_bbox"
     assert row["area_km2"] > 0
     assert row["lon"] == pytest.approx(LON, abs=1e-4)
@@ -220,8 +261,7 @@ def test_population_grid_renders_the_queried_bbox(monkeypatch, stub_services):
 
 
 def test_population_grid_renders_the_clip_polygon(monkeypatch, stub_services):
-    payload = {"status": "success", "data": {"total_population": 900}}
-    monkeypatch.setitem(sys.modules, "requests", _fake_requests(payload))
+    monkeypatch.setitem(sys.modules, "requests", _fake_worldpop())
 
     clip_path = stub_services / "outputs" / "clip.gpkg"
     clip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -241,9 +281,9 @@ def test_population_grid_renders_the_clip_polygon(monkeypatch, stub_services):
     assert row["area_km2"] == pytest.approx(3.14, rel=0.02)
 
 
-def test_population_grid_counts_only_the_clip_polygon(monkeypatch, stub_services):
-    payload = {"status": "success", "data": {"total_population": 412345}}
-    monkeypatch.setitem(sys.modules, "requests", _fake_requests(payload))
+def test_population_grid_zonal_sums_the_local_raster(monkeypatch, stub_services):
+    # the local raster answers both paths, so no HTTP call may be needed
+    monkeypatch.setitem(sys.modules, "requests", _no_http())
 
     clip = _circle(5000)
     clip_path = stub_services / "outputs" / "clip5k.gpkg"
@@ -261,13 +301,40 @@ def test_population_grid_counts_only_the_clip_polygon(monkeypatch, stub_services
         output_filename="pop_clipped",
     )
 
-    expected = _cells_inside(transform, clip.geometry.iloc[0])
-    assert expected > 0
-    row = _read_output(stub_services, "pop_clipped").iloc[0]
-    assert row["population"] == pytest.approx(expected, rel=0.01)
-    assert "GHS-POP" in row["source"]
-    # the radius-bbox estimate must not leak into the clipped answer
-    assert row["population"] != 412345
-    assert "412,345" in unclipped
-    assert f"{int(round(expected)):,}" in clipped
-    assert _read_output(stub_services, "pop_unclipped").iloc[0]["population"] == 412345
+    deg = 10.0 / 111.0
+    expected_bbox = _cells_inside(
+        transform, box(LON - deg, LAT - deg, LON + deg, LAT + deg)
+    )
+    expected_clip = _cells_inside(transform, clip.geometry.iloc[0])
+    assert 0 < expected_clip < expected_bbox
+
+    row_u = _read_output(stub_services, "pop_unclipped").iloc[0]
+    row_c = _read_output(stub_services, "pop_clipped").iloc[0]
+    assert row_u["population"] == pytest.approx(expected_bbox, rel=0.01)
+    assert row_c["population"] == pytest.approx(expected_clip, rel=0.01)
+    assert "GHS-POP" in row_u["source"]
+    assert "GHS-POP" in row_c["source"]
+    assert f"{int(round(expected_bbox)):,}" in unclipped
+    assert f"{int(round(expected_clip)):,}" in clipped
+
+
+def test_population_grid_sums_the_worldpop_pyramid(monkeypatch, stub_services):
+    submits = []
+    monkeypatch.setitem(
+        sys.modules, "requests", _fake_worldpop(pending_polls=1, submits=submits)
+    )
+
+    out = download_population_grid("Leicester", radius_km=2.0, output_filename="pop_wp")
+    assert f"{PYRAMID_TOTAL:,}" in out, out
+
+    row = _read_output(stub_services, "pop_wp").iloc[0]
+    assert row["population"] == PYRAMID_TOTAL
+    assert "WorldPop" in row["source"]
+
+    # submitted as a geojson FeatureCollection of the queried area, no iso3 guess
+    assert len(submits) == 1
+    params = submits[0]
+    assert "iso3" not in params
+    sent = json.loads(params["geojson"])
+    assert sent["type"] == "FeatureCollection"
+    assert sent["features"][0]["geometry"]["type"] == "Polygon"
