@@ -10,6 +10,8 @@ services:
     environment:
       TOOL_EXEC_DIR: "/app/geolang"
       TOOL_EXEC_VENV_NAME: "env"
+      # long analysis tools can exceed letta's 180s default sandbox timeout
+      TOOL_SANDBOX_TIMEOUT: "420"
       XAI_API_KEY: "${XAI_API_KEY}"
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       VLLM_API_BASE: "http://localhost:8000"

@@ -28,6 +28,7 @@ from ag_ui.core import (
 )
 from ag_ui.encoder import EventEncoder
 
+import httpx
 from letta_client import Letta, NotFoundError
 
 from src.agents.agent_manager import PERSONA, load_external_tools, register_tool
@@ -94,6 +95,27 @@ def _resolve_default_agent() -> str | None:
     return None
 
 
+def _prewarm_tool_sandbox():
+    """Pay the sandbox venv check + geo-stack import cost at boot instead of on
+    the first user tool call (which used to blow the sandbox timeout)."""
+    source = (
+        "def warmup_sandbox():\n"
+        '    """Preload the geo stack so the first real tool call is fast."""\n'
+        "    import geopandas\n"
+        "    import rasterio\n"
+        '    return "warm"\n'
+    )
+    try:
+        resp = httpx.post(
+            f"{LETTA_URL}/v1/tools/run",
+            json={"source_code": source, "args": {}},
+            timeout=600,
+        )
+        logger.info(f"Sandbox pre-warm finished: {resp.json().get('status')}")
+    except Exception as e:
+        logger.warning(f"Sandbox pre-warm failed (first tool call will be slow): {e}")
+
+
 @app.on_event("startup")
 async def startup():
     global agent_id
@@ -104,6 +126,9 @@ async def startup():
         tool_obj = register_tool(client, func=func, args_schema=schema, helpers=helpers)
         tool_names.append(tool_obj.name)
     logger.info(f"Registered {len(tool_names)} tools: {tool_names}")
+
+    # Warm the tool sandbox in the background; health does not wait on it
+    Thread(target=_prewarm_tool_sandbox, daemon=True).start()
 
     # Resume existing agent if available (tools already updated above)
     resume_id = _resolve_default_agent()
