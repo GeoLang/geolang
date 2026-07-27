@@ -48,6 +48,7 @@ def assess_environmental_risk(
     pollution, or green space for a location.
     """
     import os
+    import time
     import traceback
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
@@ -70,7 +71,38 @@ def assess_environmental_risk(
         if _coord_m:
             lat, lon = float(_coord_m.group(1)), float(_coord_m.group(2))
         else:
-            lat, lon = ox.geocode(place_name)
+            # pin the anchor: Nominatim can reorder equally-ranked hits between
+            # calls, and a moved anchor moves the whole elevation sample grid
+            lat, lon = None, None
+            try:
+                _geo_resp = requests.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={
+                        "q": place_name,
+                        "format": "json",
+                        "limit": 10,
+                        "dedupe": 0,
+                    },
+                    headers={"User-Agent": "geolang-gis-agent/1.0"},
+                    timeout=20,
+                )
+                _hits = _geo_resp.json() if _geo_resp.status_code == 200 else []
+            except Exception:
+                _hits = []
+            if isinstance(_hits, list) and _hits:
+                _best = sorted(
+                    _hits,
+                    key=lambda h: (
+                        -float(h.get("importance") or 0.0),
+                        str(h.get("osm_type") or ""),
+                        int(h.get("osm_id") or 0),
+                    ),
+                )[0]
+                lat, lon = float(_best["lat"]), float(_best["lon"])
+            if lat is None:
+                lat, lon = ox.geocode(place_name)
+        # quantise the anchor so geocoder jitter below ~10m cannot shift the grid
+        lat, lon = round(lat, 4), round(lon, 4)
         center = Point(lon, lat)
 
         # Build analysis area
@@ -114,7 +146,8 @@ def assess_environmental_risk(
         for xi in np.linspace(minx, maxx, n_samples):
             for yi in np.linspace(miny, maxy, n_samples):
                 if analysis_poly.contains(Point(xi, yi)):
-                    grid_points.append((yi, xi))  # lat, lon for API
+                    # round so identical inputs build a byte-identical query URL
+                    grid_points.append((round(yi, 5), round(xi, 5)))  # lat, lon for API
 
         elevations = []
         if grid_points:
@@ -123,16 +156,27 @@ def assess_environmental_risk(
                 batch = grid_points[i : i + 100]
                 locs = "|".join(f"{la},{lo}" for la, lo in batch)
                 url = f"https://api.opentopodata.org/v1/srtm90m?locations={locs}"
-                try:
-                    resp = requests.get(url, timeout=20)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("status") == "OK":
-                            for r in data.get("results", []):
-                                if r.get("elevation") is not None:
-                                    elevations.append(r["elevation"])
-                except Exception:
-                    pass
+                batch_elevs = None
+                for attempt in range(3):
+                    try:
+                        resp = requests.get(url, timeout=20)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if data.get("status") == "OK":
+                                batch_elevs = [
+                                    r["elevation"]
+                                    for r in data.get("results", [])
+                                    if r.get("elevation") is not None
+                                ]
+                                break
+                    except Exception:
+                        pass
+                    time.sleep(1.1)  # opentopodata fair-use: max 1 req/sec
+                # a dropped batch would silently change the elevation stats, so say so
+                if batch_elevs is None:
+                    warnings.append("elevation samples (OpenTopoData batch failed)")
+                else:
+                    elevations.extend(batch_elevs)
 
         elev_min = min(elevations) if elevations else None
         elev_max = max(elevations) if elevations else None
