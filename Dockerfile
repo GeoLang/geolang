@@ -4,7 +4,10 @@
 FROM letta/letta:0.16.8
 
 # Install dependencies, QGIS, locales + BUILD TOOLS (this fixes pandas C extension error)
-RUN apt-get update && apt-get install -y \
+# the base image's nodesource apt list breaks builds whenever that CDN 403s,
+# and node is already installed, so drop the list before updating
+RUN rm -f /etc/apt/sources.list.d/nodesource.sources /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
