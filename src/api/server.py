@@ -335,16 +335,24 @@ async def agui_stream(events, thread_id: str, run_id: str, accept: str | None = 
     yield encoder.encode(
         RunStartedEvent(type=EventType.RUN_STARTED, thread_id=thread_id, run_id=run_id)
     )
+    # RUN_ERROR is terminal in AG-UI: nothing may follow it, so an errored run
+    # must not fall through to RUN_FINISHED
+    errored = False
     try:
         async for kind, payload in events:
             yield render_agui_event(encoder, kind, payload)
+            if kind == "error":
+                errored = True
+                break
     except Exception as e:
+        errored = True
         yield encoder.encode(RunErrorEvent(type=EventType.RUN_ERROR, message=str(e)))
-    yield encoder.encode(
-        RunFinishedEvent(
-            type=EventType.RUN_FINISHED, thread_id=thread_id, run_id=run_id
+    if not errored:
+        yield encoder.encode(
+            RunFinishedEvent(
+                type=EventType.RUN_FINISHED, thread_id=thread_id, run_id=run_id
+            )
         )
-    )
 
 
 @app.post("/chat/agui")

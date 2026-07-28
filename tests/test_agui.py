@@ -81,9 +81,21 @@ def test_agui_stream_maps_error_to_run_error():
         server.agui_stream(_aiter([("error", "boom")]), thread_id="t1", run_id="r1")
     )
     types = [o["type"] for o in _sse_data_objects(frames)]
-    assert types == ["RUN_STARTED", "RUN_ERROR", "RUN_FINISHED"]
+    # RUN_ERROR is terminal in AG-UI, nothing may follow it
+    assert types == ["RUN_STARTED", "RUN_ERROR"]
     err = _sse_data_objects(frames)[1]
     assert err["message"] == "boom"
+
+
+def test_agui_stream_ends_on_mid_stream_exception():
+    async def _explodes():
+        yield ("text", "partial")
+        raise RuntimeError("upstream died")
+
+    frames = _collect(server.agui_stream(_explodes(), thread_id="t1", run_id="r1"))
+    types = [o["type"] for o in _sse_data_objects(frames)]
+    assert types[-1] == "RUN_ERROR"
+    assert "upstream died" in _sse_data_objects(frames)[-1]["message"]
 
 
 def test_routes_registered():
