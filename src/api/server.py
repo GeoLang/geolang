@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from threading import Thread
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -79,15 +79,19 @@ async def startup():
     Thread(target=_preload_geo_stack, daemon=True).start()
 
 
-async def sibyl_request(method: str, path: str, **kwargs) -> httpx.Response:
-    """Call sibyl, turning an unreachable service into a 503."""
+async def sibyl_request(
+    method: str, path: str, *, unreachable_status: int = 503, **kwargs
+) -> httpx.Response:
+    """Call sibyl, turning an unreachable service into an error status."""
     try:
         async with httpx.AsyncClient(
             base_url=SIBYL_URL, timeout=SIBYL_TIMEOUT
         ) as client:
             return await client.request(method, path, **kwargs)
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=503, detail=f"Agent service unreachable: {e}")
+        raise HTTPException(
+            status_code=unreachable_status, detail=f"Agent service unreachable: {e}"
+        )
 
 
 async def notify_agent(text: str) -> None:
@@ -931,6 +935,36 @@ async def delete_session(session_id: str):
     if response.status_code == 404:
         raise HTTPException(status_code=404, detail="Session not found")
     return response.json()
+
+
+# ── Model selection (proxied to sibyl) ───────────────────────────────
+
+
+def _sibyl_passthrough(response: httpx.Response) -> Response:
+    """Hand sibyl's status and body back untouched."""
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=response.headers.get("content-type"),
+    )
+
+
+@app.get("/models")
+async def list_models():
+    """Sibyl's model profiles and which one is active."""
+    return _sibyl_passthrough(
+        await sibyl_request("GET", "/models", unreachable_status=502)
+    )
+
+
+@app.put("/model")
+async def set_model(request: Request):
+    """Switch sibyl's active model. 404 unknown profile, 409 not available."""
+    return _sibyl_passthrough(
+        await sibyl_request(
+            "PUT", "/model", json=await request.json(), unreachable_status=502
+        )
+    )
 
 
 @app.get("/debug/tools")
