@@ -47,8 +47,15 @@ def _sibyl_is_local() -> bool:
     return False
 
 
+# NL_EVAL_ALLOW_CLOUD=1 runs against whatever backend sibyl has (e.g. grok as
+# a reference baseline): it spends cloud credits, so it's opt-in per run
+_allow_cloud = os.environ.get("NL_EVAL_ALLOW_CLOUD") == "1"
 pytestmark = pytest.mark.skipif(
-    not (_up(f"{GEOLANG}/tools") and _up(f"{SIBYL}/health") and _up(MODEL_PROBE) and _sibyl_is_local()),
+    not (
+        _up(f"{GEOLANG}/tools")
+        and _up(f"{SIBYL}/health")
+        and (_allow_cloud or (_up(MODEL_PROBE) and _sibyl_is_local()))
+    ),
     reason="local model chain not up (geolang api + sibyl in local mode + llama server)",
 )
 
