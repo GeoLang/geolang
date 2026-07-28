@@ -32,7 +32,12 @@ def run_qgis_algorithm(
     parameters: str,
     output_filename: Optional[str] = None,
 ) -> str:
-    """Run any QGIS processing algorithm by ID with JSON parameters."""
+    """Run any QGIS processing algorithm by ID with JSON parameters.
+
+    DISTANCE and other length parameters are in the INPUT layer's CRS units.
+    Layers here are usually EPSG:4326, where units are degrees: to buffer in
+    metres, first reproject to EPSG:3857 ('native:reprojectlayer'), run the
+    buffer, then reproject back to EPSG:4326 for display."""
     import json
     import os
     import sys
@@ -88,6 +93,29 @@ def run_qgis_algorithm(
             )
 
         result = processing.run(algorithm_id, params)
+
+        # degrees-vs-metres mistakes produce coordinates far outside lon/lat
+        # range and crash the viewer; catch them here so the model can retry
+        out_path = result.get("OUTPUT")
+        if isinstance(out_path, str) and os.path.exists(out_path):
+            try:
+                from osgeo import ogr
+
+                ds = ogr.Open(out_path)
+                lyr = ds.GetLayer() if ds else None
+                srs = lyr.GetSpatialRef() if lyr else None
+                if lyr is not None and srs is not None and srs.IsGeographic():
+                    minx, maxx, miny, maxy = lyr.GetExtent()
+                    if abs(minx) > 180 or abs(maxx) > 180 or abs(miny) > 90 or abs(maxy) > 90:
+                        return (
+                            f"❌ '{algorithm_id}' produced coordinates outside the valid "
+                            f"lon/lat range (extent {minx:.0f}..{maxx:.0f}, {miny:.0f}..{maxy:.0f}): "
+                            "distance parameters were applied in degrees. Reproject INPUT to "
+                            "EPSG:3857 ('native:reprojectlayer'), rerun, then reproject the "
+                            "result back to EPSG:4326."
+                        )
+            except Exception:
+                pass  # validation only; never mask a successful run
 
         output_lines = [f"  {k}: {v}" for k, v in result.items()]
         return (
