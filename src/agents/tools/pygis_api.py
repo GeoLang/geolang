@@ -19,6 +19,8 @@ def pyqgis_api(function_name: str, **kwargs) -> str:
     """
     Calls a PyQGIS function for QGIS-specific tasks.
     """
+    import os
+
     try:
         from qgis.core import QgsApplication
 
