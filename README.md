@@ -22,7 +22,7 @@
 
 - Docker + Docker Compose
 - Python 3.11+ (for the FastAPI server on the host)
-- An LLM provider API key (xAI Grok by default; OpenAI-compatible endpoints also work)
+- An LLM provider API key (xAI Grok by default, any OpenAI-compatible endpoint works)
 
 ### Configure
 
@@ -31,8 +31,11 @@ GeoLang reads provider keys from environment variables. **Do not commit keys to
 
 ```bash
 export XAI_API_KEY="your-xai-key-here"
-# OPENAI_API_KEY may also be set if you use an OpenAI-compatible endpoint.
 ```
+
+sibyl reads the key from `XAI_API_KEY` only and sends it as a bearer token to
+whatever `SIBYL_API_BASE` points at. To use another OpenAI-compatible provider,
+set `SIBYL_API_BASE` and put that provider's key in `XAI_API_KEY`.
 
 ### Run both services
 
