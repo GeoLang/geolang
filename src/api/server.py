@@ -79,10 +79,8 @@ async def startup():
     Thread(target=_preload_geo_stack, daemon=True).start()
 
 
-async def sibyl_request(
-    method: str, path: str, *, unreachable_status: int = 503, **kwargs
-) -> httpx.Response:
-    """Call sibyl, turning an unreachable service into an error status."""
+async def sibyl_request(method: str, path: str, **kwargs) -> httpx.Response:
+    """Call sibyl, turning an unreachable service into a 503."""
     try:
         async with httpx.AsyncClient(
             base_url=SIBYL_URL, timeout=SIBYL_TIMEOUT
@@ -90,7 +88,7 @@ async def sibyl_request(
             return await client.request(method, path, **kwargs)
     except httpx.HTTPError as e:
         raise HTTPException(
-            status_code=unreachable_status, detail=f"Agent service unreachable: {e}"
+            status_code=503, detail=f"Agent service unreachable: {e}"
         )
 
 
@@ -953,7 +951,7 @@ def _sibyl_passthrough(response: httpx.Response) -> Response:
 async def list_models():
     """Sibyl's model profiles and which one is active."""
     return _sibyl_passthrough(
-        await sibyl_request("GET", "/models", unreachable_status=502)
+        await sibyl_request("GET", "/models")
     )
 
 
@@ -962,7 +960,7 @@ async def set_model(request: Request):
     """Switch sibyl's active model. 404 unknown profile, 409 not available."""
     return _sibyl_passthrough(
         await sibyl_request(
-            "PUT", "/model", json=await request.json(), unreachable_status=502
+            "PUT", "/model", json=await request.json()
         )
     )
 

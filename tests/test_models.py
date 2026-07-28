@@ -58,7 +58,7 @@ def test_unavailable_profile_stays_a_409():
     assert response.json() == {"detail": "profile not available"}
 
 
-def test_sibyl_being_down_is_a_502():
+def test_sibyl_being_down_is_a_503():
     with respx.mock(base_url=server.SIBYL_URL) as sibyl:
         sibyl.get("/models").mock(side_effect=httpx.ConnectError("refused"))
         sibyl.put("/model").mock(side_effect=httpx.ConnectError("refused"))
@@ -66,6 +66,6 @@ def test_sibyl_being_down_is_a_502():
         listed = client.get("/models")
         switched = client.put("/model", json={"id": "local"})
 
-    assert listed.status_code == 502
+    assert listed.status_code == 503
     assert "unreachable" in listed.json()["detail"]
-    assert switched.status_code == 502
+    assert switched.status_code == 503
