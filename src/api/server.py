@@ -111,6 +111,24 @@ async def notify_agent(text: str) -> None:
         logger.warning(f"Could not notify agent: {e}")
 
 
+def _slim_schema(node):
+    """strip pydantic boilerplate the model doesn't need: titles, anyOf-null wrappers, null defaults"""
+    if isinstance(node, dict):
+        options = [o for o in node.get("anyOf", []) if o != {"type": "null"}]
+        if len(options) == 1:
+            del node["anyOf"]
+            node.update(options[0])
+        node.pop("title", None)
+        if "default" in node and node["default"] is None:
+            del node["default"]
+        for child in node.values():
+            _slim_schema(child)
+    elif isinstance(node, list):
+        for child in node:
+            _slim_schema(child)
+    return node
+
+
 @app.get("/tools")
 def list_tools():
     """Tool manifest for sibyl: what it can call and with which arguments."""
@@ -123,7 +141,7 @@ def list_tools():
             {
                 "name": func.__name__,
                 "description": inspect.getdoc(func) or "",
-                "parameters": schema.model_json_schema(),
+                "parameters": _slim_schema(schema.model_json_schema()),
             }
         )
     return {"tools": tools}
