@@ -74,6 +74,17 @@ want outputs elsewhere.
 - [`docs/viewer_integration.md`](docs/viewer_integration.md) — `viewer_cmd` protocol for ViewTopia (including `sql_query` for in-browser DuckDB)
 - [`docs/DESIGN.md`](docs/DESIGN.md) — open improvements, known sharp edges, decision log
 
+## Tests
+
+```bash
+# unit tests, run inside the container (deps are pinned for its python)
+docker exec viewtopia-geolang-api-1 sh -c "pip install -q pytest respx && python -m pytest tests/ -q"
+
+# NL evals: real agent runs against the local model. Auto-skipped unless
+# geolang api, sibyl (local mode), and the llama server are all up.
+uv run --with pytest --with httpx python -m pytest tests/test_nl_evals.py -v
+```
+
 ## Platform Integration
 
 When running as part of the full GeoLang platform (via `viewtopia/docker-compose.platform.yml`),
