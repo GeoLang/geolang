@@ -2,6 +2,51 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 
+LOW_BAND_M = 5.0  # same bands query_elevation uses: below 5m high, below 10m moderate
+MID_BAND_M = 10.0
+
+
+def flood_score_from(elevations, water_dist_m=None):
+    """
+    Flood score (0-10, 10=worst) and label from the elevation samples.
+
+    Mean elevation hides hilly coastal cities: San Francisco means 22m yet its
+    0-5m waterfront floods. So score the low-lying share of samples, saturating
+    at a quarter of the area (a quarter below a band already floods, more of it
+    isn't worse), take the worse band, then amplify by water proximity. The
+    amplifier multiplies, so water near high ground stays low risk and far water
+    never dampens the terrain signal.
+    """
+    if not elevations:
+        return None, "UNKNOWN"
+
+    n = len(elevations)
+    share_low = sum(1 for e in elevations if e < LOW_BAND_M) / n
+    share_mid = sum(1 for e in elevations if e < MID_BAND_M) / n
+    exposure_low = min(1.0, share_low / 0.25)
+    exposure_mid = min(1.0, share_mid / 0.25)
+    score = max(9.0 * exposure_low, 7.0 * exposure_mid)
+
+    if water_dist_m is not None:
+        if water_dist_m < 250:
+            score *= 1.3
+        elif water_dist_m < 1000:
+            score *= 1.15
+
+    score = max(1, min(10, int(round(score))))
+    if score >= 8:
+        label = "VERY HIGH"
+    elif score >= 6:
+        label = "HIGH"
+    elif score >= 3:
+        label = "MODERATE"
+    elif score >= 2:
+        label = "LOW"
+    else:
+        label = "VERY LOW"
+    return score, label
+
+
 class AssessEnvironmentalRiskArgs(BaseModel):
     place_name: str = Field(
         ...,
@@ -35,7 +80,8 @@ def assess_environmental_risk(
 ) -> str:
     """
     Assess environmental risk factors for a location or area. Checks:
-    1. Elevation & flood risk (OpenTopoData SRTM 90m grid)
+    1. Flood risk: share of the sampled elevation grid below 5m/10m, amplified by
+       water proximity (OpenTopoData SRTM 90m grid)
     2. Proximity to water bodies (rivers, coastline from OSM)
     3. Green space / tree cover percentage (OSM landuse)
     4. Industrial site proximity (OSM industrial landuse)
@@ -181,27 +227,14 @@ def assess_environmental_risk(
         elev_min = min(elevations) if elevations else None
         elev_max = max(elevations) if elevations else None
         elev_mean = round(np.mean(elevations), 1) if elevations else None
-
-        # Flood risk score (0-10, 10=highest risk)
-        if elev_mean is not None:
-            if elev_mean < 5:
-                flood_score = 9
-                flood_label = "VERY HIGH"
-            elif elev_mean < 10:
-                flood_score = 7
-                flood_label = "HIGH"
-            elif elev_mean < 20:
-                flood_score = 4
-                flood_label = "MODERATE"
-            elif elev_mean < 50:
-                flood_score = 2
-                flood_label = "LOW"
-            else:
-                flood_score = 1
-                flood_label = "VERY LOW"
-        else:
-            flood_score = None
-            flood_label = "UNKNOWN"
+        low_lying_pct = (
+            round(
+                100.0 * sum(1 for e in elevations if e < LOW_BAND_M) / len(elevations),
+                1,
+            )
+            if elevations
+            else None
+        )
 
         # 2. Water body proximity (rivers, lakes, coastline)
         water_count = 0
@@ -223,6 +256,9 @@ def assess_environmental_risk(
                 water_dist_m = round(water_proj.distance(center_proj).min(), 0)
         except Exception as e:
             warnings.append(f"water bodies (OSM: {e})")
+
+        # scored here, not with the samples, because it needs the water distance
+        flood_score, flood_label = flood_score_from(elevations, water_dist_m)
 
         # 3. Green space coverage
         green_area_pct = 0.0
@@ -378,6 +414,7 @@ def assess_environmental_risk(
                     "elev_min_m": elev_min,
                     "elev_max_m": elev_max,
                     "elev_mean_m": elev_mean,
+                    "low_lying_pct": low_lying_pct,
                     "green_pct": green_area_pct,
                     "green_score": green_score,
                     "green_label": green_label,
@@ -411,6 +448,16 @@ def assess_environmental_risk(
             + (
                 f", range {elev_min:.0f}–{elev_max:.0f}m"
                 if elev_min is not None
+                else ""
+            )
+            + (
+                f", {low_lying_pct}% of samples below {LOW_BAND_M:.0f}m"
+                if low_lying_pct is not None
+                else ""
+            )
+            + (
+                f", nearest water {water_dist_m:.0f}m"
+                if water_dist_m is not None
                 else ""
             ),
             f"Pollution:    {pollution_score}/10 ({pollution_label})"

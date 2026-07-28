@@ -11,7 +11,10 @@ import pytest
 import rasterio
 from shapely.geometry import Point, box
 
-from src.agents.tools.assess_environmental_risk import assess_environmental_risk
+from src.agents.tools.assess_environmental_risk import (
+    assess_environmental_risk,
+    flood_score_from,
+)
 from src.agents.tools.download_population_grid import download_population_grid
 
 LAT, LON = 52.6369, -1.1398  # Leicester
@@ -175,6 +178,49 @@ def _cells_inside(transform, geom, value=10.0, size=200):
     return total
 
 
+# San Francisco shape: 20% waterfront at 2m, a little at 8m, the rest hills.
+# Mean is 45m, which the old mean-only score called LOW.
+SF_ELEVATIONS = [2.0] * 20 + [8.0] * 5 + [60.0] * 75
+
+
+def test_flood_score_catches_low_lying_waterfront_under_a_high_mean():
+    assert np.mean(SF_ELEVATIONS) > 20  # a mean-based score would say LOW
+    score, label = flood_score_from(SF_ELEVATIONS, water_dist_m=120)
+    assert score >= 8
+    assert label == "VERY HIGH"
+
+
+def test_flood_score_is_very_low_on_an_inland_plateau():
+    score, label = flood_score_from([120.0] * 50, water_dist_m=None)
+    assert score == 1
+    assert label == "VERY LOW"
+
+
+def test_flood_score_is_very_high_on_a_floodplain():
+    score, label = flood_score_from([2.0] * 50, water_dist_m=None)
+    assert score >= 8
+    assert label == "VERY HIGH"
+
+
+def test_flood_score_stays_low_when_water_is_near_but_ground_is_high():
+    score, label = flood_score_from([40.0] * 50, water_dist_m=50)
+    assert score == 1
+    assert label == "VERY LOW"
+
+
+def test_flood_score_falls_back_to_elevation_only_without_water_distance():
+    elevation_only = flood_score_from(SF_ELEVATIONS, water_dist_m=None)
+    assert elevation_only == (7, "HIGH")
+    # far water is not an amplifier, so it scores the same as no water data
+    assert flood_score_from(SF_ELEVATIONS, water_dist_m=5000) == elevation_only
+    # near water is worse than either signal alone
+    assert flood_score_from(SF_ELEVATIONS, water_dist_m=120)[0] > elevation_only[0]
+
+
+def test_flood_score_is_unknown_without_elevations():
+    assert flood_score_from([], water_dist_m=100) == (None, "UNKNOWN")
+
+
 def test_env_risk_renders_the_buffer_polygon(monkeypatch, stub_services):
     elevations = {"status": "OK", "results": [{"elevation": 8.0}] * 100}
     monkeypatch.setitem(sys.modules, "requests", _fake_requests(elevations))
@@ -194,7 +240,7 @@ def test_env_risk_renders_the_buffer_polygon(monkeypatch, stub_services):
 
     # scores survive on the polygon, centroid survives as properties
     row = gdf.iloc[0]
-    assert row["flood_score"] == 7  # 8m mean elevation -> HIGH
+    assert row["flood_score"] == 7  # every sample below 10m -> HIGH
     assert row["overall_risk"] > 0
     assert row["overall_label"].endswith("RISK")
     assert row["radius_km"] == 2.0
