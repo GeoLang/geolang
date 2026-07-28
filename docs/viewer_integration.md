@@ -1,6 +1,6 @@
 # Viewer Integration — ViewTopia Commands
 
-The GeoLang agent emits **viewer commands** over the `/chat/stream` SSE channel. ViewTopia listens for `viewer_cmd` events and dispatches them by `action` name to handlers registered in [`viewtopia/src/viewer-commands.js`](https://github.com/GeoLang/viewtopia/blob/main/src/viewer-commands.js).
+The GeoLang agent emits **viewer commands** over the `/chat/agui` SSE channel. ViewTopia listens for `viewer_cmd` events and dispatches them by `action` name to handlers registered in [`viewtopia/src/viewer-commands.js`](https://github.com/GeoLang/viewtopia/blob/main/src/viewer-commands.js).
 
 This doc covers commands that the agent server is responsible for emitting. The frontend side is documented in [`viewtopia/docs/duckdb-wasm.md`](https://github.com/GeoLang/viewtopia/blob/main/docs/duckdb-wasm.md).
 
@@ -50,7 +50,7 @@ If none match the viewer dispatches a `viewtopia:sql_error` CustomEvent.
 
 ## Agent-side tool definition
 
-The Letta agent needs a tool registered (in [`geolang/src/tools/`](../src/tools/)) that returns this command. Sketch:
+The agent needs a tool module (in [`geolang/src/agents/tools/`](../src/agents/tools/)) that returns this command. Sketch:
 
 ```python
 def sql_query(sql: str, show_on_map: bool = True, color: str = "#3388ff") -> dict:
@@ -83,7 +83,7 @@ The SSE channel is one-way (agent → viewer). The viewer currently stashes the 
 If we need the agent to reason over result rows for follow-up turns, the options are:
 
 1. **Refine via SQL** — have the agent emit a more selective `sql_query` rather than asking for raw rows.
-2. **Result echo endpoint** — add `POST /chat/sql_result` on the agent server; have ViewTopia post the result summary back. Letta puts it in working memory for the next turn.
+2. **Result echo endpoint** — add `POST /chat/sql_result` on the agent server, have ViewTopia post the result summary back, and forward it to sibyl as a session message (the same path `/upload` and `/draw` use).
 3. **Tool-call return value** — if/when the SSE channel becomes bidirectional (e.g. ChatGPT-style tool-call protocol), the result flows back natively.
 
 Deferred until a concrete use case forces the choice. Option 2 is the cheapest if needed.

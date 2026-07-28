@@ -1,16 +1,17 @@
 # Architecture Overview
 
-GeoLang is a thin FastAPI service that wraps a [Letta](https://github.com/letta-ai/letta) stateful agent and exposes it to ViewTopia (and other clients) over HTTP + Server-Sent Events. The "intelligence" lives in Letta; GeoLang is the integration surface that gives that agent geospatial tools and a viewer protocol.
+GeoLang is a FastAPI service that owns the geospatial tools and exposes an agent to ViewTopia (and other clients) over HTTP + Server-Sent Events. The agent loop lives in **sibyl**, a separate Rust service. GeoLang is the integration surface: it serves sibyl a tool manifest, runs the tools in-process, and renders sibyl's run events as AG-UI.
 
 ## Process topology
 
 ```
-┌──────────────┐    HTTP/SSE     ┌──────────────────────┐    Letta SDK    ┌──────────────┐
-│  ViewTopia   │ ───────────────►│   GeoLang API        │ ──────────────► │ Letta server │
-│  (browser)   │ ◄─────────────  │   (FastAPI, :8080)   │ ◄────────────── │   (:8283)    │
-└──────────────┘   viewer_cmd    │                      │                 │              │
-                                 │  loads tools from    │                 │  agent state │
-                                 │  src/agents/tools/   │                 │  + LLM proxy │
+┌──────────────┐    HTTP/SSE     ┌──────────────────────┐  POST /runs     ┌──────────────┐
+│  ViewTopia   │ ───────────────►│   GeoLang API        │ ──────────────► │    sibyl     │
+│  (browser)   │ ◄─────────────  │   (FastAPI, :8080)   │ ◄────────────── │   (:8090)    │
+└──────────────┘   viewer_cmd    │                      │  NDJSON events  │              │
+                                 │  loads tools from    │ ◄────────────── │  agent loop  │
+                                 │  src/agents/tools/   │  GET /tools     │  + sessions  │
+                                 │  and runs them       │  POST /tools/x  │  + LLM calls │
                                  └──────────┬───────────┘                 └──────┬───────┘
                                             │                                    │
                           ┌─────────────────┼────────────────┐                   │
@@ -18,13 +19,13 @@ GeoLang is a thin FastAPI service that wraps a [Letta](https://github.com/letta-
                     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌────────────────┐
                     │ Ptolemy  │     │ Geokode  │     │ Itinera  │     │  LLM provider  │
                     │ TileTopia│     │ (geo-    │     │ (routing)│     │  (xAI / OpenAI │
-                    │ (HTTP)   │     │  coding) │     │          │     │   / vLLM)      │
+                    │ (HTTP)   │     │  coding) │     │          │     │    via sibyl)  │
                     └──────────┘     └──────────┘     └──────────┘     └────────────────┘
 ```
 
-- **Letta** owns the conversation, working memory blocks, and tool-call orchestration. GeoLang never sees raw token streams — it sees structured events (text, tool calls, tool results).
-- **GeoLang API** ([`src/api/server.py`](../src/api/server.py)) is a single-file FastAPI app. On startup it scans `src/agents/tools/`, registers each tool with Letta, and either resumes an existing agent (via `.agent_id`) or creates a fresh one.
-- **Tools** are plain Python functions discovered by `pkgutil.iter_modules` of the `tools` package. Each module exports `TOOL_FUNCTION` and optionally `TOOL_SCHEMA` (pydantic) and `TOOL_HELPERS`. They run in the GeoLang process and may shell out to QGIS, GeoPandas, or downstream services.
+- **sibyl** owns the conversation, sessions, history, and the tool-call loop. GeoLang never sees raw token streams, it sees NDJSON run events (text, tool calls, tool returns).
+- **GeoLang API** ([`src/api/server.py`](../src/api/server.py)) is a single-file FastAPI app. It serves the tool manifest at `GET /tools`, executes a tool at `POST /tools/{name}`, and proxies `/sessions/*` to sibyl. `POST /chat/agui` opens a sibyl run and renders its events as AG-UI SSE.
+- **Tools** are plain Python functions discovered by `pkgutil.iter_modules` of the `tools` package. Each module exports `TOOL_FUNCTION` and `TOOL_SCHEMA` (pydantic). They run in the GeoLang process and may shell out to QGIS, GeoPandas, or downstream services.
 - **ViewTopia** consumes `/chat/agui` (AG-UI protocol SSE) and dispatches `viewer_cmd` custom events through [`viewer/commands.ts`](https://github.com/GeoLang/viewtopia/blob/main/src/viewer/commands.ts).
 
 ## SSE event vocabulary
@@ -40,20 +41,19 @@ GeoLang is a thin FastAPI service that wraps a [Letta](https://github.com/letta-
 | `RUN_ERROR` | `{message}` | Tool or LLM failure. |
 | `RUN_FINISHED` | — | End of run. |
 
-## Tool registration flow
+## Tool manifest and execution
 
-1. `load_external_tools()` reloads the `tools` package from disk on every startup, picks up modules exporting `TOOL_FUNCTION`.
-2. `register_tool()` extracts the function's source (and any `TOOL_HELPERS`) and upserts it as a Letta tool. Source is concatenated so helper functions are visible inside the sandbox Letta runs the tool in.
-3. The agent is created (or resumed) with the full tool name list.
-4. On every restart the persona block is re-synced and any new tools are attached to the existing agent without resetting conversation state.
+1. `load_external_tools()` reloads the `tools` package from disk on every call, picking up modules that export `TOOL_FUNCTION`.
+2. `GET /tools` turns those into a manifest: `name` from the function, `description` from its docstring, `parameters` from `TOOL_SCHEMA.model_json_schema()`. A module without a `TOOL_SCHEMA` is logged and left out.
+3. sibyl decides to call a tool and posts `{"args": {...}}` to `POST /tools/{name}`. GeoLang validates the args against `TOOL_SCHEMA` and calls the function in its own process, in FastAPI's threadpool, since tools can block for minutes.
+4. Everything comes back as `{"result": "<string>"}`, including failures, which start with ❌ so the agent can recover.
 
-This means **editing a file in `src/agents/tools/` and restarting the API is enough** — there is no separate manifest, registry, or migration step.
+Because the reload happens per request, **editing a file in `src/agents/tools/` takes effect without a restart**. There is no registry or migration step.
 
 ## State and persistence
 
-- **Agent ID** — `.agent_id` in `TOOL_EXEC_DIR`. Delete to force a fresh agent.
-- **Conversation memory** — owned by Letta (Postgres-backed in the supplied compose).
-- **Sessions** — `.sessions.json` is a thin GeoLang-side mapping for multi-conversation UX; switching sessions swaps the active `agent_id`.
+- **Conversation history and sessions** — owned by sibyl. GeoLang's `/sessions/*` routes are proxies, they store nothing.
+- **Persona** — `PERSONA` in [`agent_manager.py`](../src/agents/agent_manager.py), sent as `system_prompt` on every run, so prompt edits take effect on the next message.
 - **User datasets** — `user_data/catalogue.json` lists uploaded files; the actual files live in `user_data/`.
 - **Outputs** — tool results (GeoJSON, GPKG, rendered images) land in `outputs/` and are served at `/outputs/{filename}`.
 
@@ -61,7 +61,7 @@ This means **editing a file in `src/agents/tools/` and restarting the API is eno
 
 | Concern | Owner |
 |---|---|
-| LLM choice, context window, tool-call loop | Letta |
+| LLM choice, context window, tool-call loop, history | sibyl |
 | Tool implementation, viewer protocol, file I/O | GeoLang API |
 | Map rendering, DuckDB-WASM analysis, layer state | ViewTopia |
 | Versioned geodatabase, multi-user editing | Ptolemy |
@@ -70,9 +70,8 @@ This means **editing a file in `src/agents/tools/` and restarting the API is eno
 
 The agent should prefer **client-side** work (a `viewer_cmd` like `sql_query` running in DuckDB-WASM) over server-side work (a Ptolemy REST call) when the data is reachable from the browser — it's lower latency and frees the server. See [`viewer_integration.md`](viewer_integration.md) for the heuristic.
 
-## Known sharp edges
+## Known limitations
 
-- **`src/core/` and `src/agents/agent_manager.py` are stubs** — the live code path is `src/api/server.py`. The stubs may be vestigial; treat them as such until reorganised.
+- **Tools run in the API process.** A tool that blocks holds a threadpool slot, and a tool that crashes the interpreter takes the API with it. There is no sandbox between the agent's tool calls and this process.
 - **CORS is wide-open** (`allow_origins=["*"]`) in [`server.py`](../src/api/server.py) — fine for development, must be tightened in any shared deployment.
-- **API keys in compose** — `docker-compose.yml` has provider keys inline. Move to a `.env` file before sharing the repo (and rotate the existing ones).
-- **Tool source is sent to Letta** — the entire `inspect.getsource(func)` text is uploaded as a Letta tool. Don't put secrets in tool module bodies; they will be persisted to the Letta backend.
+- **The tool endpoints are unauthenticated.** Anything that can reach `POST /tools/{name}` can run a tool. Keep the port off the public network.

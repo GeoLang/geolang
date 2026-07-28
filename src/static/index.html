@@ -1983,8 +1983,9 @@
       const res = await fetch(`${API}/health`);
       const data = await res.json();
       const el = document.getElementById('status');
-      el.textContent = data.agent_id ? `agent ready` : 'no agent';
-      el.className = `status ${data.agent_id ? 'ok' : ''}`;
+      const ok = data.status === 'ok';
+      el.textContent = ok ? 'agent ready' : 'no agent';
+      el.className = `status ${ok ? 'ok' : ''}`;
     } catch (e) {
       document.getElementById('status').textContent = 'server offline';
     }

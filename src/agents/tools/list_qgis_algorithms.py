@@ -1,3 +1,10 @@
+from pydantic import BaseModel
+
+
+class ListQgisAlgorithmsArgs(BaseModel):
+    pass  # no arguments needed
+
+
 def list_qgis_algorithms() -> str:
     """List all available QGIS processing algorithms."""
     import os
@@ -35,3 +42,4 @@ def list_qgis_algorithms() -> str:
 
 # Required for auto-registration
 TOOL_FUNCTION = list_qgis_algorithms
+TOOL_SCHEMA = ListQgisAlgorithmsArgs

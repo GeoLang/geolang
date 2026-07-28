@@ -1,14 +1,11 @@
-"""Letta response post-processing: progress text, UI spec inference, message parsing."""
+"""Agent output post-processing: progress text and UI spec inference."""
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
 
 from src.core.utils import OUTPUTS_DIR
-
-logger = logging.getLogger(__name__)
 
 
 TOOL_PROGRESS = {
@@ -40,16 +37,6 @@ TOOL_PROGRESS = {
     "cluster_points": lambda a: f"Clustering {a.get('input_path','points').split('/')[-1].replace('.gpkg','')} ({a.get('method','dbscan').upper()})…",
     "voronoi": lambda a: f"Generating Voronoi polygons from {a.get('input_path','points').split('/')[-1].replace('.gpkg','')}…",
     "terrain_profile": lambda a: f"Fetching elevation profile from {a.get('start_place','')} to {a.get('end_place','')}…",
-}
-
-
-TOOL_MESSAGE_TYPES = {
-    "tool_call_message",
-    "tool_return_message",
-    "function_call",
-    "function_return",
-    "tool_call",
-    "tool_return",
 }
 
 
@@ -121,60 +108,3 @@ def infer_ui_spec_from_text(text: str):
         return spec
 
     return None
-
-
-def extract_text_and_ui_spec(response):
-    """Parse Letta response messages to extract visible text, UI spec, and viewer commands."""
-    text = ""
-    ui_spec = None
-    viewer_commands = []
-    assistant_texts = []
-    all_content = []
-
-    for msg in response.messages:
-
-        def get_attr(obj, *keys):
-            for k in keys:
-                v = getattr(obj, k, None) if not isinstance(obj, dict) else obj.get(k)
-                if v is not None:
-                    return v
-            return None
-
-        msg_type = str(get_attr(msg, "message_type", "role") or "")
-        content = str(get_attr(msg, "content", "text") or "")
-        tool_return = str(get_attr(msg, "tool_return") or "")
-
-        for candidate in [content, tool_return]:
-            if "__UI_SPEC__:" in candidate:
-                raw = candidate.split("__UI_SPEC__:", 1)[1]
-                try:
-                    ui_spec = json.loads(raw)
-                except Exception:
-                    pass
-            if "__VIEWER_CMD__:" in candidate:
-                for part in candidate.split("__VIEWER_CMD__:")[1:]:
-                    try:
-                        viewer_commands.append(json.loads(part.split("\n")[0].strip()))
-                    except Exception:
-                        pass
-
-        if msg_type in ("assistant_message", "assistant") and content:
-            assistant_texts.append(content)
-
-        all_content.extend([content, tool_return])
-
-    if assistant_texts:
-        text = assistant_texts[-1]
-    else:
-        logger.warning(
-            "No assistant_message found. Types: %s",
-            [
-                str(getattr(m, "message_type", getattr(m, "role", "?")))
-                for m in response.messages
-            ],
-        )
-
-    if not ui_spec:
-        ui_spec = infer_ui_spec_from_text(" ".join(all_content))
-
-    return text, ui_spec, viewer_commands

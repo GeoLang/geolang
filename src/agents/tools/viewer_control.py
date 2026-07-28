@@ -56,8 +56,8 @@ def viewer_control(
     add markers, load tilesets, apply point cloud classification colours, etc.
     The command is sent to the viewer frontend which executes it.
     After geocoding a place, call this with action='fly_to' and the coordinates."""
-    # NOTE: Letta executes a tool from its extracted function body, WITHOUT the
-    # module's top-level imports — so json must be imported inside the function.
+    # NOTE: tools run in the geolang process now, but imports stay inside the
+    # function body so each tool stays self-contained.
     import json
 
     params = {}

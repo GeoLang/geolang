@@ -1,50 +1,37 @@
 # Tests for agents
-"""Default-agent resolution: restarts must reuse the existing agent, never mint a new one."""
-from types import SimpleNamespace
+"""The tool manifest and executor sibyl calls: geolang runs tools in-process."""
+from fastapi.testclient import TestClient
 
+from src.agents.agent_manager import load_external_tools
 from src.api import server
 
-
-class _Agents:
-    def __init__(self, known=None, by_name=None):
-        self.known = known or {}
-        self.by_name = by_name or {}
-
-    def retrieve(self, agent_id):
-        if agent_id not in self.known:
-            raise RuntimeError(f"no such agent {agent_id}")
-        return SimpleNamespace(id=agent_id, name=self.known[agent_id])
-
-    def list(self, name, limit=None):
-        return self.by_name.get(name, [])
+client = TestClient(server.app)
 
 
-def _install(monkeypatch, tmp_path, agents, saved_id=None):
-    id_file = tmp_path / ".agent_id"
-    if saved_id is not None:
-        id_file.write_text(saved_id)
-    monkeypatch.setattr(server, "AGENT_ID_FILE", str(id_file))
-    monkeypatch.setattr(server, "client", SimpleNamespace(agents=agents))
+def test_manifest_covers_every_tool_module():
+    manifest = client.get("/tools").json()["tools"]
+
+    assert {t["name"] for t in manifest} == {f.__name__ for f, _ in load_external_tools()}
+    for tool in manifest:
+        assert tool["description"], f"{tool['name']} has no docstring"
+        assert tool["parameters"]["type"] == "object"
 
 
-def test_resolves_saved_id(monkeypatch, tmp_path):
-    agents = _Agents(known={"agent-saved": "gis-agent"})
-    _install(monkeypatch, tmp_path, agents, saved_id="agent-saved")
-    assert server._resolve_default_agent() == "agent-saved"
+def test_executor_runs_a_tool_and_returns_a_string():
+    response = client.post("/tools/list_outputs", json={"args": {}})
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert isinstance(result, str) and result
+    assert not result.startswith("❌")
 
 
-def test_falls_back_to_name_when_saved_id_is_stale(monkeypatch, tmp_path):
-    agents = _Agents(
-        known={},
-        by_name={"gis-agent": [SimpleNamespace(id="agent-live", name="gis-agent")]},
-    )
-    _install(monkeypatch, tmp_path, agents, saved_id="agent-gone")
-    assert server._resolve_default_agent() == "agent-live"
+def test_unknown_tool_is_404():
+    assert client.post("/tools/nonexistent", json={"args": {}}).status_code == 404
 
 
-def test_ignores_per_session_agents(monkeypatch, tmp_path):
-    agents = _Agents(
-        by_name={"gis-agent": [SimpleNamespace(id="agent-sess", name="gis-agent-20260101-000000")]}
-    )
-    _install(monkeypatch, tmp_path, agents)
-    assert server._resolve_default_agent() is None
+def test_bad_args_come_back_as_a_tool_error():
+    response = client.post("/tools/geocode_place", json={"args": {}})
+
+    assert response.status_code == 200
+    assert response.json()["result"].startswith("❌ Invalid arguments:")

@@ -6,27 +6,10 @@ Base URL in development: `http://localhost:8080`. In the bundled platform deploy
 
 ## Conventions
 
-- Errors use FastAPI's default `{"detail": "..."}` shape with the HTTP status reflecting the failure mode (`503` if the agent is not yet initialised, `404` for missing resources, `500` for unhandled exceptions).
+- Errors use FastAPI's default `{"detail": "..."}` shape with the HTTP status reflecting the failure mode (`503` if sibyl is unreachable, `404` for missing resources, `500` for unhandled exceptions).
 - All filesystem outputs land under `TOOL_EXEC_DIR/outputs/` and are served from `/outputs/{filename}`.
 
 ## Chat
-
-### `POST /chat`
-One-shot request/response. Use for non-interactive scripting; prefer `/chat/agui` for UIs.
-
-Request:
-```json
-{ "message": "Show me populated places above 1M people in Spain" }
-```
-
-Response:
-```json
-{
-  "text": "Here are 8 places…",
-  "ui_spec": { "type": "map", "layers": [ ... ] },
-  "viewer_commands": [ { "action": "...", "params": { ... } } ]
-}
-```
 
 ### `POST /chat/agui`
 SSE stream of [AG-UI protocol](https://docs.ag-ui.com/) events. Accepts a `RunAgentInput` body (`threadId`, `runId`, `messages`); the last user message is the prompt. See [architecture.md](architecture.md#sse-event-vocabulary) for the event mapping and [viewer_integration.md](viewer_integration.md) for `viewer_cmd` semantics.
@@ -35,15 +18,15 @@ Each line is a standard SSE `data: <json>` payload, wrapped in `RUN_STARTED`/`RU
 
 ## Sessions
 
-GeoLang persists a lightweight session list in `.sessions.json`. Each session maps to a distinct Letta agent; switching swaps the active `agent_id`.
+Sessions live in sibyl. These routes are proxies and keep no state of their own.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/sessions` | List sessions and the current one. |
-| `POST` | `/sessions/new` | Create a new session (new agent). |
-| `POST` | `/sessions/switch` | Switch active session by id. |
+| `GET` | `/sessions` | List sessions, newest first, with `active` marking the current one. |
+| `POST` | `/sessions/new` | Create a session named `Session N` and activate it. |
+| `POST` | `/sessions/switch` | Switch active session by id. `404` if unknown. |
 | `PUT` | `/sessions/{session_id}/rename` | Rename a session. |
-| `DELETE` | `/sessions/{session_id}` | Delete a session (and its agent). |
+| `DELETE` | `/sessions/{session_id}` | Delete a session. `400` for the active one. |
 
 ## Datasets
 
@@ -82,16 +65,29 @@ User-uploaded files for the agent to operate on.
 |---|---|---|
 | `POST` | `/share` | Create a shareable link for a dataset / view. |
 
+## Tools
+
+sibyl reads the manifest, picks a tool, and posts the arguments back for GeoLang to execute in-process.
+
+### `GET /tools`
+```json
+{ "tools": [ { "name": "geocode_place", "description": "…", "parameters": { "type": "object", ... } } ] }
+```
+`parameters` is the JSON schema of the module's `TOOL_SCHEMA`. Modules without one are skipped.
+
+### `POST /tools/{name}`
+Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>" }`. `404` for an unknown tool. Bad arguments and tool exceptions come back as `200` with a `result` starting with ❌, so the agent can read the failure and recover. Calls can take minutes.
+
 ## Debug
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Liveness — returns `{"status": "ok"}` plus `agent_id`. |
-| `GET` | `/debug/tools` | List tools registered with the active agent. |
+| `GET` | `/health` | Liveness, returns `{"status": "ok"}`. |
+| `GET` | `/debug/tools` | Names of the loaded tool modules. |
 
 ## Tool catalogue
 
-36 tools live under [`src/agents/tools/`](../src/agents/tools/). They auto-register on startup. Categories:
+36 tools live under [`src/agents/tools/`](../src/agents/tools/). They are loaded from disk on every manifest or execution request. Categories:
 
 **Data acquisition** — `geocode_place` (geokode-first, Natural Earth fallback), `batch_geocode`, `get_admin_boundary`, `download_natural_earth_dataset`, `download_osm_data`, `download_population_grid`, `query_elevation`.
 
@@ -107,16 +103,15 @@ User-uploaded files for the agent to operate on.
 
 **Escape hatches** — `geopandas_api` (arbitrary GeoPandas), `pyqgis_api` (arbitrary PyQGIS), `viewer_control` (raw viewer commands), `emit_ui_spec` (structured map hints).
 
-Adding a tool is a single file: drop a module into `src/agents/tools/` exporting `TOOL_FUNCTION` (and optionally `TOOL_SCHEMA`, `TOOL_HELPERS`), then restart the API. See [architecture.md](architecture.md#tool-registration-flow).
+Adding a tool is a single file: drop a module into `src/agents/tools/` exporting `TOOL_FUNCTION` and `TOOL_SCHEMA`. No restart needed. See [architecture.md](architecture.md#tool-manifest-and-execution).
 
 ## Environment variables
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LETTA_URL` | `http://localhost:8283` | Letta server endpoint. |
-| `TOOL_EXEC_DIR` | `~/src/geolang` | Working directory for tool I/O, sessions, catalogue. |
-| `OPENAI_API_KEY` / `XAI_API_KEY` | — | LLM provider key (xAI Grok by default). |
-| `VLLM_API_BASE` | `http://localhost:8000` | Embedding server endpoint. |
+| `SIBYL_URL` | `http://localhost:8090` | sibyl agent service endpoint. |
+| `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O, outputs, catalogue. |
+| `APP_BASE_URL` | `http://localhost:8080` | URL Playwright loads for `/export-pdf` and `/export-png`. |
 | `PTOLEMY_URL` | `http://ptolemy:3000` | Ptolemy geodatabase endpoint (`ptolemy_query`). |
 | `PTOLEMY_API_TOKEN` | — | Optional bearer token when Ptolemy auth is enabled. |
 | `GEOKODE_URL` | — | geokode endpoint; when set, `geocode_place` tries it first. |

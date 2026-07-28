@@ -1,17 +1,19 @@
-# Use the official Letta image (Debian Bookworm-based).
-# Pinned to a known-good Letta version — bump intentionally after testing
-# (see docs/DESIGN.md "Pin the Letta base image").
-FROM letta/letta:0.16.8
+# Debian bookworm base so the QGIS apt packages (whose python bindings are built
+# for debian's python3.11) match this image's CPython 3.11.
+FROM python:3.11-slim-bookworm
 
-# Install dependencies, QGIS, locales + BUILD TOOLS (this fixes pandas C extension error)
-# the base image's nodesource apt list breaks builds whenever that CDN 403s,
-# and node is already installed, so drop the list before updating
-RUN rm -f /etc/apt/sources.list.d/nodesource.sources /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update && apt-get install -y \
+ENV PYTHONUNBUFFERED=1 \
+    TOOL_EXEC_DIR=/app/geolang \
+    QT_QPA_PLATFORM=offscreen \
+    QGIS_PREFIX_PATH=/usr \
+    PATH=/opt/venv/bin:$PATH
+
+# Build tools for the geo stack's C extensions, QGIS, locales, curl for healthchecks
+RUN apt-get update && apt-get install -y \
     wget \
+    curl \
     gnupg \
     ca-certificates \
-    python3-pip \
     python3-dev \
     gcc \
     g++ \
@@ -25,7 +27,7 @@ RUN rm -f /etc/apt/sources.list.d/nodesource.sources /etc/apt/sources.list.d/nod
     && mkdir -p /etc/apt/keyrings \
     && wget -O /etc/apt/keyrings/qgis-archive-keyring.gpg https://download.qgis.org/downloads/qgis-archive-keyring.gpg \
     && chmod a+r /etc/apt/keyrings/qgis-archive-keyring.gpg \
-    && echo "Types: deb deb-src\nURIs: https://qgis.org/debian\nSuites: bookworm\nArchitectures: amd64\nComponents: main\nSigned-By: /etc/apt/keyrings/qgis-archive-keyring.gpg" > /etc/apt/sources.list.d/qgis.sources \
+    && printf 'Types: deb deb-src\nURIs: https://qgis.org/debian\nSuites: bookworm\nArchitectures: amd64\nComponents: main\nSigned-By: /etc/apt/keyrings/qgis-archive-keyring.gpg\n' > /etc/apt/sources.list.d/qgis.sources \
     && apt-get update \
     && apt-get install -y \
         qgis \
@@ -35,27 +37,20 @@ RUN rm -f /etc/apt/sources.list.d/nodesource.sources /etc/apt/sources.list.d/nod
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# One venv for the API and the tools: they run in the same process now.
+COPY requirements_client.txt requirements.txt /tmp/
+RUN python -m venv /opt/venv \
+    && pip install --no-cache-dir -r /tmp/requirements_client.txt -r /tmp/requirements.txt \
+    && playwright install --with-deps chromium \
+    && rm /tmp/requirements_client.txt /tmp/requirements.txt
+
 # SELinux-friendly outputs
-RUN mkdir -p /app/geolang/outputs && \
-    chmod 777 /app/geolang/outputs && \
-    chown -R root:root /app/geolang
+RUN mkdir -p /app/geolang/outputs && chmod 777 /app/geolang/outputs
 
-# host-server extra: server.py runs in the base image's uv-managed /app/.venv
-# (no pip). PATH points python3 at that venv, so use the system interpreter to
-# get uv, then install the AG-UI SDK into the server venv with it.
-RUN /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages uv && \
-    uv pip install --python /app/.venv/bin/python --no-cache ag-ui-protocol==0.1.19
+# the repo is bind-mounted here by compose
+WORKDIR /app/geolang
 
-# Letta rebuilds the tool-exec venv from scratch on every server start
-# (prepare_local_sandbox with force_recreate=True), ~40s. Our entrypoint already
-# populates it from requirements.txt, so turn Letta's copy off.
-ENV TOOL_EXEC_AUTORELOAD_VENV=false
-
-# Entrypoint: populate Letta tool-exec venv on first start (survives the host
-# volume mount that shadows anything baked into the image), then chain to the base
-# image's /usr/local/bin/docker-entrypoint.sh (the postgres init script).
-# Ours gets its own path: letta/server/startup.sh starts postgres by calling
-# /usr/local/bin/docker-entrypoint.sh directly, so that name has to stay theirs.
-COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/geolang-entrypoint.sh
-ENTRYPOINT ["/usr/local/bin/geolang-entrypoint.sh"]
-CMD ["./letta/server/startup.sh"]
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+    CMD curl -fsS http://localhost:8080/health || exit 1
+CMD ["uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8080"]

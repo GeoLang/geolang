@@ -1,3 +1,4 @@
+import inspect
 import json
 import logging
 import os
@@ -13,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ag_ui.core import (
     CustomEvent,
@@ -29,28 +30,17 @@ from ag_ui.core import (
 from ag_ui.encoder import EventEncoder
 
 import httpx
-from letta_client import Letta, NotFoundError
 
-from src.agents.agent_manager import PERSONA, load_external_tools, register_tool
-from src.agents.workflows import (
-    extract_text_and_ui_spec,
-    get_progress_text,
-    infer_ui_spec_from_text,
-    TOOL_MESSAGE_TYPES,
-)
+from src.agents.agent_manager import PERSONA, load_external_tools
+from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
 from src.core.utils import (
-    AGENT_ID_FILE,
-    CATALOGUE_FILE,
     EXEC_DIR,
-    LETTA_URL,
     OUTPUTS_DIR,
-    SESSIONS_FILE,
+    SIBYL_URL,
     USER_DATA_DIR,
     load_catalogue,
-    load_sessions,
     load_shares,
     save_catalogue,
-    save_sessions,
     save_shares,
 )
 
@@ -66,166 +56,107 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = Letta(base_url=LETTA_URL, timeout=300)
-agent_id: str = None
-
-DEFAULT_AGENT_NAME = "gis-agent"
+# sibyl owns the agent loop and session history, geolang runs the tools
+SIBYL_TIMEOUT = 30.0
 
 
-def _resolve_default_agent() -> str | None:
-    """Id of the default agent to resume: the saved one, else the newest by name."""
-    if os.path.exists(AGENT_ID_FILE):
-        with open(AGENT_ID_FILE) as f:
-            saved_id = f.read().strip()
-        if saved_id:
-            try:
-                return client.agents.retrieve(agent_id=saved_id).id
-            except Exception as e:
-                logger.info(f"Saved agent {saved_id} not usable: {e}")
-
-    # agents.list is newest-first; exact name match skips per-session agents,
-    # which are named gis-agent-<timestamp>
+def _preload_geo_stack():
+    """Pay the geo-stack import cost at boot instead of on the first tool call."""
     try:
-        for agent in client.agents.list(name=DEFAULT_AGENT_NAME, limit=1):
-            if agent.name == DEFAULT_AGENT_NAME:
-                logger.info(f"Reusing existing agent by name: {agent.id}")
-                return agent.id
-    except Exception as e:
-        logger.warning(f"Could not look up agent by name: {e}")
-    return None
+        import geopandas
+        import rasterio
 
-
-def _prewarm_tool_sandbox():
-    """Pay the sandbox venv check + geo-stack import cost at boot instead of on
-    the first user tool call (which used to blow the sandbox timeout)."""
-    source = (
-        "def warmup_sandbox():\n"
-        '    """Preload the geo stack so the first real tool call is fast."""\n'
-        "    import geopandas\n"
-        "    import rasterio\n"
-        '    return "warm"\n'
-    )
-    try:
-        resp = httpx.post(
-            f"{LETTA_URL}/v1/tools/run",
-            json={"source_code": source, "args": {}},
-            timeout=600,
+        logger.info(
+            f"Geo stack preloaded: geopandas {geopandas.__version__}, "
+            f"rasterio {rasterio.__version__}"
         )
-        logger.info(f"Sandbox pre-warm finished: {resp.json().get('status')}")
     except Exception as e:
-        logger.warning(f"Sandbox pre-warm failed (first tool call will be slow): {e}")
+        logger.warning(f"Geo stack preload failed (first tool call will be slow): {e}")
 
 
 @app.on_event("startup")
 async def startup():
-    global agent_id
-
-    # Always upsert tools so code changes take effect without resetting the agent
-    tool_names = []
-    for func, schema, helpers in load_external_tools():
-        tool_obj = register_tool(client, func=func, args_schema=schema, helpers=helpers)
-        tool_names.append(tool_obj.name)
-    logger.info(f"Registered {len(tool_names)} tools: {tool_names}")
-
-    # Warm the tool sandbox in the background; health does not wait on it
-    Thread(target=_prewarm_tool_sandbox, daemon=True).start()
-
-    # Resume existing agent if available (tools already updated above)
-    resume_id = _resolve_default_agent()
-    if resume_id:
-        agent_id = resume_id
-        with open(AGENT_ID_FILE, "w") as f:
-            f.write(agent_id)
-        # Always sync persona so server.py changes take effect without resetting the agent
-        try:
-            for block in client.agents.blocks.list(agent_id=agent_id):
-                if getattr(block, "label", None) == "persona":
-                    client.blocks.update(block_id=block.id, value=PERSONA)
-                    logger.info("Persona block updated on existing agent")
-                    break
-        except Exception as e:
-            logger.warning(f"Could not update persona block: {e}")
-
-        # Sync tool list so newly added tools are available without recreating the agent
-        try:
-            existing_tools = client.agents.tools.list(agent_id=agent_id)
-            existing_names = {t.name for t in existing_tools}
-            # Build name→id map from globally registered tools
-            all_tools = client.tools.list()
-            tool_id_map = {t.name: t.id for t in all_tools}
-            for name in tool_names:
-                if name not in existing_names and name in tool_id_map:
-                    client.agents.tools.attach(
-                        tool_id=tool_id_map[name], agent_id=agent_id
-                    )
-                    logger.info(f"Attached new tool to agent: {name}")
-        except Exception as e:
-            logger.warning(f"Could not sync agent tools: {e}")
-
-        logger.info(f"Resumed existing agent: {agent_id}")
-        return
-
-    shared_block = client.blocks.create(
-        label="gis_workflow",
-        description="Shared data for GIS tasks (e.g., dataset paths, results).",
-        value="No datasets yet.",
-    )
-
-    agent = client.agents.create(
-        name=DEFAULT_AGENT_NAME,
-        llm_config={
-            "model": "grok-4-1-fast-reasoning",
-            "model_endpoint_type": "openai",
-            "model_endpoint": "https://api.x.ai/v1",
-            "context_window": 131072,
-        },
-        embedding_config={
-            "embedding_provider": "vllm",
-            "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
-            "embedding_endpoint_type": "openai",
-            "embedding_endpoint": os.environ.get("VLLM_API_BASE", "http://localhost:8000"),
-            "embedding_dim": 384,
-        },
-        memory_blocks=[
-            {"label": "persona", "value": PERSONA},
-            {
-                "label": "human",
-                "value": "User needs geospatial analysis with GeoPandas and QGIS.",
-            },
-        ],
-        block_ids=[shared_block.id],
-        tools=tool_names,
-    )
-
-    agent_id = agent.id
-    with open(AGENT_ID_FILE, "w") as f:
-        f.write(agent_id)
-    logger.info(f"Created agent: {agent_id}")
+    Thread(target=_preload_geo_stack, daemon=True).start()
 
 
-
-class ChatRequest(BaseModel):
-    message: str
-
-
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    if not agent_id:
-        raise HTTPException(status_code=503, detail="Agent not initialized")
+async def sibyl_request(method: str, path: str, **kwargs) -> httpx.Response:
+    """Call sibyl, turning an unreachable service into a 503."""
     try:
-        response = client.agents.messages.create(
-            agent_id=agent_id,
-            messages=[{"role": "user", "content": request.message}],
-        )
-        text, ui_spec, viewer_commands = extract_text_and_ui_spec(response)
-        return {"text": text, "ui_spec": ui_spec, "viewer_commands": viewer_commands}
+        async with httpx.AsyncClient(
+            base_url=SIBYL_URL, timeout=SIBYL_TIMEOUT
+        ) as client:
+            return await client.request(method, path, **kwargs)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail=f"Agent service unreachable: {e}")
+
+
+async def notify_agent(text: str) -> None:
+    """Append a message to sibyl's active session without running the model."""
+    try:
+        async with httpx.AsyncClient(
+            base_url=SIBYL_URL, timeout=SIBYL_TIMEOUT
+        ) as client:
+            sessions = (await client.get("/sessions")).json()
+            session = next((s for s in sessions if s.get("active")), None)
+            if session is None:
+                session = (
+                    await client.post("/sessions", json={"name": "Default"})
+                ).json()
+            await client.post(
+                f"/sessions/{session['id']}/messages", json={"content": text}
+            )
     except Exception as e:
-        logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning(f"Could not notify agent: {e}")
+
+
+@app.get("/tools")
+def list_tools():
+    """Tool manifest for sibyl: what it can call and with which arguments."""
+    tools = []
+    for func, schema in load_external_tools():
+        if schema is None:
+            logger.warning(f"Tool {func.__name__} has no TOOL_SCHEMA, skipping")
+            continue
+        tools.append(
+            {
+                "name": func.__name__,
+                "description": inspect.getdoc(func) or "",
+                "parameters": schema.model_json_schema(),
+            }
+        )
+    return {"tools": tools}
+
+
+class ToolCallRequest(BaseModel):
+    args: dict = {}
+
+
+# sync so FastAPI runs it in the threadpool: tools block for minutes
+@app.post("/tools/{name}")
+def run_tool(name: str, request: ToolCallRequest):
+    """Execute a tool in-process and return its string result."""
+    # schema-less modules are not in the manifest either, so they are unknown here
+    entry = next(
+        (t for t in load_external_tools() if t[0].__name__ == name and t[1]), None
+    )
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: {name}")
+    func, schema = entry
+
+    try:
+        args = schema(**request.args).model_dump(exclude_unset=True)
+    except ValidationError as e:
+        return {"result": f"❌ Invalid arguments: {e}"}
+
+    try:
+        return {"result": func(**args)}
+    except Exception as e:
+        logger.exception(f"Tool {name} failed")
+        return {"result": f"❌ Tool execution failed: {e}"}
 
 
 async def agent_event_stream(message: str):
-    """Run the Letta agent stream and yield normalized (kind, payload) events.
+    """Run a sibyl agent run and yield normalized (kind, payload) events.
 
     Single source of truth for the marker parsing. kinds:
     "text", "progress", "viewer_cmd", "ui_spec", "error", "keepalive".
@@ -235,13 +166,19 @@ async def agent_event_stream(message: str):
     q: asyncio.Queue = asyncio.Queue()
 
     def run_in_thread():
+        # no read timeout: a tool call can keep the stream silent for minutes
+        timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
         try:
-            stream = client.agents.messages.stream(
-                agent_id=agent_id,
-                messages=[{"role": "user", "content": message}],
-            )
-            for event in stream:
-                loop.call_soon_threadsafe(q.put_nowait, event)
+            with httpx.Client(timeout=timeout) as client:
+                with client.stream(
+                    "POST",
+                    f"{SIBYL_URL}/runs",
+                    json={"system_prompt": PERSONA, "message": message},
+                ) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if line.strip():
+                            loop.call_soon_threadsafe(q.put_nowait, json.loads(line))
         except Exception as e:
             loop.call_soon_threadsafe(q.put_nowait, {"__error__": str(e)})
         finally:
@@ -263,59 +200,58 @@ async def agent_event_stream(message: str):
         if event is None:
             break
 
-        if isinstance(event, dict) and "__error__" in event:
+        if "__error__" in event:
             yield ("error", event["__error__"])
             break
 
-        msg_type = str(getattr(event, "message_type", "") or "")
-        content = str(getattr(event, "content", "") or "")
-        tool_call = getattr(event, "tool_call", None)
-        tool_return = str(getattr(event, "tool_return", "") or "")
+        kind = event.get("kind")
 
-        # Debug: log every tool call and return
-        if tool_call and msg_type in TOOL_MESSAGE_TYPES:
-            tool_name = str(getattr(tool_call, "name", "") or "")
-            tool_args = str(getattr(tool_call, "arguments", "") or "")
+        if kind == "tool_call":
+            tool_name = str(event.get("name", "") or "")
+            tool_args = str(event.get("args", "") or "")
             logger.info(f"TOOL CALL: {tool_name}({tool_args[:200]})")
-        if tool_return and tool_return.strip():
-            logger.info(f"TOOL RETURN: {tool_return[:300]}")
-            # Surface tool errors as progress events so the user sees them
-            if tool_return.startswith("❌") or tool_return.startswith("ERROR"):
-                short = tool_return[:200].split("\n")[0]
-                yield ("progress", short)
-
-        all_content.extend([content, tool_return])
-
-        # Real-time tool progress
-        if tool_call and msg_type in TOOL_MESSAGE_TYPES:
-            tool_name = str(getattr(tool_call, "name", "") or "")
-            tool_args = str(getattr(tool_call, "arguments", "") or "")
             yield ("progress", get_progress_text(tool_name, tool_args))
+            continue
 
-        # UI spec from emit_ui_spec tool — check both content and tool_return
-        if ui_spec is None:
-            for candidate in (tool_return, content):
-                if "__UI_SPEC__:" in candidate:
-                    try:
-                        ui_spec = json.loads(candidate.split("__UI_SPEC__:", 1)[1])
-                        break
-                    except Exception:
-                        pass
+        if kind in ("text", "tool_return"):
+            content = str(event.get("content", "") or "")
 
-        # Viewer commands from viewer_control tool
-        for candidate in (tool_return, content):
-            if "__VIEWER_CMD__:" in candidate:
-                for part in candidate.split("__VIEWER_CMD__:")[1:]:
+            if kind == "tool_return":
+                logger.info(f"TOOL RETURN: {event.get('name')} {content[:300]}")
+                # Surface tool errors as progress events so the user sees them
+                if content.startswith("❌") or content.startswith("ERROR"):
+                    yield ("progress", content[:200].split("\n")[0])
+            else:
+                assistant_texts.append(content)
+
+            all_content.append(content)
+
+            # UI spec from the emit_ui_spec tool
+            if ui_spec is None and "__UI_SPEC__:" in content:
+                try:
+                    ui_spec = json.loads(content.split("__UI_SPEC__:", 1)[1])
+                except Exception:
+                    pass
+
+            # Viewer commands from the viewer_control tool
+            if "__VIEWER_CMD__:" in content:
+                for part in content.split("__VIEWER_CMD__:")[1:]:
                     try:
                         cmd = json.loads(part.split("\n")[0].strip())
                         yield ("viewer_cmd", cmd)
                     except Exception:
                         pass
 
-        # Assistant text
-        if msg_type in ("assistant_message", "assistant") and content:
-            assistant_texts.append(content)
-            yield ("text", content)
+            if kind == "text":
+                yield ("text", content)
+            continue
+
+        if kind == "error":
+            yield ("error", event.get("message", ""))
+            break
+
+        if kind == "done":
+            break
 
     if ui_spec is None:
         import re as _re
@@ -414,9 +350,6 @@ async def agui_stream(events, thread_id: str, run_id: str, accept: str | None = 
 @app.post("/chat/agui")
 async def chat_agui(input: RunAgentInput, request: Request):
     """AG-UI event endpoint: the agent pipeline rendered as AG-UI SSE."""
-    if not agent_id:
-        raise HTTPException(status_code=503, detail="Agent not initialized")
-
     user_messages = [m for m in input.messages if getattr(m, "role", None) == "user"]
     if not user_messages:
         raise HTTPException(status_code=400, detail="No user message in input")
@@ -607,20 +540,12 @@ async def upload_dataset(file: UploadFile = File(...)):
     save_catalogue(catalogue)
 
     # Notify the agent about the new dataset
-    if agent_id:
-        col_preview = ", ".join(cols[:10]) + ("..." if len(cols) > 10 else "")
-        summary = (
-            f"[Dataset uploaded] '{stem}': {metadata['geometry_type']}, "
-            f"{metadata['row_count']} features, CRS: EPSG:4326, columns: {col_preview}. "
-            f"File path for tools: {metadata['relative_path']}"
-        )
-        try:
-            client.agents.messages.create(
-                agent_id=agent_id,
-                messages=[{"role": "user", "content": summary}],
-            )
-        except Exception as e:
-            logger.warning(f"Could not notify agent of upload: {e}")
+    col_preview = ", ".join(cols[:10]) + ("..." if len(cols) > 10 else "")
+    await notify_agent(
+        f"[Dataset uploaded] '{stem}': {metadata['geometry_type']}, "
+        f"{metadata['row_count']} features, CRS: EPSG:4326, columns: {col_preview}. "
+        f"File path for tools: {metadata['relative_path']}"
+    )
 
     return metadata
 
@@ -769,7 +694,7 @@ async def get_stats(filename: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "agent_id": agent_id}
+    return {"status": "ok"}
 
 
 class DrawRequest(BaseModel):
@@ -824,22 +749,14 @@ async def save_drawn_area(request: DrawRequest):
     save_catalogue(catalogue)
 
     # Notify the agent about the drawn area
-    if agent_id:
-        bounds = gdf.total_bounds
-        center_lon = round(float((bounds[0] + bounds[2]) / 2), 4)
-        center_lat = round(float((bounds[1] + bounds[3]) / 2), 4)
-        summary = (
-            f"[User drew a shape on the map] '{safe_name}': {metadata['geometry_type']}, "
-            f"center lon={center_lon}, lat={center_lat}. "
-            f"File path for tools: {relative_path}"
-        )
-        try:
-            client.agents.messages.create(
-                agent_id=agent_id,
-                messages=[{"role": "user", "content": summary}],
-            )
-        except Exception as e:
-            logger.warning(f"Could not notify agent of drawn area: {e}")
+    bounds = gdf.total_bounds
+    center_lon = round(float((bounds[0] + bounds[2]) / 2), 4)
+    center_lat = round(float((bounds[1] + bounds[3]) / 2), 4)
+    await notify_agent(
+        f"[User drew a shape on the map] '{safe_name}': {metadata['geometry_type']}, "
+        f"center lon={center_lon}, lat={center_lat}. "
+        f"File path for tools: {relative_path}"
+    )
 
     return metadata
 
@@ -948,22 +865,7 @@ async def export_png(request: ExportPNGRequest):
         raise HTTPException(status_code=500, detail=f"PNG export failed: {e}")
 
 
-# ── Session management ────────────────────────────
-
-
-
-def _ensure_current_session():
-    """Make sure the current agent_id is tracked in sessions."""
-    global agent_id
-    if not agent_id:
-        return
-    sessions = load_sessions()
-    if agent_id not in sessions:
-        sessions[agent_id] = {
-            "name": "Default",
-            "created_at": datetime.now().isoformat(),
-        }
-        save_sessions(sessions)
+# ── Session management (proxied to sibyl) ────────────────────────────
 
 
 class RenameSessionRequest(BaseModel):
@@ -974,168 +876,59 @@ class SwitchSessionRequest(BaseModel):
     session_id: str
 
 
-def _prune_dead_sessions(sessions: dict) -> dict:
-    """Drop sessions whose Letta agent is gone, e.g. after a pgdata wipe.
-
-    Only a 404 counts as dead: a letta outage must not erase the file.
-    """
-    live = {}
-    for sid, info in sessions.items():
-        try:
-            client.agents.retrieve(agent_id=sid)
-        except NotFoundError:
-            logger.info(f"pruning session {sid}: agent no longer exists")
-            continue
-        live[sid] = info
-    if len(live) != len(sessions):
-        save_sessions(live)
-    return live
-
-
 @app.get("/sessions")
 async def list_sessions():
-    _ensure_current_session()
-    sessions = _prune_dead_sessions(load_sessions())
-    result = []
-    for sid, info in sessions.items():
-        result.append(
-            {
-                "id": sid,
-                "name": info.get("name", "Unnamed"),
-                "created_at": info.get("created_at", ""),
-                "active": sid == agent_id,
-            }
-        )
-    result.sort(key=lambda s: s["created_at"], reverse=True)
-    return result
+    response = await sibyl_request("GET", "/sessions")
+    return response.json()
 
 
 @app.post("/sessions/new")
 async def create_session():
-    """Create a new session (new Letta agent) and switch to it."""
-    global agent_id
-
-    sessions = load_sessions()
-
-    # Create a new agent with the same config
-    shared_block = client.blocks.create(
-        label="gis_workflow",
-        description="Shared data for GIS tasks (e.g., dataset paths, results).",
-        value="No datasets yet.",
-    )
-
-    tool_names = []
-    for func, schema, helpers in load_external_tools():
-        tool_obj = register_tool(client, func=func, args_schema=schema, helpers=helpers)
-        tool_names.append(tool_obj.name)
-
-    agent = client.agents.create(
-        name=f"gis-agent-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
-        llm_config={
-            "model": "grok-4-1-fast-reasoning",
-            "model_endpoint_type": "openai",
-            "model_endpoint": "https://api.x.ai/v1",
-            "context_window": 131072,
-        },
-        embedding_config={
-            "embedding_provider": "vllm",
-            "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
-            "embedding_endpoint_type": "openai",
-            "embedding_endpoint": os.environ.get("VLLM_API_BASE", "http://localhost:8000"),
-            "embedding_dim": 384,
-        },
-        memory_blocks=[
-            {"label": "persona", "value": PERSONA},
-            {
-                "label": "human",
-                "value": "User needs geospatial analysis with GeoPandas and QGIS.",
-            },
-        ],
-        block_ids=[shared_block.id],
-        tools=tool_names,
-    )
-
-    new_id = agent.id
-    sessions[new_id] = {
-        "name": f"Session {len(sessions) + 1}",
-        "created_at": datetime.now().isoformat(),
-    }
-    save_sessions(sessions)
-
-    agent_id = new_id
-    with open(AGENT_ID_FILE, "w") as f:
-        f.write(agent_id)
-
-    return {"id": new_id, "name": sessions[new_id]["name"]}
+    """Create a new session and make it the active one."""
+    existing = (await sibyl_request("GET", "/sessions")).json()
+    name = f"Session {len(existing) + 1}"
+    created = (await sibyl_request("POST", "/sessions", json={"name": name})).json()
+    return {"id": created["id"], "name": created["name"]}
 
 
 @app.post("/sessions/switch")
 async def switch_session(request: SwitchSessionRequest):
     """Switch to an existing session."""
-    global agent_id
-    sessions = load_sessions()
-    if request.session_id not in sessions:
+    response = await sibyl_request(
+        "POST", f"/sessions/{request.session_id}/activate"
+    )
+    if response.status_code == 404:
         raise HTTPException(status_code=404, detail="Session not found")
-
-    try:
-        client.agents.retrieve(agent_id=request.session_id)
-    except NotFoundError:
-        del sessions[request.session_id]
-        save_sessions(sessions)
-        raise HTTPException(status_code=404, detail="Agent no longer exists")
-
-    agent_id = request.session_id
-    with open(AGENT_ID_FILE, "w") as f:
-        f.write(agent_id)
-
-    return {"id": agent_id, "name": sessions[agent_id].get("name", "Unnamed")}
+    return response.json()
 
 
 @app.put("/sessions/{session_id}/rename")
 async def rename_session(session_id: str, request: RenameSessionRequest):
-    sessions = load_sessions()
-    if session_id not in sessions:
+    response = await sibyl_request(
+        "PATCH", f"/sessions/{session_id}", json={"name": request.name}
+    )
+    if response.status_code == 404:
         raise HTTPException(status_code=404, detail="Session not found")
-    sessions[session_id]["name"] = request.name
-    save_sessions(sessions)
     return {"id": session_id, "name": request.name}
 
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a session and its Letta agent."""
-    global agent_id
-    if session_id == agent_id:
+    response = await sibyl_request("DELETE", f"/sessions/{session_id}")
+    if response.status_code == 400:
         raise HTTPException(
             status_code=400,
             detail="Cannot delete the active session. Switch to another first.",
         )
-
-    sessions = load_sessions()
-    if session_id not in sessions:
+    if response.status_code == 404:
         raise HTTPException(status_code=404, detail="Session not found")
-
-    # Delete the Letta agent
-    try:
-        client.agents.delete(session_id)
-    except Exception:
-        pass  # Agent may already be gone
-
-    del sessions[session_id]
-    save_sessions(sessions)
-    return {"deleted": session_id}
+    return response.json()
 
 
 @app.get("/debug/tools")
-async def debug_tools():
-    """List tools attached to the current agent — for debugging tool registration."""
-    if not agent_id:
-        return {"error": "No agent"}
-    try:
-        tools = client.agents.tools.list(agent_id=agent_id)
-        return {"agent_id": agent_id, "tools": [t.name for t in tools]}
-    except Exception as e:
-        return {"error": str(e)}
+def debug_tools():
+    """Names of the tools geolang serves to sibyl."""
+    return {"tools": [func.__name__ for func, _ in load_external_tools()]}
 
 
 class ShareRequest(BaseModel):

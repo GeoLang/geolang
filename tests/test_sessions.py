@@ -1,77 +1,71 @@
-"""Session listing prunes entries whose Letta agent is gone, e.g. after a pgdata wipe."""
+"""The session endpoints are thin proxies over sibyl, which owns session state."""
 import asyncio
 import json
-from types import SimpleNamespace
 
 import httpx
 import pytest
+import respx
 from fastapi import HTTPException
-from letta_client import NotFoundError
 
 from src.api import server
 
-
-def _not_found():
-    request = httpx.Request("GET", "http://letta/agents/x")
-    return NotFoundError("no such agent", response=httpx.Response(404, request=request), body=None)
-
-
-class _Agents:
-    def __init__(self, known, error=None):
-        self.known = known
-        self.error = error
-
-    def retrieve(self, agent_id):
-        if agent_id not in self.known:
-            raise self.error or _not_found()
-        return SimpleNamespace(id=agent_id)
+SESSIONS = [
+    {"id": "s2", "name": "Session 2", "created_at": "2026-01-02", "active": True},
+    {"id": "s1", "name": "Session 1", "created_at": "2026-01-01", "active": False},
+]
 
 
-def _install(monkeypatch, tmp_path, agents, sessions):
-    sessions_file = tmp_path / ".sessions.json"
-    sessions_file.write_text(json.dumps(sessions))
-    monkeypatch.setattr("src.core.utils.SESSIONS_FILE", str(sessions_file))
-    monkeypatch.setattr(server, "AGENT_ID_FILE", str(tmp_path / ".agent_id"))
-    monkeypatch.setattr(server, "client", SimpleNamespace(agents=agents))
-    monkeypatch.setattr(server, "agent_id", "agent-live")
-    return sessions_file
+def test_list_forwards_sibyls_sessions():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.get("/sessions").respond(200, json=SESSIONS)
+
+        assert asyncio.run(server.list_sessions()) == SESSIONS
 
 
-def _stored(sessions_file):
-    return list(json.loads(sessions_file.read_text()))
+def test_new_names_the_session_after_the_existing_count():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.get("/sessions").respond(200, json=SESSIONS)
+        created = {
+            "id": "s3",
+            "name": "Session 3",
+            "created_at": "2026-01-03",
+            "active": True,
+        }
+        route = sibyl.post("/sessions").respond(200, json=created)
+
+        result = asyncio.run(server.create_session())
+
+    assert result == {"id": "s3", "name": "Session 3"}
+    assert json.loads(route.calls.last.request.content) == {"name": "Session 3"}
 
 
-TWO_SESSIONS = {
-    "agent-live": {"name": "Live", "created_at": "2026-01-02"},
-    "agent-gone": {"name": "Gone", "created_at": "2026-01-01"},
-}
+def test_delete_of_the_active_session_stays_a_400():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.delete("/sessions/s2").respond(400, json={"detail": "session is active"})
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(server.delete_session("s2"))
+
+    assert exc.value.status_code == 400
+    assert "Cannot delete the active session" in exc.value.detail
 
 
-def test_list_prunes_dead_sessions(monkeypatch, tmp_path):
-    sessions_file = _install(monkeypatch, tmp_path, _Agents(known={"agent-live"}), TWO_SESSIONS)
+def test_switch_to_an_unknown_session_is_a_404():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.post("/sessions/gone/activate").respond(404)
 
-    result = asyncio.run(server.list_sessions())
-
-    assert [s["id"] for s in result] == ["agent-live"]
-    assert _stored(sessions_file) == ["agent-live"]
-
-
-def test_list_keeps_sessions_when_letta_is_down(monkeypatch, tmp_path):
-    agents = _Agents(known=set(), error=RuntimeError("connection refused"))
-    sessions_file = _install(monkeypatch, tmp_path, agents, TWO_SESSIONS)
-
-    with pytest.raises(RuntimeError):
-        asyncio.run(server.list_sessions())
-
-    assert _stored(sessions_file) == ["agent-live", "agent-gone"]
-
-
-def test_switch_to_dead_session_404s_and_prunes(monkeypatch, tmp_path):
-    sessions_file = _install(monkeypatch, tmp_path, _Agents(known={"agent-live"}), TWO_SESSIONS)
-
-    with pytest.raises(HTTPException) as exc:
-        asyncio.run(server.switch_session(server.SwitchSessionRequest(session_id="agent-gone")))
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(server.switch_session(server.SwitchSessionRequest(session_id="gone")))
 
     assert exc.value.status_code == 404
-    assert _stored(sessions_file) == ["agent-live"]
-    assert server.agent_id == "agent-live"
+
+
+def test_sibyl_being_down_is_a_503():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.get("/sessions").mock(side_effect=httpx.ConnectError("refused"))
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(server.list_sessions())
+
+    assert exc.value.status_code == 503
+    assert "unreachable" in exc.value.detail

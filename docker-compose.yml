@@ -1,23 +1,32 @@
 services:
-  letta-gis:
-    image: letta-gis:latest
+  geolang:
+    image: geolang:latest
+    build: .
     volumes:
       # Use a relative path so the mount tracks wherever this compose file lives —
       # avoids the previous case-mismatch (`~/src/geolang` vs `~/src/GeoLang/geolang`)
       # which caused docker to auto-create an empty stub directory and mount that.
       - .:/app/geolang:z
-      - ${HOME}/.letta/.persist/pgdata:/var/lib/postgresql/data:z
     environment:
       TOOL_EXEC_DIR: "/app/geolang"
-      TOOL_EXEC_VENV_NAME: "env"
-      # long analysis tools can exceed letta's 180s default sandbox timeout
-      TOOL_SANDBOX_TIMEOUT: "420"
-      XAI_API_KEY: "${XAI_API_KEY}"
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      VLLM_API_BASE: "http://localhost:8000"
+      SIBYL_URL: "http://sibyl:8090"
       QT_QPA_PLATFORM: "offscreen"
       QGIS_PREFIX_PATH: "/usr"
-      PYTHONPATH: "/usr/lib/python3/dist-packages:/usr/lib/qgis/python:${PYTHONPATH}"
-      LD_LIBRARY_PATH: "/usr/lib/qgis:${LD_LIBRARY_PATH}"
+      PYTHONPATH: "/usr/lib/python3/dist-packages:/usr/lib/qgis/python"
+      LD_LIBRARY_PATH: "/usr/lib/qgis"
     ports:
-      - "8283:8283"
+      - "8080:8080"
+
+  sibyl:
+    build: ../sibyl
+    environment:
+      XAI_API_KEY: "${XAI_API_KEY}"
+      GEOLANG_URL: "http://geolang:8080"
+      SIBYL_DB_PATH: "/data/sibyl.db"
+    volumes:
+      - sibyl-data:/data
+    ports:
+      - "8090:8090"
+
+volumes:
+  sibyl-data:

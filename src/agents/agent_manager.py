@@ -1,14 +1,11 @@
-"""Tool discovery, Letta tool registration, and the persona prompt."""
+"""Tool discovery and the persona prompt sent to the agent service."""
 from __future__ import annotations
 
 import importlib
-import inspect
 import logging
 import pkgutil
 import sys
-import textwrap
 from pathlib import Path
-from time import sleep
 
 logger = logging.getLogger(__name__)
 
@@ -200,9 +197,9 @@ PERSONA = (
 def load_external_tools():
     """Load tool modules, force-reloading from disk every time so edits take effect.
 
-    Each tool module under ``src/agents/tools/`` should expose ``TOOL_FUNCTION`` and
-    optionally ``TOOL_SCHEMA`` (a pydantic model) and ``TOOL_HELPERS`` (a list of
-    helper functions whose source is appended to the tool's source code).
+    Each tool module under ``src/agents/tools/`` exposes ``TOOL_FUNCTION`` and
+    ``TOOL_SCHEMA`` (a pydantic model describing its arguments). Returns a list of
+    ``(function, schema)`` pairs.
     """
     tools = []
     try:
@@ -224,59 +221,9 @@ def load_external_tools():
                 if hasattr(module, "TOOL_FUNCTION"):
                     func = module.TOOL_FUNCTION
                     schema = getattr(module, "TOOL_SCHEMA", None)
-                    helpers = getattr(module, "TOOL_HELPERS", None)
-                    tools.append((func, schema, helpers))
+                    tools.append((func, schema))
             except Exception as e:
                 logger.warning(f"Could not load tool {module_info.name}: {e}")
     except Exception as e:
         logger.warning(f"Could not load external tools: {e}")
     return tools
-
-
-def register_tool(client, func, args_schema=None, helpers=None, max_retries=3):
-    """Upsert ``func`` as a Letta tool. Concatenates helper source so the tool's
-    sandbox sees them in scope. Retries up to ``max_retries`` times on failure."""
-    for attempt in range(max_retries):
-        try:
-            if helpers:
-                parts = [textwrap.dedent(inspect.getsource(h)) for h in helpers]
-                parts.append(textwrap.dedent(inspect.getsource(func)))
-                source_code = "\n\n".join(parts)
-                args_json_schema = (
-                    args_schema.model_json_schema() if args_schema else None
-                )
-                tool_name = func.__name__
-                existing = next(iter(client.tools.list(name=tool_name)), None)
-                if existing:
-                    tool_obj = client.tools.update(
-                        existing.id,
-                        source_code=source_code,
-                        **(
-                            {"args_json_schema": args_json_schema}
-                            if args_json_schema
-                            else {}
-                        ),
-                    )
-                else:
-                    tool_obj = client.tools.upsert(
-                        source_code=source_code,
-                        **(
-                            {"args_json_schema": args_json_schema}
-                            if args_json_schema
-                            else {}
-                        ),
-                    )
-            elif args_schema:
-                tool_obj = client.tools.upsert_from_function(
-                    func=func, args_schema=args_schema
-                )
-            else:
-                tool_obj = client.tools.upsert_from_function(func=func)
-            logger.info(f"Registered tool: {tool_obj.name}")
-            return tool_obj
-        except Exception as e:
-            logger.error(f"Tool registration attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                sleep(2)
-            else:
-                raise

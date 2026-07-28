@@ -1,6 +1,6 @@
 # GeoLang
 
-**AI-powered geospatial agent** — natural language interface to GIS operations, powered by [Letta](https://github.com/letta-ai/letta).
+**AI-powered geospatial agent**: a natural language interface to GIS operations. The agent loop runs in [sibyl](../sibyl), a separate Rust service. GeoLang owns the tools, the persona, and the viewer protocol.
 
 [![CI](https://github.com/GeoLang/geolang/actions/workflows/ci.yml/badge.svg)](https://github.com/GeoLang/geolang/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
@@ -11,8 +11,8 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- Letta-based agent with persistent memory
-- Embedding server support (vLLM + sentence-transformers)
+- 36 geospatial tools served to sibyl over HTTP and executed in-process
+- AG-UI event stream for ViewTopia
 
 ---
 
@@ -34,40 +34,26 @@ export XAI_API_KEY="your-xai-key-here"
 # OPENAI_API_KEY may also be set if you use an OpenAI-compatible endpoint.
 ```
 
-### Run the Letta backend
+### Run both services
 
 ```bash
-# Build the geolang image (pinned to a known-good Letta base — see Dockerfile).
-docker build -t letta-gis:latest .
-
-# Start as a service (NOT `run --rm`, which is one-shot and exits).
-docker compose up -d
+docker compose up -d --build
 
 # Watch startup
-docker compose logs -f letta-gis
+docker compose logs -f geolang
 ```
 
-First-time startup will:
+That starts geolang on `8080` (FastAPI, tools, QGIS) and sibyl on `8090` (agent
+loop, sessions, history). sibyl fetches the tool manifest from
+`http://geolang:8080/tools` and calls back into `/tools/{name}` to run one.
+Sessions live in sibyl's SQLite database on the `sibyl-data` volume.
 
-1. Run `docker-entrypoint.sh` which populates the Letta tool-exec venv at
-   `./env/` from `requirements.txt` (writes a `.populated` marker; subsequent
-   restarts skip this step).
-2. Chain to the base Letta entrypoint which starts internal Postgres + Redis +
-   the Letta server on port `8283`.
-
-Letta is ready when you see `Uvicorn running on http://0.0.0.0:8283` in the
-logs. The data dir is bind-mounted from `~/.letta/.persist/pgdata` — if you
-ever change the pinned Letta version and hit an Alembic migration error, the
-remedy is to wipe `~/.letta/.persist/pgdata` (and `.agent_id` / `.sessions.json`
-in this repo) and start fresh.
-
-### Run the GeoLang API server
+### Run the API server on the host
 
 ```bash
-# Optional: client deps for the embedding server / dev tooling
 pip install -r requirements_client.txt
 
-# Start the FastAPI app on the host (talks to the Letta container).
+# sibyl must be reachable. SIBYL_URL defaults to http://localhost:8090
 python -m uvicorn src.api.server:app --reload --port 8080
 # → http://localhost:8080/
 ```
@@ -76,21 +62,11 @@ python -m uvicorn src.api.server:app --reload --port 8080
 no env var is needed in dev. Override it via the `TOOL_EXEC_DIR` env var if you
 want outputs elsewhere.
 
-### Embedding server (optional, for memory recall)
-
-```bash
-python3.12 -m venv ~/vllmenv
-source ~/vllmenv/bin/activate
-pip install -r requirements_vllm.txt
-python -m vllm.entrypoints.openai.api_server \
-  --model sentence-transformers/all-MiniLM-L6-v2 --port 8000
-```
-
 ---
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — process topology, SSE event vocabulary, tool registration flow
+- [`docs/architecture.md`](docs/architecture.md) — process topology, SSE event vocabulary, tool manifest flow
 - [`docs/api_reference.md`](docs/api_reference.md) — all HTTP endpoints and the tool catalogue
 - [`docs/viewer_integration.md`](docs/viewer_integration.md) — `viewer_cmd` protocol for ViewTopia (including `sql_query` for in-browser DuckDB)
 - [`docs/DESIGN.md`](docs/DESIGN.md) — open improvements, known sharp edges, decision log
@@ -98,7 +74,7 @@ python -m vllm.entrypoints.openai.api_server \
 ## Platform Integration
 
 When running as part of the full GeoLang platform (via `viewtopia/docker-compose.platform.yml`),
-GeoLang runs on port **8283** internally and is exposed on port **8080** externally.
+GeoLang serves the API on port **8080** and sibyl runs alongside it on **8090**.
 
 ---
 

@@ -1,3 +1,10 @@
+from pydantic import BaseModel
+
+
+class CheckQgisStatusArgs(BaseModel):
+    pass  # no arguments needed
+
+
 def check_qgis_status() -> str:
     """Diagnostic tool — run this FIRST."""
     import os
@@ -47,3 +54,4 @@ def check_qgis_status() -> str:
 
 # Required for auto-registration
 TOOL_FUNCTION = check_qgis_status
+TOOL_SCHEMA = CheckQgisStatusArgs

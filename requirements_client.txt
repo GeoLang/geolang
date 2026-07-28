@@ -1,7 +1,7 @@
-letta_client==1.7.12  # pinned pre-Letta-Code pivot
 geopandas
 fastapi
 uvicorn[standard]
 python-multipart
 playwright
+httpx
 ag-ui-protocol==0.1.19
