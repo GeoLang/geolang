@@ -31,8 +31,8 @@ def get_admin_boundary(
 ) -> str:
     """
     Fetch the administrative boundary polygon for a place (country, region, city, district)
-    from OpenStreetMap. Returns a polygon GPKG that can be used as a clip mask, choropleth
-    boundary, or analysis area.
+    from OpenStreetMap. Returns a polygon GPKG that can be used as a clip mask or
+    analysis area.
 
     Use this when the user asks to:
     - 'Show me the boundary of Leicester / Greater London / Bavaria'

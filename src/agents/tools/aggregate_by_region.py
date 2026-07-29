@@ -65,9 +65,9 @@ def aggregate_by_region(
     - 'Number of schools in each catchment zone'
     - 'Sum of crime incidents by neighbourhood'
 
-    Returns a polygon GPKG with aggregated values per region, ready for choropleth.
-    Call emit_ui_spec after with ui_type='map' to visualise — then use the choropleth
-    dropdown in the layer panel to colour by the aggregated column.
+    Returns a polygon GPKG with aggregated values per region. Call emit_ui_spec
+    after with ui_type='map' to draw it. The aggregated column is an attribute on
+    each region, which the Feature Picker panel shows on click.
     """
     import os
     import traceback
@@ -282,7 +282,7 @@ def aggregate_by_region(
             f"{agg_func.capitalize()} of features per region: {n_matched}/{n_regions} regions have data, "
             f"{total} total features matched.{agg_col_note}{top_note} "
             f"Saved to outputs/{output_filename}.gpkg. "
-            f"Use choropleth on 'feature_count' to visualise."
+            f"Each region carries 'feature_count' as an attribute."
         )
 
     except Exception as e:

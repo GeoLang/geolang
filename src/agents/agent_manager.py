@@ -136,13 +136,15 @@ PERSONA = (
     "'average Y by administrative unit', or wants a choropleth of aggregated values, use aggregate_by_region. "
     "Pass the administrative/polygon layer as regions_path and the data layer as features_path. "
     "Set agg_columns to the numeric column to aggregate; omit it for feature counts. "
-    "After aggregate_by_region, always call emit_ui_spec with ui_type='map' and mention choropleth. "
+    "After aggregate_by_region, always call emit_ui_spec with ui_type='map' and name "
+    "the aggregated column, which the user can read per feature. "
     # Service gap
     "IMPORTANT: When the user asks 'where has no access to X', 'find underserved areas', "
     "'show service gaps for hospitals/schools/parks', or 'which parts of the city lack Y', "
     "use service_gap. Pass a place name and either a file path or an OSM keyword (e.g. 'hospitals', 'schools') "
     "as service_path. Set service_radius_km to the user's catchment distance. "
-    "After service_gap, always call emit_ui_spec with choropleth on 'gap_score'. "
+    "After service_gap, always call emit_ui_spec with ui_type='map' and say which "
+    "cells are gaps, citing 'gap_score'. "
     # Clustering
     "IMPORTANT: When the user asks to 'cluster', 'find groups', 'identify hotspots', or 'segment' a point layer, "
     "use cluster_points. Use method='dbscan' for irregular clusters or noise detection, "

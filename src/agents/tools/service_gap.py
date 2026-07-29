@@ -80,7 +80,7 @@ def service_gap(
     - 'Find underserved areas for pharmacies in central London'
     - 'Which parts of the city lack park access within 500m?'
 
-    Returns a polygon GPKG with service gap classification ready for choropleth.
+    Returns a polygon GPKG with service gap classification per cell.
     Call emit_ui_spec after with ui_type='map'.
     """
     import os
@@ -375,7 +375,7 @@ def service_gap(
             f"Underserved: {n_under} ({pct_under}%), "
             f"Gap: {n_gap} ({pct_gap}%).{pop_note} "
             f"Saved to outputs/{output_filename}.gpkg. "
-            f"Use choropleth on 'gap_score' or 'gap_class' to visualise (0=served, 1=underserved, 2=gap)."
+            f"Each cell carries 'gap_score' and 'gap_class' (0=served, 1=underserved, 2=gap)."
         )
 
     except Exception as e:

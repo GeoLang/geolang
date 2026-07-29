@@ -220,7 +220,7 @@ def cluster_points(
             f"{method.upper()} clustering complete: {n_clusters_found} clusters found "
             f"from {n_total} points.{noise_note}{top_note}{hull_note} "
             f"Points saved to outputs/{output_filename}.gpkg. "
-            f"Colour points by 'cluster_id' using choropleth to visualise."
+            f"Each point carries its 'cluster_id' as an attribute."
         )
 
     except ImportError:
