@@ -1,0 +1,13 @@
+id = "centroids-to-csv"
+prompt = "Using a workflow, reduce each parcel polygon in outputs/eval_parcels.gpkg to its centre point and give me the result as a CSV at outputs/eval_parcel_centres.csv."
+inputs = ["outputs/eval_parcels.gpkg"]
+notes = "Parameterless transform, and the csv sink. 'centre point' must map to centroid."
+
+[[expect.source]]
+format = "geopackage"
+
+[[expect.transform]]
+operation = "centroid"
+
+[[expect.sink]]
+format = "csv"

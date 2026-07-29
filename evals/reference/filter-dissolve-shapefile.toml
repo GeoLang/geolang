@@ -1,0 +1,26 @@
+[project]
+name = "north-region"
+
+[[source]]
+name = "districts"
+format = "gpkg"
+path = "outputs/eval_districts.gpkg"
+
+[[transform]]
+name = "north"
+input = "districts"
+operation = "filter"
+field = "region"
+equals = "North"
+
+[[transform]]
+name = "merged"
+input = "north"
+operation = "dissolve"
+group_by = "region"
+
+[[sink]]
+name = "out"
+input = "merged"
+format = "shp"
+path = "outputs/eval_north_region.shp"

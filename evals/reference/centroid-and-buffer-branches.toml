@@ -1,0 +1,30 @@
+[project]
+name = "depot-views"
+
+[[source]]
+name = "depots"
+format = "geojson"
+path = "outputs/eval_depots.geojson"
+
+[[transform]]
+name = "centres"
+input = "depots"
+operation = "centroid"
+
+[[transform]]
+name = "reach"
+input = "depots"
+operation = "buffer"
+distance = 1000.0
+
+[[sink]]
+name = "centres_out"
+input = "centres"
+format = "gpkg"
+path = "outputs/eval_depot_centres.gpkg"
+
+[[sink]]
+name = "reach_out"
+input = "reach"
+format = "gpkg"
+path = "outputs/eval_depot_reach.gpkg"

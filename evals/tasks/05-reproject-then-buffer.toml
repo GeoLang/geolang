@@ -1,0 +1,20 @@
+id = "reproject-then-buffer"
+prompt = "Using a workflow, reproject outputs/eval_stations.geojson from EPSG:4326 to EPSG:3857 and then buffer the result by 250 metres, saving a GeoPackage at outputs/eval_station_buffers.gpkg."
+inputs = ["outputs/eval_stations.geojson"]
+notes = """Order is the point: buffering before reprojecting buffers in the wrong
+units. The order check fails if the chain runs the other way round."""
+
+[[expect.source]]
+format = "geojson"
+
+[[expect.transform]]
+operation = "reproject"
+params = { from_crs = "EPSG:4326", to_crs = "EPSG:3857" }
+
+[[expect.transform]]
+operation = "buffer"
+params = { distance = 250.0 }
+tolerance = { distance = 1.0 }
+
+[[expect.sink]]
+format = "geopackage"

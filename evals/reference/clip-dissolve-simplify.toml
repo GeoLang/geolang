@@ -1,0 +1,34 @@
+[project]
+name = "landuse-summary"
+
+[[source]]
+name = "landuse"
+format = "gpkg"
+path = "outputs/eval_landuse.gpkg"
+
+[[transform]]
+name = "area"
+input = "landuse"
+operation = "clip"
+min_x = 4.8
+min_y = 52.3
+max_x = 5.0
+max_y = 52.4
+
+[[transform]]
+name = "merged"
+input = "area"
+operation = "dissolve"
+group_by = "landuse_type"
+
+[[transform]]
+name = "simple"
+input = "merged"
+operation = "simplify"
+epsilon = 0.005
+
+[[sink]]
+name = "out"
+input = "simple"
+format = "gpkg"
+path = "outputs/eval_landuse_summary.gpkg"

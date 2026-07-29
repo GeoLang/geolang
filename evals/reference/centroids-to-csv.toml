@@ -1,0 +1,18 @@
+[project]
+name = "parcel-centres"
+
+[[source]]
+name = "parcels"
+format = "geopackage"
+path = "outputs/eval_parcels.gpkg"
+
+[[transform]]
+name = "centres"
+input = "parcels"
+operation = "centroid"
+
+[[sink]]
+name = "out"
+input = "centres"
+format = "csv"
+path = "outputs/eval_parcel_centres.csv"

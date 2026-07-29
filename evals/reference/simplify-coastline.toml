@@ -1,0 +1,19 @@
+[project]
+name = "coast-simple"
+
+[[source]]
+name = "coast"
+format = "shapefile"
+path = "outputs/eval_coast.shp"
+
+[[transform]]
+name = "simple"
+input = "coast"
+operation = "simplify"
+epsilon = 0.01
+
+[[sink]]
+name = "out"
+input = "simple"
+format = "geojson"
+path = "outputs/eval_coast_simple.geojson"

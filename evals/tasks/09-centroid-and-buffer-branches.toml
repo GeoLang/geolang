@@ -1,0 +1,25 @@
+id = "centroid-and-buffer-branches"
+prompt = "Using a workflow, give me two outputs from outputs/eval_depots.geojson: the centre point of each depot as outputs/eval_depot_centres.gpkg, and a 1 km buffer around each depot as outputs/eval_depot_reach.gpkg."
+inputs = ["outputs/eval_depots.geojson"]
+notes = """Two branches off one source, so the two transforms have no order between
+them and the order check is switched off. Also the only task with two sinks."""
+
+[expect]
+ordered = false
+
+[[expect.source]]
+format = "geojson"
+
+[[expect.transform]]
+operation = "centroid"
+
+[[expect.transform]]
+operation = "buffer"
+params = { distance = 1000.0 }
+tolerance = { distance = 1.0 }
+
+[[expect.sink]]
+format = "geopackage"
+
+[[expect.sink]]
+format = "geopackage"

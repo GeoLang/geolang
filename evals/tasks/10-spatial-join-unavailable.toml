@@ -1,0 +1,9 @@
+id = "spatial-join-unavailable"
+prompt = "Using a workflow, tag every point in outputs/eval_incidents.geojson with the name of the district polygon it falls inside, from outputs/eval_districts.gpkg, and save a GeoPackage."
+inputs = ["outputs/eval_incidents.geojson", "outputs/eval_districts.gpkg"]
+notes = """Negative task. spatial_join appears in geodukt's catalog but a manifest
+cannot supply the second dataset, and /validate rejects it saying exactly that.
+The correct answer is telling the user a workflow cannot do this (the spatial_join
+tool can), not composing a manifest that would fail. Scored purely on the absence
+of a manifest reaching for the operation: a model that plans nothing scores 1.0."""
+unavailable = "spatial_join"

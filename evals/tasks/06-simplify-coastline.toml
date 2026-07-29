@@ -1,0 +1,15 @@
+id = "simplify-coastline"
+prompt = "Using a workflow, simplify the coastline in outputs/eval_coast.shp with a Douglas-Peucker tolerance of 0.01 and write GeoJSON to outputs/eval_coast_simple.geojson."
+inputs = ["outputs/eval_coast.shp"]
+notes = "Shapefile source, and a small float parameter the model must not round to zero."
+
+[[expect.source]]
+format = "shapefile"
+
+[[expect.transform]]
+operation = "simplify"
+params = { epsilon = 0.01 }
+tolerance = { epsilon = 1e-6 }
+
+[[expect.sink]]
+format = "geojson"

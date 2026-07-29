@@ -1,0 +1,19 @@
+[project]
+name = "depot-buffers"
+
+[[source]]
+name = "depots"
+format = "geojson"
+path = "outputs/eval_depots.geojson"
+
+[[transform]]
+name = "buffered"
+input = "depots"
+operation = "buffer"
+distance = 500.0
+
+[[sink]]
+name = "out"
+input = "buffered"
+format = "gpkg"
+path = "outputs/eval_depot_buffers.gpkg"

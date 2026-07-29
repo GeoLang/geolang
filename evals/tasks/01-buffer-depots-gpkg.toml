@@ -1,0 +1,15 @@
+id = "buffer-depots-gpkg"
+prompt = "Using a workflow, buffer every depot in outputs/eval_depots.geojson by 500 metres and save the result as a GeoPackage at outputs/eval_depot_buffers.gpkg."
+inputs = ["outputs/eval_depots.geojson"]
+notes = "Simplest possible pipeline: one source, one transform, one sink."
+
+[[expect.source]]
+format = "geojson"
+
+[[expect.transform]]
+operation = "buffer"
+params = { distance = 500.0 }
+tolerance = { distance = 1.0 }
+
+[[expect.sink]]
+format = "geopackage"

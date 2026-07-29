@@ -1,0 +1,24 @@
+id = "clip-dissolve-simplify"
+prompt = "Using a workflow, take outputs/eval_landuse.gpkg, clip it to longitude 4.8 to 5.0 and latitude 52.3 to 52.4, merge the result by the landuse_type field, simplify it with a tolerance of 0.005, and write a GeoPackage to outputs/eval_landuse_summary.gpkg."
+inputs = ["outputs/eval_landuse.gpkg"]
+notes = "Three-step chain: the longest pipeline in the suite, and the order is fixed by the request."
+
+[[expect.source]]
+format = "geopackage"
+
+[[expect.transform]]
+operation = "clip"
+params = { min_x = 4.8, min_y = 52.3, max_x = 5.0, max_y = 52.4 }
+tolerance = { min_x = 0.0001, min_y = 0.0001, max_x = 0.0001, max_y = 0.0001 }
+
+[[expect.transform]]
+operation = "dissolve"
+params = { group_by = "landuse_type" }
+
+[[expect.transform]]
+operation = "simplify"
+params = { epsilon = 0.005 }
+tolerance = { epsilon = 1e-6 }
+
+[[expect.sink]]
+format = "geopackage"

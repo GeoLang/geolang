@@ -1,0 +1,28 @@
+# the buffer is declared before the reprojection it consumes, so scoring has to
+# read the order off the input references, not off the file
+[project]
+name = "station-buffers"
+
+[[source]]
+name = "stations"
+format = "geojson"
+path = "outputs/eval_stations.geojson"
+
+[[transform]]
+name = "reach"
+input = "webmerc"
+operation = "buffer"
+distance = 250.0
+
+[[transform]]
+name = "webmerc"
+input = "stations"
+operation = "reproject"
+from_crs = "EPSG:4326"
+to_crs = "EPSG:3857"
+
+[[sink]]
+name = "out"
+input = "reach"
+format = "gpkg"
+path = "outputs/eval_station_buffers.gpkg"

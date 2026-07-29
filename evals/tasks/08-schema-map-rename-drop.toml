@@ -1,0 +1,16 @@
+id = "schema-map-rename-drop"
+prompt = "Using a workflow, rename the pop_est column to population and drop the gdp_md column in outputs/eval_countries.geojson, writing GeoJSON to outputs/eval_countries_clean.geojson."
+inputs = ["outputs/eval_countries.geojson"]
+notes = """The discovery task. Nothing in the request names the operation, and the
+rename/drop parameter shapes are not guessable, so a correct manifest effectively
+requires calling list_workflow_operations first."""
+
+[[expect.source]]
+format = "geojson"
+
+[[expect.transform]]
+operation = "schema_map"
+params = { rename = { pop_est = "population" }, drop = ["gdp_md"] }
+
+[[expect.sink]]
+format = "geojson"

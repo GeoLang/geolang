@@ -86,6 +86,40 @@ docker exec viewtopia-geolang-api-1 sh -c "pip install -q pytest respx && python
 uv run --with pytest --with httpx python -m pytest tests/test_nl_evals.py -v
 ```
 
+## Workflow evals
+
+Measures whether a model builds the right geodukt pipeline, so "model X scores Y
+on N tasks" is a number rather than an impression. Scoring compares the manifest
+the model composed against the expected pipeline graph, never its prose, so the
+same manifest always scores the same.
+
+```bash
+# against whatever model sibyl is running. Needs geolang api, sibyl, and a
+# geodukt the tool executor can reach. Skips cleanly with the reason otherwise.
+python -m evals.runner
+
+# cloud profiles cost credits, so they are opt-in
+python -m evals.runner --allow-cloud --only buffer-depots-gpkg
+
+# no stack: score manifests captured earlier, or the reference answers
+python -m evals.runner --manifests evals/reference
+```
+
+Reports land in `evals/reports/` as JSON and markdown, tagged with the profile,
+model and timestamp. `--capture DIR` saves each model manifest so a run can be
+re-scored later without spending another run.
+
+Each task in `evals/tasks/` is one TOML file: the request, the input layers it
+assumes exist (created before a stack run), and the pipeline a correct answer
+builds. Every expected element is one check worth one point and the task score is
+`passed/total`, so pinning three parameters weights parameters more. A task with
+`unavailable = "<operation>"` is a negative task, passed by *not* building a
+manifest that reaches for an operation geodukt cannot run.
+
+To add one, drop a task file in `evals/tasks/` and a reference answer named
+`<task id>.toml` in `evals/reference/`. A test asserts every reference answer
+scores 1.0, which is what keeps a task from expecting something impossible.
+
 ## Platform Integration
 
 When running as part of the full GeoLang platform (via `viewtopia/docker-compose.platform.yml`),

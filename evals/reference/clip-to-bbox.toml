@@ -1,0 +1,22 @@
+[project]
+name = "roads-clipped"
+
+[[source]]
+name = "roads"
+format = "geojson"
+path = "outputs/eval_roads.geojson"
+
+[[transform]]
+name = "clipped"
+input = "roads"
+operation = "clip"
+min_x = -1.2
+min_y = 52.6
+max_x = -1.0
+max_y = 52.7
+
+[[sink]]
+name = "out"
+input = "clipped"
+format = "geojson"
+path = "outputs/eval_roads_clipped.geojson"

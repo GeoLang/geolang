@@ -1,0 +1,18 @@
+id = "filter-dissolve-shapefile"
+prompt = "Using a workflow, take outputs/eval_districts.gpkg, keep only the features whose region field equals North, merge those into one shape per region, and write a shapefile to outputs/eval_north_region.shp."
+inputs = ["outputs/eval_districts.gpkg"]
+notes = "Two-step chain where filtering must happen before dissolving."
+
+[[expect.source]]
+format = "geopackage"
+
+[[expect.transform]]
+operation = "filter"
+params = { field = "region", equals = "North" }
+
+[[expect.transform]]
+operation = "dissolve"
+params = { group_by = "region" }
+
+[[expect.sink]]
+format = "shapefile"

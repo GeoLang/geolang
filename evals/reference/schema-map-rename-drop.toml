@@ -1,0 +1,22 @@
+[project]
+name = "countries-clean"
+
+[[source]]
+name = "countries"
+format = "geojson"
+path = "outputs/eval_countries.geojson"
+
+[[transform]]
+name = "tidied"
+input = "countries"
+operation = "schema_map"
+drop = ["gdp_md"]
+
+[transform.rename]
+pop_est = "population"
+
+[[sink]]
+name = "out"
+input = "tidied"
+format = "geojson"
+path = "outputs/eval_countries_clean.geojson"

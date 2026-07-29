@@ -1,0 +1,16 @@
+id = "clip-to-bbox"
+prompt = "Using a workflow, clip outputs/eval_roads.geojson to the area between longitude -1.2 and -1.0 and latitude 52.6 and 52.7, writing GeoJSON to outputs/eval_roads_clipped.geojson."
+inputs = ["outputs/eval_roads.geojson"]
+notes = """Four pinned parameters, so this task weights getting the box right over
+everything else. Catches models that swap x for y or invent a bbox array."""
+
+[[expect.source]]
+format = "geojson"
+
+[[expect.transform]]
+operation = "clip"
+params = { min_x = -1.2, min_y = 52.6, max_x = -1.0, max_y = 52.7 }
+tolerance = { min_x = 0.0001, min_y = 0.0001, max_x = 0.0001, max_y = 0.0001 }
+
+[[expect.sink]]
+format = "geojson"
