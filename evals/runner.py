@@ -143,9 +143,27 @@ def delete_sessions(session_ids) -> None:
             print(f"could not delete session {session_id}: {e}", file=sys.stderr)
 
 
+PLANNING_TOOLS = ("plan_workflow", "run_workflow")
+
+
 def captured_manifest(message: str) -> str:
-    """Run one prompt and return the manifest from the last plan_workflow call."""
-    manifests = []
+    """The manifest the model landed on. Kept for callers that ignore tool use."""
+    return capture_answer(message)[0]
+
+
+def capture_answer(message: str):
+    """Run one prompt and return (manifest, tools called).
+
+    A manifest the tool rejected is not an answer: the user never saw a plan and
+    the model went on to do something else, so scoring the rejected attempt would
+    mark a model wrong for recovering correctly. Only a manifest whose own call
+    came back without an error counts, and the last of those is the final answer.
+    """
+    accepted = []
+    tools = []
+    # a turn can carry several calls before any result, so results are matched to
+    # calls by tool name in order rather than assuming they interleave
+    pending = {}
     timeout = httpx.Timeout(connect=10.0, read=RUN_READ_TIMEOUT, write=30.0, pool=10.0)
     with httpx.Client(timeout=timeout) as client:
         # imported late so scoring a capture needs neither the tools nor the stack
@@ -159,22 +177,29 @@ def captured_manifest(message: str) -> str:
                 if not line.strip():
                     continue
                 event = json.loads(line)
-                if event.get("kind") != "tool_call":
-                    continue
-                if str(event.get("name") or "") not in (
-                    "plan_workflow",
-                    "run_workflow",
-                ):
-                    continue
-                try:
-                    args = json.loads(str(event.get("args") or ""))
-                except json.JSONDecodeError:
-                    continue
-                toml_text = args.get("manifest_toml")
-                if toml_text:
-                    manifests.append(str(toml_text))
-    # the last proposal is the model's final answer, after any error correction
-    return manifests[-1] if manifests else ""
+                kind = event.get("kind")
+                name = str(event.get("name") or "")
+                if kind == "tool_call":
+                    tools.append(name)
+                    if name not in PLANNING_TOOLS:
+                        continue
+                    try:
+                        args = json.loads(str(event.get("args") or ""))
+                    except json.JSONDecodeError:
+                        continue
+                    toml_text = args.get("manifest_toml")
+                    if toml_text:
+                        pending.setdefault(name, []).append(str(toml_text))
+                elif kind == "tool_return" and pending.get(name):
+                    manifest = pending[name].pop(0)
+                    content = str(event.get("content") or "").strip()
+                    if not content.upper().startswith("ERROR"):
+                        accepted.append(manifest)
+    # a call whose result never arrived stays an answer, so a truncated run fails
+    # loudly instead of scoring as though the model planned nothing
+    for leftover in pending.values():
+        accepted.extend(leftover)
+    return (accepted[-1] if accepted else ""), tools
 
 
 def score_from_directory(tasks: list, directory: Path) -> list:
@@ -322,7 +347,7 @@ def main(argv=None) -> int:
                     print(f"running {label}", file=sys.stderr)
                     # a fresh session per run, so one sample cannot bias the next
                     eval_sessions.append(start_eval_session(f"eval {task.id} {run}"))
-                    manifest = captured_manifest(task.prompt)
+                    manifest, tools = capture_answer(task.prompt)
                     if capture_dir and manifest:
                         name = (
                             f"{task.id}.toml"
@@ -330,7 +355,7 @@ def main(argv=None) -> int:
                             else f"{task.id}.run{run}.toml"
                         )
                         (capture_dir / name).write_text(manifest)
-                    samples.append(score_manifest(task, manifest))
+                    samples.append(score_manifest(task, manifest, tools))
                 results.append(TaskSamples(task.id, samples))
         finally:
             restore_session(user_session)

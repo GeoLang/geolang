@@ -188,8 +188,11 @@ def _format_checks(kind: str, expected: list, actual_steps: list) -> list:
     return checks
 
 
-def score_manifest(task: Task, manifest_toml: str) -> Result:
-    """Score one model answer. An empty manifest means the model built none."""
+def score_manifest(task: Task, manifest_toml: str, tools=None) -> Result:
+    """Score one model answer. An empty manifest means the model built none.
+
+    `tools` is the tool names the model called, when the caller recorded them.
+    """
     text = manifest_toml or ""
     manifest = None
     parse_error = ""
@@ -200,7 +203,7 @@ def score_manifest(task: Task, manifest_toml: str) -> Result:
             parse_error = str(e)
 
     if task.unavailable:
-        return Result(task.id, [_unavailable_check(task, manifest)], text)
+        return Result(task.id, _unavailable_checks(task, manifest, tools), text)
 
     checks = [
         Check(
@@ -284,8 +287,14 @@ def score_manifest(task: Task, manifest_toml: str) -> Result:
     return Result(task.id, checks, text)
 
 
-def _unavailable_check(task: Task, manifest) -> Check:
-    """A negative task passes when no manifest reaches for the missing operation."""
+def _unavailable_checks(task: Task, manifest, tools) -> list:
+    """A negative task must avoid the impossible manifest AND still do the work.
+
+    Avoiding the manifest alone is not enough: a model that shrugs and does
+    nothing would pass. When the caller knows which tools ran, the operation has
+    to have been called directly instead. `tools` is None when scoring a captured
+    manifest, where tool use was never recorded, so only the first check applies.
+    """
     operations = [
         str(t.get("operation", "")).strip().lower()
         for t in (manifest or {}).get("transform") or []
@@ -293,11 +302,23 @@ def _unavailable_check(task: Task, manifest) -> Check:
     ]
     target = str(task.unavailable).strip().lower()
     used = target in operations
-    return Check(
-        f"avoids unavailable operation {target}",
-        not used,
-        "" if not used else f"built a manifest using {target}",
-    )
+    checks = [
+        Check(
+            f"avoids unavailable operation {target}",
+            not used,
+            "" if not used else f"built a manifest using {target}",
+        )
+    ]
+    if tools is not None:
+        called = [str(t).strip().lower() for t in tools]
+        checks.append(
+            Check(
+                f"calls {target} directly instead",
+                target in called,
+                "" if target in called else f"never called {target}, so nothing ran",
+            )
+        )
+    return checks
 
 
 class TaskSamples:

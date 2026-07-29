@@ -594,3 +594,79 @@ def test_repeat_needs_the_stack():
     """A captured manifest scores identically every time, so repeating it lies."""
     code = runner.main(["--manifests", str(REFERENCE_DIR), "--repeat", "3"])
     assert code == 2
+
+
+SPATIAL_JOIN_STEP = """
+[[transform]]
+name = "last"
+input = "src"
+operation = "spatial_join"
+"""
+
+
+def test_a_rejected_manifest_is_not_the_models_answer():
+    """The user never saw it, so it cannot be what the model stands behind."""
+    body = _ndjson(
+        _plan_call(manifest(SPATIAL_JOIN_STEP)),
+        {
+            "kind": "tool_return",
+            "name": "plan_workflow",
+            "content": "ERROR: geodukt rejected the manifest: spatial_join cannot run",
+        },
+        {"kind": "tool_call", "name": "spatial_join", "args": "{}"},
+        {"kind": "done"},
+    )
+    with respx.mock(base_url=runner.SIBYL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        captured, tools = runner.capture_answer("join them")
+
+    assert captured == ""
+    assert "spatial_join" in tools
+
+
+def test_recovering_from_a_rejection_passes_the_negative_task():
+    body = _ndjson(
+        _plan_call(manifest(SPATIAL_JOIN_STEP)),
+        {"kind": "tool_return", "name": "plan_workflow", "content": "ERROR: cannot run"},
+        {"kind": "tool_call", "name": "spatial_join", "args": "{}"},
+        {"kind": "done"},
+    )
+    with respx.mock(base_url=runner.SIBYL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        captured, tools = runner.capture_answer("join them")
+
+    assert score_manifest(NEGATIVE_TASK, captured, tools).score == 1.0
+
+
+def test_doing_nothing_fails_the_negative_task():
+    """Avoiding the manifest is not enough: the work still has to happen."""
+    body = _ndjson({"kind": "text", "content": "sorry, cannot"}, {"kind": "done"})
+    with respx.mock(base_url=runner.SIBYL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        captured, tools = runner.capture_answer("join them")
+
+    result = score_manifest(NEGATIVE_TASK, captured, tools)
+    assert result.score < 1.0
+    assert [c.name for c in result.failures] == ["calls spatial_join directly instead"]
+
+
+def test_an_accepted_bad_manifest_still_fails_the_negative_task():
+    body = _ndjson(
+        _plan_call(manifest(SPATIAL_JOIN_STEP)),
+        {"kind": "tool_return", "name": "plan_workflow", "content": 'Plan "t": 3 steps'},
+        {"kind": "tool_call", "name": "spatial_join", "args": "{}"},
+        {"kind": "done"},
+    )
+    with respx.mock(base_url=runner.SIBYL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        captured, tools = runner.capture_answer("join them")
+
+    result = score_manifest(NEGATIVE_TASK, captured, tools)
+    assert [c.name for c in result.failures] == ["avoids unavailable operation spatial_join"]
+
+
+def test_scoring_a_capture_skips_the_tool_check():
+    """A captured manifest never recorded tool use, so only the manifest is judged."""
+    result = score_manifest(NEGATIVE_TASK, "")
+    assert result.total == 1
+    assert result.score == 1.0
