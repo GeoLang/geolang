@@ -7,8 +7,13 @@ from what /run will execute.
 """
 
 import os
+import re
 
 DEFAULT_GEODUKT_URL = "http://geodukt:8080"
+
+# geodukt names the operation it refused: "transform 'x' uses operation 'y'
+# which cannot run: <why>"
+_REFUSED_OPERATION = re.compile(r"operation '([a-z0-9_]+)' which cannot run")
 
 # mirrors SUPPORTED_FORMATS in geodukt-io/src/formats.rs
 SUPPORTED_FORMATS = "csv, geojson, geopackage (gpkg), shapefile (shp)"
@@ -16,6 +21,29 @@ SUPPORTED_FORMATS = "csv, geojson, geopackage (gpkg), shapefile (shp)"
 
 def geodukt_url() -> str:
     return os.environ.get("GEODUKT_URL", DEFAULT_GEODUKT_URL).rstrip("/")
+
+
+def direct_tool_advice(detail: str) -> str:
+    """Guidance for an operation no manifest can run, or "" when it does not apply.
+
+    A rejection that only says "fix it and try again" sends the model round the
+    same loop, because there is no manifest that works. Tool names are module
+    names in this package, so a same-named module means the operation exists as a
+    single-shot tool and that is what the model should call instead.
+    """
+    match = _REFUSED_OPERATION.search(detail or "")
+    if not match:
+        return ""
+    operation = match.group(1)
+    from pathlib import Path
+
+    if not (Path(__file__).parent / f"{operation}.py").exists():
+        return ""
+    return (
+        f"No manifest can run '{operation}', so do NOT call plan_workflow again "
+        f"for this. Call the {operation} tool directly instead, and tell the user "
+        "you ran it as a single step rather than a workflow."
+    )
 
 
 def parse_manifest(manifest_toml: str):

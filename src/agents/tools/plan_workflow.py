@@ -12,6 +12,7 @@ from src.core.user_token import service_headers
 
 from ._geodukt import (
     SUPPORTED_FORMATS,
+    direct_tool_advice,
     error_detail,
     geodukt_url,
     manifest_steps,
@@ -56,8 +57,9 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
     before anything runs. Compose the pipeline as a geodukt TOML manifest, call
     this, present the returned steps in plain language, and only call
     run_workflow with the same manifest once the user approves. Use this instead
-    of chaining buffer_clip_dissolve, clip_layer, spatial_join and friends by
-    hand whenever a request needs several chained operations over files."""
+    of chaining buffer_clip_dissolve, clip_layer and friends by hand whenever a
+    request needs several chained operations over files. A manifest cannot run
+    spatial_join (transforms take one input): call that tool directly."""
     import json
 
     manifest, error = parse_manifest(manifest_toml)
@@ -82,8 +84,12 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
     route_missing = resp.status_code == 404 and not (resp.text or "").strip()
 
     if resp.status_code >= 400 and not route_missing:
+        detail = error_detail(resp)
+        advice = direct_tool_advice(detail)
+        if advice:
+            return f"ERROR: geodukt rejected the manifest: {detail}\n{advice}"
         return (
-            f"ERROR: geodukt rejected the manifest: {error_detail(resp)}\n"
+            f"ERROR: geodukt rejected the manifest: {detail}\n"
             f"Fix it and call plan_workflow again. Formats: {SUPPORTED_FORMATS}. "
             "Call list_workflow_operations for valid operation names."
         )

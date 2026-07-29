@@ -149,6 +149,28 @@ VALIDATED = {
 }
 
 
+SPATIAL_JOIN_MANIFEST = """
+[project]
+name = "sj"
+
+[[source]]
+name = "pts"
+format = "geojson"
+path = "outputs/pts.geojson"
+
+[[transform]]
+name = "tagged"
+input = "pts"
+operation = "spatial_join"
+
+[[sink]]
+name = "out"
+input = "tagged"
+format = "gpkg"
+path = "outputs/sj.gpkg"
+"""
+
+
 class _FakeGeodukt:
     """geodukt-server stand-in. Responses are (status_code, body) per path."""
 
@@ -533,3 +555,32 @@ def test_plan_event_renders_as_an_agui_custom_event():
     frame = server.render_agui_event(EventEncoder(), "plan", {"title": "x"})
 
     assert '"name":"plan"' in frame.replace(" ", "")
+
+
+def test_an_impossible_operation_sends_the_model_to_the_direct_tool(geodukt):
+    """Retrying the manifest cannot work, so the rejection must not ask for it."""
+    geodukt(
+        validate=(
+            422,
+            {
+                "kind": "invalid",
+                "message": (
+                    "transform 'tagged' uses operation 'spatial_join' which cannot "
+                    "run: a manifest cannot supply the second dataset to join against"
+                ),
+            },
+        )
+    )
+    result = plan_workflow(SPATIAL_JOIN_MANIFEST)
+
+    assert "call the spatial_join tool directly" in result.lower()
+    assert "call plan_workflow again" not in result.replace("do NOT call plan_workflow again", "")
+    assert "__PLAN__" not in result
+
+
+def test_an_ordinary_rejection_still_asks_for_a_fix(geodukt):
+    geodukt(validate=(422, {"kind": "invalid", "message": "sink 'out' has no input"}))
+    result = plan_workflow(SPATIAL_JOIN_MANIFEST)
+
+    assert "Fix it and call plan_workflow again" in result
+    assert "directly" not in result
