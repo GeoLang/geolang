@@ -1,4 +1,5 @@
 import json
+import os
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -69,23 +70,58 @@ def emit_ui_spec(
 
     try:
         if ui_type == "map":
+            entries = []
+            if layers:
+                s = layers.strip()
+                if s.startswith("["):
+                    # models often guess a json array instead of the pipe format
+                    try:
+                        for item in json.loads(s):
+                            if isinstance(item, dict):
+                                entries.append((
+                                    str(item.get("name", "")),
+                                    str(item.get("file") or item.get("file_path") or item.get("path") or ""),
+                                    str(item.get("color") or "#3388ff"),
+                                ))
+                    except json.JSONDecodeError:
+                        pass
+                if not entries:
+                    for layer_str in s.split(";"):
+                        parts = [p.strip() for p in layer_str.split("|")]
+                        if len(parts) >= 2:
+                            parts += ["#3388ff"] * (3 - len(parts))
+                            entries.append((parts[0], parts[1], parts[2] or "#3388ff"))
             layer_list = []
             seen_files = set()
-            if layers:
-                for layer_str in layers.split(";"):
-                    parts = [p.strip() for p in layer_str.split("|")]
-                    if len(parts) >= 2:
-                        file_key = parts[1].strip()
-                        if file_key in seen_files:
-                            continue
-                        seen_files.add(file_key)
-                        layer_list.append(
-                            {
-                                "name": parts[0],
-                                "file": parts[1],
-                                "color": parts[2] if len(parts) > 2 else "#3388ff",
-                            }
-                        )
+            for name, file, color in entries:
+                if not file or file in seen_files:
+                    continue
+                seen_files.add(file)
+                layer_list.append({"name": name, "file": file, "color": color})
+            # an empty-layer "success" lets the model declare victory over a
+            # blank map (grok looped on exactly that), so fail with instructions
+            if not layer_list:
+                return (
+                    "ERROR: a map spec needs at least one layer, given as "
+                    "'name|file|color' entries separated by ';' "
+                    "(e.g. 'Buffer|outputs/buffer.gpkg|#ff6b35'). Generate the layer "
+                    "files first; to only move the camera use viewer_control instead."
+                )
+            exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
+            missing = [
+                layer["file"]
+                for layer in layer_list
+                if not (
+                    os.path.exists(layer["file"])
+                    or os.path.exists(os.path.join(exec_dir, layer["file"]))
+                )
+            ]
+            if missing:
+                return (
+                    f"ERROR: layer file(s) not found: {', '.join(missing)}. "
+                    "Run the analysis tools to create them first, or call "
+                    "list_outputs to see what exists."
+                )
             spec = {"type": "map", "layers": layer_list}
             if center_lon is not None and center_lat is not None:
                 spec["center"] = [center_lon, center_lat]
