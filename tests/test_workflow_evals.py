@@ -19,7 +19,10 @@ from evals.runner import (
     stack_skip_reason,
 )
 from evals.scoring import (
+    Check,
+    Result,
     Task,
+    TaskSamples,
     aggregate,
     canon_format,
     load_tasks,
@@ -525,3 +528,69 @@ def test_the_markdown_report_tabulates_every_task():
     assert "**Aggregate 1.00**" in text
     for task in tasks:
         assert f"`{task.id}`" in text
+
+
+def _samples(task_id, scores):
+    """TaskSamples whose runs score exactly `scores`, via a one-check stand-in."""
+    runs = [
+        Result(task_id, [Check("only check", passed=bool(s))]) for s in scores
+    ]
+    return TaskSamples(task_id, runs)
+
+
+def test_repeated_runs_report_the_mean_and_the_worst_run():
+    """A task that only passes sometimes must not report its lucky run."""
+    samples = _samples("flaky-task", [1.0, 0.0, 1.0])
+
+    assert samples.runs == 3
+    assert samples.score == pytest.approx(2 / 3, abs=1e-4)
+    assert (samples.low, samples.high) == (0.0, 1.0)
+    assert samples.flaky is True
+    # checks come from the worst run, so the failure stays visible
+    assert samples.passed == 0
+    assert [c.name for c in samples.failures] == ["only check"]
+
+
+def test_a_stable_task_is_not_flaky():
+    samples = _samples("stable-task", [1.0, 1.0])
+    assert samples.flaky is False
+    assert samples.score == 1.0
+    assert samples.failures == []
+
+
+def test_aggregate_names_the_flaky_tasks():
+    agg = aggregate([_samples("flaky", [1.0, 0.0]), _samples("stable", [1.0, 1.0])])
+
+    assert agg["flaky"] == ["flaky"]
+    assert agg["runs_per_task"] == 2
+    # the flaky task's mean drags the aggregate below a single good run
+    assert agg["score"] == pytest.approx(0.75)
+    # only a task perfect in every run counts as perfect
+    assert agg["perfect"] == 1
+
+
+def test_the_repeated_report_shows_the_range_and_flags_flakiness():
+    tasks = load_tasks(TASKS_DIR)
+    results = score_from_directory(tasks, REFERENCE_DIR)
+    # stand in one flaky task so the report has something to flag
+    results[0] = _samples(results[0].task_id, [1.0, 0.0])
+    meta = {
+        "generated_at": "2026-07-29T00:00:00+00:00",
+        "mode": "stack",
+        "profile": "local",
+        "model": "test-model",
+        "aggregate": aggregate(results),
+    }
+    text = markdown_report(meta, results, tasks)
+
+    assert "| Task | Mean | Range | Checks | First failure |" in text
+    assert "0.00 to 1.00" in text
+    assert "2 runs per task" in text
+    assert f"`{results[0].task_id}`" in text
+    assert "Flaky:" in text
+
+
+def test_repeat_needs_the_stack():
+    """A captured manifest scores identically every time, so repeating it lies."""
+    code = runner.main(["--manifests", str(REFERENCE_DIR), "--repeat", "3"])
+    assert code == 2

@@ -93,10 +93,17 @@ on N tasks" is a number rather than an impression. Scoring compares the manifest
 the model composed against the expected pipeline graph, never its prose, so the
 same manifest always scores the same.
 
+Scoring is deterministic but the model is not: a task the model gets right most
+of the time still fails sometimes, so a single run can report anything within
+that spread. Quote a repeated run, not one lucky pass.
+
 ```bash
 # against whatever model sibyl is running. Needs geolang api, sibyl, and a
 # geodukt the tool executor can reach. Skips cleanly with the reason otherwise.
 python -m evals.runner
+
+# what to quote: each task five times, reporting means and the flaky ones
+python -m evals.runner --repeat 5
 
 # cloud profiles cost credits, so they are opt-in
 python -m evals.runner --allow-cloud --only buffer-depots-gpkg
@@ -104,6 +111,12 @@ python -m evals.runner --allow-cloud --only buffer-depots-gpkg
 # no stack: score manifests captured earlier, or the reference answers
 python -m evals.runner --manifests evals/reference
 ```
+
+`--repeat N` runs every task N times in its own session. A task's score is the
+mean over its runs and its checks come from its worst run, so a task that only
+passes sometimes cannot report a clean sheet. The report names the flaky tasks
+and gives their range; `--repeat` needs the stack, since a captured manifest
+scores the same every time.
 
 Reports land in `evals/reports/` as JSON and markdown, tagged with the profile,
 model and timestamp. `--capture DIR` saves each model manifest so a run can be

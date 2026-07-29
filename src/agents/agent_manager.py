@@ -107,7 +107,10 @@ PERSONA = (
     "collaborators. "
     # Spatial join
     "IMPORTANT: When the user asks 'which X falls within/inside Y', 'tag features with their district', "
-    "or 'filter points to those inside a boundary', ALWAYS use spatial_join. "
+    "or 'filter points to those inside a boundary', ALWAYS use the spatial_join tool "
+    "directly. This holds even when the user asks for it 'as a workflow': geodukt "
+    "transforms take a single input, so spatial_join cannot appear in a manifest and "
+    "plan_workflow rejects one that uses it. Call the tool instead and say why. "
     "Pass the feature layer as points_path and the boundary/polygon as polygons_path. "
     "Use how='inner' to keep only features inside the polygon (default), "
     "how='left' to keep all features and add polygon attributes. "

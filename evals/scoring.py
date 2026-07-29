@@ -300,12 +300,83 @@ def _unavailable_check(task: Task, manifest) -> Check:
     )
 
 
+class TaskSamples:
+    """One task run several times.
+
+    Reads like a single `Result` so reports and aggregation do not care how many
+    runs there were, but the score is the mean and the checks come from the worst
+    run, so a task that only passes sometimes cannot report a lucky score.
+    """
+
+    def __init__(self, task_id: str, results: list):
+        if not results:
+            raise ValueError(f"task {task_id} has no runs to score")
+        self.task_id = task_id
+        self.results = list(results)
+
+    @property
+    def runs(self) -> int:
+        return len(self.results)
+
+    @property
+    def worst(self):
+        return min(self.results, key=lambda r: r.score)
+
+    @property
+    def score(self) -> float:
+        return round(sum(r.score for r in self.results) / self.runs, 4)
+
+    @property
+    def low(self) -> float:
+        return min(r.score for r in self.results)
+
+    @property
+    def high(self) -> float:
+        return max(r.score for r in self.results)
+
+    @property
+    def flaky(self) -> bool:
+        return self.low != self.high
+
+    @property
+    def passed(self) -> int:
+        return self.worst.passed
+
+    @property
+    def total(self) -> int:
+        return self.worst.total
+
+    @property
+    def failures(self) -> list:
+        return self.worst.failures
+
+    @property
+    def manifest(self) -> str:
+        return self.worst.manifest
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.task_id,
+            "score": self.score,
+            "low": self.low,
+            "high": self.high,
+            "flaky": self.flaky,
+            "runs": self.runs,
+            "passed": self.passed,
+            "total": self.total,
+            "runs_detail": [r.as_dict() for r in self.results],
+        }
+
+
 def aggregate(results: list) -> dict:
     scores = [r.score for r in results]
+    flaky = [r.task_id for r in results if getattr(r, "flaky", False)]
     return {
         "tasks": len(results),
         "score": round(sum(scores) / len(scores), 4) if scores else 0.0,
         "perfect": sum(1 for s in scores if s == 1.0),
         "checks_passed": sum(r.passed for r in results),
         "checks_total": sum(r.total for r in results),
+        "runs_per_task": max((getattr(r, "runs", 1) for r in results), default=1),
+        "flaky": flaky,
     }

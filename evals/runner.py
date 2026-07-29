@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from evals.scoring import aggregate, load_tasks, score_manifest
+from evals.scoring import TaskSamples, aggregate, load_tasks, score_manifest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GEOLANG = os.environ.get("NL_EVAL_GEOLANG", "http://localhost:8080")
@@ -183,12 +183,14 @@ def score_from_directory(tasks: list, directory: Path) -> list:
     for task in tasks:
         path = directory / f"{task.id}.toml"
         text = path.read_text() if path.exists() else ""
-        results.append(score_manifest(task, text))
+        results.append(TaskSamples(task.id, [score_manifest(task, text)]))
     return results
 
 
 def markdown_report(meta: dict, results: list, tasks: list) -> str:
     by_id = {t.id: t for t in tasks}
+    repeated = meta["aggregate"].get("runs_per_task", 1) > 1
+    flaky = meta["aggregate"].get("flaky") or []
     lines = [
         f"# Workflow eval: {meta['profile']} / {meta['model'] or 'unknown model'}",
         "",
@@ -198,9 +200,26 @@ def markdown_report(meta: dict, results: list, tasks: list) -> str:
         f"{meta['aggregate']['tasks']} tasks "
         f"({meta['aggregate']['perfect']} perfect, "
         f"{meta['aggregate']['checks_passed']}/{meta['aggregate']['checks_total']} checks).",
+    ]
+    if repeated:
+        runs = meta["aggregate"]["runs_per_task"]
+        note = (
+            f"Flaky: {', '.join(f'`{t}`' for t in flaky)}. Their score depends on "
+            "sampling, so quote the range rather than one run."
+            if flaky
+            else "No task varied between runs."
+        )
+        preamble = (
+            f"{runs} runs per task. Scores are means, checks come from each "
+            f"task's worst run. {note}"
+        )
+        lines += ["", preamble]
+    lines += [
         "",
-        "| Task | Score | Checks | First failure |",
-        "|---|---|---|---|",
+        "| Task | Score | Checks | First failure |"
+        if not repeated
+        else "| Task | Mean | Range | Checks | First failure |",
+        "|---|---|---|---|" if not repeated else "|---|---|---|---|---|",
     ]
     for res in results:
         failures = res.failures
@@ -208,9 +227,16 @@ def markdown_report(meta: dict, results: list, tasks: list) -> str:
         if failures:
             detail = f": {failures[0].detail}" if failures[0].detail else ""
             first = f"{failures[0].name}{detail}"
-        lines.append(
-            f"| `{res.task_id}` | {res.score:.2f} | {res.passed}/{res.total} | {first} |"
-        )
+        if repeated:
+            span = f"{res.low:.2f} to {res.high:.2f}" if res.flaky else "stable"
+            lines.append(
+                f"| `{res.task_id}` | {res.score:.2f} | {span} | "
+                f"{res.passed}/{res.total} | {first} |"
+            )
+        else:
+            lines.append(
+                f"| `{res.task_id}` | {res.score:.2f} | {res.passed}/{res.total} | {first} |"
+            )
     lines += ["", "## Tasks", ""]
     for res in results:
         task = by_id.get(res.task_id)
@@ -243,7 +269,22 @@ def main(argv=None) -> int:
         default=os.environ.get("NL_EVAL_ALLOW_CLOUD") == "1",
         help="permit running against a cloud model profile, which costs credits",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        metavar="N",
+        help="run each task N times and report the mean, the range and which "
+        "tasks were flaky. Sampling makes one run a poor estimate of a score",
+    )
     args = parser.parse_args(argv)
+    if args.repeat < 1:
+        print("--repeat must be at least 1", file=sys.stderr)
+        return 2
+    if args.repeat > 1 and args.manifests:
+        print("--repeat needs the stack: a captured manifest scores the same every time",
+              file=sys.stderr)
+        return 2
 
     tasks = load_tasks(args.tasks)
     if args.only:
@@ -275,12 +316,22 @@ def main(argv=None) -> int:
         eval_sessions = []
         try:
             for task in tasks:
-                print(f"running {task.id}…", file=sys.stderr)
-                eval_sessions.append(start_eval_session(f"eval {task.id}"))
-                manifest = captured_manifest(task.prompt)
-                if capture_dir and manifest:
-                    (capture_dir / f"{task.id}.toml").write_text(manifest)
-                results.append(score_manifest(task, manifest))
+                samples = []
+                for run in range(1, args.repeat + 1):
+                    label = f"{task.id}…" if args.repeat == 1 else f"{task.id} {run}/{args.repeat}…"
+                    print(f"running {label}", file=sys.stderr)
+                    # a fresh session per run, so one sample cannot bias the next
+                    eval_sessions.append(start_eval_session(f"eval {task.id} {run}"))
+                    manifest = captured_manifest(task.prompt)
+                    if capture_dir and manifest:
+                        name = (
+                            f"{task.id}.toml"
+                            if args.repeat == 1
+                            else f"{task.id}.run{run}.toml"
+                        )
+                        (capture_dir / name).write_text(manifest)
+                    samples.append(score_manifest(task, manifest))
+                results.append(TaskSamples(task.id, samples))
         finally:
             restore_session(user_session)
             delete_sessions(eval_sessions)
