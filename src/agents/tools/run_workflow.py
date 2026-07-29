@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, Field
 
+from src.core.user_token import service_headers
+
 from ._geodukt import error_detail, geodukt_url, manifest_steps, parse_manifest
 
 
@@ -28,9 +30,14 @@ def run_workflow(manifest_toml: str) -> str:
     try:
         import requests
 
-        # a pipeline can chew through large inputs, so allow a long read
+        # a pipeline can chew through large inputs, so allow a long read.
+        # /run is the gated route: without a token geodukt answers 401 unless it
+        # is running without a platform secret
         resp = requests.post(
-            f"{url}/run", json={"manifest": manifest_toml}, timeout=(10, 600)
+            f"{url}/run",
+            json={"manifest": manifest_toml},
+            headers=service_headers(),
+            timeout=(10, 600),
         )
     except Exception as e:
         return f"ERROR: geodukt is unreachable at {url}: {e}"

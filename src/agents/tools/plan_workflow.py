@@ -8,6 +8,8 @@ Nothing runs here: run_workflow executes the same manifest after the user agrees
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from src.core.user_token import service_headers
+
 from ._geodukt import (
     SUPPORTED_FORMATS,
     error_detail,
@@ -67,7 +69,10 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
         import requests
 
         resp = requests.post(
-            f"{url}/validate", json={"manifest": manifest_toml}, timeout=30
+            f"{url}/validate",
+            json={"manifest": manifest_toml},
+            headers=service_headers(),
+            timeout=30,
         )
     except Exception as e:
         return f"ERROR: geodukt is unreachable at {url}: {e}"

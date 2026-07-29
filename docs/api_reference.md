@@ -16,6 +16,8 @@ SSE stream of [AG-UI protocol](https://docs.ag-ui.com/) events. Accepts a `RunAg
 
 Each line is a standard SSE `data: <json>` payload, wrapped in `RUN_STARTED`/`RUN_FINISHED`. Keepalive comments (`: keepalive`) are emitted every 15s of agent silence.
 
+An `Authorization: Bearer <jwt>` header is forwarded to sibyl as the run's `user_token`, and sibyl sends it back on every tool call of that run, so the tools reach ptolemy, tiletopia and geodukt as that user. Without one the run is anonymous: public reads work, gated writes fail.
+
 ## Sessions
 
 Sessions live in sibyl. These routes are proxies and keep no state of their own.
@@ -79,6 +81,8 @@ sibyl reads the manifest, picks a tool, and posts the arguments back for GeoLang
 Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>" }`. `404` for an unknown tool. Bad arguments and tool exceptions come back as `200` with a `result` starting with ❌, so the agent can read the failure and recover. Calls can take minutes.
 
 Add `"notify": true` when running a tool outside the model's turn, such as the viewer's plan-approval button calling `run_workflow`: the result is appended to the active sibyl session so the model can answer follow-up questions about it. sibyl never sets the flag, so a run the model itself asked for is not reported back to it twice.
+
+An `Authorization: Bearer <jwt>` header sets the identity the tool's own outbound calls go out as, for the length of that call. `PTOLEMY_API_TOKEN` is the service account ptolemy falls back on when there is no caller.
 
 ## Debug
 

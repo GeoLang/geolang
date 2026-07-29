@@ -10,7 +10,9 @@ from datetime import datetime
 from pathlib import Path
 from threading import Thread
 
-from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
+from typing import Annotated
+
+from fastapi import FastAPI, Header, HTTPException, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,6 +35,7 @@ import httpx
 
 from src.agents.agent_manager import PERSONA, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
+from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
     EXEC_DIR,
     OUTPUTS_DIR,
@@ -158,8 +161,17 @@ class ToolCallRequest(BaseModel):
 
 # sync so FastAPI runs it in the threadpool: tools block for minutes
 @app.post("/tools/{name}")
-def run_tool(name: str, request: ToolCallRequest):
-    """Execute a tool in-process and return its string result."""
+def run_tool(
+    name: str,
+    request: ToolCallRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Execute a tool in-process and return its string result.
+
+    sibyl passes the caller's bearer through on every tool call of a run, and the
+    viewer sends its own on the plan-approval path. Whatever arrives is what the
+    tool's outbound calls go out as.
+    """
     # schema-less modules are not in the manifest either, so they are unknown here
     entry = next(
         (t for t in load_external_tools() if t[0].__name__ == name and t[1]), None
@@ -174,7 +186,8 @@ def run_tool(name: str, request: ToolCallRequest):
         return {"result": f"❌ Invalid arguments: {e}"}
 
     try:
-        result = func(**args)
+        with user_token_scope(bearer_token(authorization)):
+            result = func(**args)
     except Exception as e:
         logger.exception(f"Tool {name} failed")
         result = f"❌ Tool execution failed: {e}"
@@ -186,15 +199,22 @@ def run_tool(name: str, request: ToolCallRequest):
     return {"result": result}
 
 
-async def agent_event_stream(message: str):
+async def agent_event_stream(message: str, user_token: str | None = None):
     """Run a sibyl agent run and yield normalized (kind, payload) events.
 
     Single source of truth for the marker parsing. kinds:
     "text", "progress", "viewer_cmd", "ui_spec", "plan", "error", "keepalive".
     /chat/agui renders these as AG-UI events.
+
+    `user_token` is the caller's bearer. sibyl holds it for the run and sends it
+    back on every tool call, so the tools act as this user. Without one the run
+    is anonymous.
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
+    body = {"system_prompt": PERSONA, "message": message}
+    if user_token:
+        body["user_token"] = user_token
 
     def run_in_thread():
         # no read timeout: a tool call can keep the stream silent for minutes
@@ -204,7 +224,7 @@ async def agent_event_stream(message: str):
                 with client.stream(
                     "POST",
                     f"{SIBYL_URL}/runs",
-                    json={"system_prompt": PERSONA, "message": message},
+                    json=body,
                 ) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
@@ -413,7 +433,9 @@ async def chat_agui(input: RunAgentInput, request: Request):
 
     return StreamingResponse(
         agui_stream(
-            agent_event_stream(prompt),
+            agent_event_stream(
+                prompt, user_token=bearer_token(request.headers.get("authorization"))
+            ),
             thread_id=input.thread_id,
             run_id=input.run_id,
             accept=request.headers.get("accept"),

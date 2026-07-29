@@ -59,10 +59,11 @@ def ptolemy_query(
     outputs_dir = os.path.join(exec_dir, "outputs")
     os.makedirs(outputs_dir, exist_ok=True)
 
-    headers = {}
-    token = os.environ.get("PTOLEMY_API_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    from src.core.user_token import service_headers
+
+    # the person who asked wins; PTOLEMY_API_TOKEN is the service account a
+    # headless run falls back on
+    headers = service_headers("PTOLEMY_API_TOKEN")
 
     try:
         import requests

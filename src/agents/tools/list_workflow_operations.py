@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel
 
+from src.core.user_token import service_headers
+
 from ._geodukt import SUPPORTED_FORMATS, geodukt_url
 
 
@@ -46,11 +48,12 @@ def list_workflow_operations() -> str:
     try:
         import requests
 
-        resp = requests.get(f"{url}/operations", timeout=15)
+        headers = service_headers()
+        resp = requests.get(f"{url}/operations", headers=headers, timeout=15)
         source = "geodukt transform catalog"
         if resp.status_code == 404:
             # /operations is newer than the GP tool routes
-            resp = requests.get(f"{url}/gp/catalog", timeout=15)
+            resp = requests.get(f"{url}/gp/catalog", headers=headers, timeout=15)
             source = "geodukt GP tool catalog (partial: /operations unavailable)"
         if resp.status_code >= 400:
             detail = (resp.text or "").strip()[:300] or f"HTTP {resp.status_code}"

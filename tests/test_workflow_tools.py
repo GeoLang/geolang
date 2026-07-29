@@ -20,6 +20,7 @@ from src.agents.tools.list_workflow_operations import (
 from src.agents.tools.plan_workflow import PlanWorkflowArgs, plan_workflow
 from src.agents.tools.run_workflow import RunWorkflowArgs, run_workflow
 from src.api import server
+from src.core.user_token import user_token_scope
 
 MANIFEST = """
 [project]
@@ -154,11 +155,14 @@ class _FakeGeodukt:
     def __init__(self, **responses):
         self.responses = responses
         self.calls = []
+        # kept apart from calls so the call assertions stay about the payload
+        self.headers = []
 
-    def _respond(self, url, payload=None):
+    def _respond(self, url, payload=None, headers=None):
         path = url.rsplit("8080", 1)[-1] if "8080" in url else url
         key = path.strip("/").replace("/", "_")
         self.calls.append((path, payload))
+        self.headers.append(headers or {})
         if key not in self.responses:
             raise AssertionError(f"unexpected request to {path}")
         status, body = self.responses[key]
@@ -171,11 +175,11 @@ class _FakeGeodukt:
 
         return SimpleNamespace(status_code=status, text=text, json=as_json)
 
-    def post(self, url, json=None, timeout=None):
-        return self._respond(url, json)
+    def post(self, url, json=None, headers=None, timeout=None):
+        return self._respond(url, json, headers)
 
-    def get(self, url, timeout=None):
-        return self._respond(url)
+    def get(self, url, headers=None, timeout=None):
+        return self._respond(url, headers=headers)
 
 
 class _NoHttp:
@@ -345,6 +349,40 @@ def test_run_workflow_reports_counts_and_outputs(geodukt):
     assert not res.startswith("ERROR")
 
 
+def test_the_run_goes_out_as_the_user_who_approved_it(geodukt):
+    """geodukt gates /run on an editor or admin token, so the approval has to
+    reach it as the person who gave it, not as geolang."""
+    fake = geodukt(run=(200, RUN_RECORD))
+
+    with user_token_scope("header.payload.signature"):
+        run_workflow(MANIFEST)
+
+    assert fake.headers == [{"Authorization": "Bearer header.payload.signature"}]
+
+
+def test_a_headless_run_carries_no_token(geodukt):
+    # the eval harness runs with nobody signed in: no header, and geodukt
+    # answers 401 unless it is running without a platform secret
+    fake = geodukt(run=(200, RUN_RECORD))
+
+    run_workflow(MANIFEST)
+
+    assert fake.headers == [{}]
+
+
+def test_planning_and_the_catalog_travel_as_the_caller_too(geodukt):
+    fake = geodukt(validate=(200, VALIDATED), operations=(200, OPERATIONS))
+
+    with user_token_scope("header.payload.signature"):
+        plan_workflow(MANIFEST)
+        list_workflow_operations()
+
+    assert fake.headers == [
+        {"Authorization": "Bearer header.payload.signature"},
+        {"Authorization": "Bearer header.payload.signature"},
+    ]
+
+
 def test_run_workflow_surfaces_a_failed_run(geodukt):
     geodukt(run=(200, {"id": 1, "status": {"Failed": "clip: no overlap"}, "steps": []}))
 
@@ -436,6 +474,21 @@ def test_a_viewer_run_is_reported_back_into_the_session(geodukt, monkeypatch):
     assert sent[0].startswith("[run_workflow run from the viewer]")
     # the counts have to survive into the session or a follow-up question cannot use them
     assert "catchment: 12 features" in sent[0]
+
+
+def test_an_approved_run_reaches_geodukt_as_the_approving_user(geodukt):
+    """The viewer's approve button posts the tool call itself, so its bearer is
+    what the executor must run the tool under."""
+    fake = geodukt(run=(200, RUN_RECORD))
+
+    body = server.run_tool(
+        "run_workflow",
+        server.ToolCallRequest(args={"manifest_toml": MANIFEST}),
+        authorization="Bearer header.payload.signature",
+    )
+
+    assert "catchment: 12 features" in body["result"]
+    assert fake.headers == [{"Authorization": "Bearer header.payload.signature"}]
 
 
 def test_the_models_own_run_is_not_reported_twice(geodukt, monkeypatch):

@@ -33,7 +33,10 @@ def list_tilesets(search: str = None, category: str = None) -> str:
     import os
     import traceback
 
+    from src.core.user_token import service_headers
+
     base_url = os.environ.get("TILETOPIA_URL", "http://tiletopia:3000").rstrip("/")
+    headers = service_headers()
 
     try:
         import requests
@@ -41,7 +44,9 @@ def list_tilesets(search: str = None, category: str = None) -> str:
         lines = []
 
         params = {"q": search} if search else {}
-        resp = requests.get(f"{base_url}/api/v1/assets", params=params, timeout=15)
+        resp = requests.get(
+            f"{base_url}/api/v1/assets", params=params, headers=headers, timeout=15
+        )
         resp.raise_for_status()
         assets = resp.json()
         if assets:
@@ -55,7 +60,9 @@ def list_tilesets(search: str = None, category: str = None) -> str:
                 lines.append(f"  • {name} (id={asset_id}, status={status}) → url: {url}")
 
         cat_params = {"category": category} if category else {}
-        resp = requests.get(f"{base_url}/api/v1/catalog", params=cat_params, timeout=15)
+        resp = requests.get(
+            f"{base_url}/api/v1/catalog", params=cat_params, headers=headers, timeout=15
+        )
         resp.raise_for_status()
         catalog = [d for d in resp.json() if d.get("enabled", True)]
         if catalog:
