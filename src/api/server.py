@@ -179,7 +179,7 @@ async def agent_event_stream(message: str):
     """Run a sibyl agent run and yield normalized (kind, payload) events.
 
     Single source of truth for the marker parsing. kinds:
-    "text", "progress", "viewer_cmd", "ui_spec", "error", "keepalive".
+    "text", "progress", "viewer_cmd", "ui_spec", "plan", "error", "keepalive".
     /chat/agui renders these as AG-UI events.
     """
     loop = asyncio.get_running_loop()
@@ -209,6 +209,7 @@ async def agent_event_stream(message: str):
     all_content = []
     assistant_texts = []
     ui_spec = None
+    planned = False
 
     while True:
         try:
@@ -262,6 +263,16 @@ async def agent_event_stream(message: str):
                     except Exception:
                         pass
 
+            # Workflow plan from plan_workflow, awaiting the user's approval
+            if "__PLAN__:" in content:
+                for part in content.split("__PLAN__:")[1:]:
+                    try:
+                        plan = json.loads(part.split("\n")[0].strip())
+                    except Exception:
+                        continue
+                    planned = True
+                    yield ("plan", plan)
+
             if kind == "text":
                 yield ("text", content)
             continue
@@ -273,7 +284,9 @@ async def agent_event_stream(message: str):
         if kind == "done":
             break
 
-    if ui_spec is None:
+    # a plan names output files that do not exist yet, and the inference below
+    # cannot tell those from files a tool actually wrote
+    if ui_spec is None and not planned:
         import re as _re
 
         # Primary: infer from full content, filter to files the agent mentioned
@@ -338,6 +351,10 @@ def render_agui_event(encoder: EventEncoder, kind: str, payload) -> str:
     if kind == "ui_spec":
         return encoder.encode(
             CustomEvent(type=EventType.CUSTOM, name="ui_spec", value=payload)
+        )
+    if kind == "plan":
+        return encoder.encode(
+            CustomEvent(type=EventType.CUSTOM, name="plan", value=payload)
         )
     if kind == "error":
         return encoder.encode(

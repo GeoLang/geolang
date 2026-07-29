@@ -11,7 +11,8 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 36 geospatial tools served to sibyl over HTTP and executed in-process
+- 39 geospatial tools served to sibyl over HTTP and executed in-process
+- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan for the user to approve, `run_workflow` executes it
 - AG-UI event stream for ViewTopia
 
 ---

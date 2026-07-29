@@ -41,12 +41,13 @@ def sql_query(
     fit: bool = True,
 ) -> str:
     """Run a DuckDB Spatial SQL query in the user's browser and optionally render
-    the result as a map layer. Use this for ad-hoc analytical questions over data
-    already reachable from the viewer: attached layers, public GeoParquet/CSV URLs
-    via read_parquet/read_csv, or remote GeoJSON. Prefer this over server-side
-    tools when the data is reachable from the browser: it is lower latency and
-    does not burden the server. Do NOT use it for large server-side datasets,
-    mutations, or results that must persist for collaborators."""
+    the result as a map layer. This is the escape hatch for a single ad-hoc
+    question over data already reachable from the viewer: attached layers, public
+    GeoParquet/CSV URLs via read_parquet/read_csv, or remote GeoJSON. For analysis
+    that transforms data in more than one step, use plan_workflow and run_workflow
+    instead: the user gets a reviewable plan and reusable output files, which raw
+    SQL leaves behind neither of. Do NOT use sql_query for large server-side
+    datasets, mutations, or results that must persist for collaborators."""
     import json
 
     cmd = {

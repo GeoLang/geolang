@@ -38,6 +38,7 @@ GeoLang is a FastAPI service that owns the geospatial tools and exposes an agent
 | `TEXT_MESSAGE_START/CONTENT/END` | `{messageId, delta}` | An assistant message; the full text arrives as one CONTENT delta. |
 | `CUSTOM` name=`viewer_cmd` | `{value: {action, params}}` | Imperative instruction for the viewer. See [`viewer_integration.md`](viewer_integration.md). |
 | `CUSTOM` name=`ui_spec` | `{value}` | Structured UI hint (e.g. `{type: "map", layers: [...]}`) — viewer-rendered. |
+| `CUSTOM` name=`plan` | `{value: {title, project, steps, datasets, outputs, formats, manifest}}` | A geodukt workflow awaiting the user's approval, from `plan_workflow`. `manifest` is the TOML `run_workflow` executes verbatim once they agree. |
 | `RUN_ERROR` | `{message}` | Tool or LLM failure. |
 | `RUN_FINISHED` | — | End of run. |
 

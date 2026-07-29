@@ -87,7 +87,7 @@ Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>
 
 ## Tool catalogue
 
-36 tools live under [`src/agents/tools/`](../src/agents/tools/). They are loaded from disk on every manifest or execution request. Categories:
+39 tools live under [`src/agents/tools/`](../src/agents/tools/). They are loaded from disk on every manifest or execution request. Categories:
 
 **Data acquisition** — `geocode_place` (geokode-first, Natural Earth fallback), `batch_geocode`, `get_admin_boundary`, `download_natural_earth_dataset`, `download_osm_data`, `download_population_grid`, `query_elevation`.
 
@@ -98,6 +98,8 @@ Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>
 **Terrain & raster** — `terrain_profile`, `query_zonal_population`, `assess_environmental_risk`, `generate_heatmap`.
 
 **Platform services** — `ptolemy_query` (geodatabase datasets/branches/features), `list_tilesets` (TileTopia assets + catalog), `sql_query` (in-browser DuckDB Spatial via viewer command).
+
+**Workflows**: `list_workflow_operations` (geodukt transform catalog), `plan_workflow` (validate a geodukt TOML manifest, emit the plan as a `__PLAN__` marker for approval), `run_workflow` (execute the approved manifest). Shared client code sits in `_geodukt.py`, which the loader skips because of the leading underscore.
 
 **Export & discovery** — `export_to_gpkg`, `list_user_datasets`, `list_outputs`, `list_qgis_algorithms`, `check_qgis_status`, `run_qgis_algorithm`.
 
@@ -117,3 +119,4 @@ Adding a tool is a single file: drop a module into `src/agents/tools/` exporting
 | `GEOKODE_URL` | — | geokode endpoint; when set, `geocode_place` tries it first. |
 | `ITINERA_URL` | — | itinera endpoint; when set, `compute_route` tries it first. |
 | `TILETOPIA_URL` | `http://tiletopia:3000` | TileTopia endpoint (`list_tilesets`). |
+| `GEODUKT_URL` | `http://geodukt:8080` | geodukt-server endpoint (`plan_workflow`, `run_workflow`, `list_workflow_operations`). |
