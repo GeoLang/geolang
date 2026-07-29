@@ -11,9 +11,10 @@ class GeocodePlaceArgs(BaseModel):
 def geocode_place(place_name: str) -> str:
     """
     Look up the coordinates of a named place. Tries the platform's geokode
-    service first (precise addresses within its loaded extract), then falls back
-    to the Natural Earth populated places dataset for global coverage.
-    Returns longitude, latitude, and country. Call this whenever the user mentions a location by name.
+    service first (precise addresses within its loaded extract), then the
+    Natural Earth populated places dataset, then Nominatim (OpenStreetMap) for
+    landmarks and anything else. Returns longitude, latitude, and country.
+    Call this whenever the user mentions a location by name.
     """
     import os
     import traceback
@@ -88,7 +89,7 @@ def geocode_place(place_name: str) -> str:
             match = gdf[gdf[name_col].str.contains(query, case=False, na=False)]
 
         if match.empty:
-            return f"❌ Place '{place_name}' not found in dataset."
+            return _nominatim_fallback(place_name)
 
         # Use the most populous match if there are multiple
         pop_col = next((c for c in match.columns if "POP" in c.upper()), None)
@@ -107,6 +108,34 @@ def geocode_place(place_name: str) -> str:
 
     except Exception as e:
         return f"❌ Geocoding failed: {str(e)}\n{traceback.format_exc()}"
+
+
+def _nominatim_fallback(place_name: str) -> str:
+    # landmarks ("Eiffel Tower") are in neither geokode's address extract nor
+    # Natural Earth's populated places, so ask Nominatim before giving up
+    try:
+        import requests
+
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": place_name, "format": "json", "limit": 1},
+            headers={"User-Agent": "geolang-gis-agent/1.0"},
+            timeout=10,
+        )
+        data = resp.json()
+        if data:
+            hit = data[0]
+            lon = round(float(hit["lon"]), 5)
+            lat = round(float(hit["lat"]), 5)
+            label = hit.get("display_name", place_name)
+            return f"✅ {label} (nominatim): lon={lon}, lat={lat}"
+    except Exception:
+        pass
+    return (
+        f"❌ Place '{place_name}' not found in any geocoding source. "
+        "Tell the user geocoding failed. Do not answer with coordinates "
+        "from memory."
+    )
 
 
 TOOL_FUNCTION = geocode_place
