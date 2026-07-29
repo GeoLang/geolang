@@ -188,10 +188,19 @@ def _format_checks(kind: str, expected: list, actual_steps: list) -> list:
     return checks
 
 
-def score_manifest(task: Task, manifest_toml: str, tools=None) -> Result:
+def _first_line(text: str, limit: int = 160) -> str:
+    """The reason without the retry advice that follows it."""
+    line = str(text or "").strip().split("\n")[0]
+    return line[:limit]
+
+
+def score_manifest(task: Task, manifest_toml: str, tools=None, rejection="") -> Result:
     """Score one model answer. An empty manifest means the model built none.
 
     `tools` is the tool names the model called, when the caller recorded them.
+    `rejection` is the last error a planning call returned, which is what makes
+    the difference between a model that never tried and one that could not
+    recover from being told no.
     """
     text = manifest_toml or ""
     manifest = None
@@ -205,11 +214,19 @@ def score_manifest(task: Task, manifest_toml: str, tools=None) -> Result:
     if task.unavailable:
         return Result(task.id, _unavailable_checks(task, manifest, tools), text)
 
+    if not text.strip():
+        nothing = (
+            f"rejected and not corrected: {_first_line(rejection)}"
+            if rejection
+            else "no manifest produced"
+        )
+    else:
+        nothing = ""
     checks = [
         Check(
             "manifest parses",
             manifest is not None,
-            parse_error or ("no manifest produced" if not text.strip() else ""),
+            parse_error or nothing,
         )
     ]
     graph = manifest or {}

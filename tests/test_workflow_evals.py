@@ -618,7 +618,7 @@ def test_a_rejected_manifest_is_not_the_models_answer():
     )
     with respx.mock(base_url=runner.SIBYL) as sibyl:
         sibyl.post("/runs").respond(200, content=body)
-        captured, tools = runner.capture_answer("join them")
+        captured, tools, _ = runner.capture_answer("join them")
 
     assert captured == ""
     assert "spatial_join" in tools
@@ -633,7 +633,7 @@ def test_recovering_from_a_rejection_passes_the_negative_task():
     )
     with respx.mock(base_url=runner.SIBYL) as sibyl:
         sibyl.post("/runs").respond(200, content=body)
-        captured, tools = runner.capture_answer("join them")
+        captured, tools, _ = runner.capture_answer("join them")
 
     assert score_manifest(NEGATIVE_TASK, captured, tools).score == 1.0
 
@@ -643,7 +643,7 @@ def test_doing_nothing_fails_the_negative_task():
     body = _ndjson({"kind": "text", "content": "sorry, cannot"}, {"kind": "done"})
     with respx.mock(base_url=runner.SIBYL) as sibyl:
         sibyl.post("/runs").respond(200, content=body)
-        captured, tools = runner.capture_answer("join them")
+        captured, tools, _ = runner.capture_answer("join them")
 
     result = score_manifest(NEGATIVE_TASK, captured, tools)
     assert result.score < 1.0
@@ -659,7 +659,7 @@ def test_an_accepted_bad_manifest_still_fails_the_negative_task():
     )
     with respx.mock(base_url=runner.SIBYL) as sibyl:
         sibyl.post("/runs").respond(200, content=body)
-        captured, tools = runner.capture_answer("join them")
+        captured, tools, _ = runner.capture_answer("join them")
 
     result = score_manifest(NEGATIVE_TASK, captured, tools)
     assert [c.name for c in result.failures] == ["avoids unavailable operation spatial_join"]
@@ -670,3 +670,40 @@ def test_scoring_a_capture_skips_the_tool_check():
     result = score_manifest(NEGATIVE_TASK, "")
     assert result.total == 1
     assert result.score == 1.0
+
+
+def test_an_unrecovered_rejection_is_reported_as_the_reason():
+    """A zero with no reason is undiagnosable, so the rejection has to survive."""
+    body = _ndjson(
+        _plan_call(manifest(BUFFER_STEP)),
+        {
+            "kind": "tool_return",
+            "name": "plan_workflow",
+            "content": "ERROR: geodukt rejected the manifest: missing required parameter 'distance'\nFix it and call plan_workflow again.",
+        },
+        {"kind": "done"},
+    )
+    with respx.mock(base_url=runner.SIBYL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        captured, tools, rejection = runner.capture_answer("buffer the depots")
+
+    assert captured == ""
+    assert "missing required parameter" in rejection
+
+    result = score_manifest(BUFFER_TASK, captured, tools, rejection)
+    detail = result.failures[0].detail
+    assert "rejected and not corrected" in detail
+    assert "missing required parameter" in detail
+    # the retry advice on the second line is noise in a report table
+    assert "call plan_workflow again" not in detail
+
+
+def test_no_attempt_at_all_still_says_so():
+    body = _ndjson({"kind": "text", "content": "I would rather not"}, {"kind": "done"})
+    with respx.mock(base_url=runner.SIBYL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        captured, tools, rejection = runner.capture_answer("buffer the depots")
+
+    assert rejection == ""
+    result = score_manifest(BUFFER_TASK, captured, tools, rejection)
+    assert result.failures[0].detail == "no manifest produced"

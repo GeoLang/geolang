@@ -152,15 +152,20 @@ def captured_manifest(message: str) -> str:
 
 
 def capture_answer(message: str):
-    """Run one prompt and return (manifest, tools called).
+    """Run one prompt and return (manifest, tools called, last rejection).
 
     A manifest the tool rejected is not an answer: the user never saw a plan and
     the model went on to do something else, so scoring the rejected attempt would
     mark a model wrong for recovering correctly. Only a manifest whose own call
     came back without an error counts, and the last of those is the final answer.
+
+    The last rejection comes back too. Without it a run that produced nothing is
+    an unexplained zero, and the interesting question is always whether the model
+    never tried or tried and failed to recover.
     """
     accepted = []
     tools = []
+    rejection = ""
     # a turn can carry several calls before any result, so results are matched to
     # calls by tool name in order rather than assuming they interleave
     pending = {}
@@ -193,13 +198,15 @@ def capture_answer(message: str):
                 elif kind == "tool_return" and pending.get(name):
                     manifest = pending[name].pop(0)
                     content = str(event.get("content") or "").strip()
-                    if not content.upper().startswith("ERROR"):
+                    if content.upper().startswith("ERROR"):
+                        rejection = content
+                    else:
                         accepted.append(manifest)
     # a call whose result never arrived stays an answer, so a truncated run fails
     # loudly instead of scoring as though the model planned nothing
     for leftover in pending.values():
         accepted.extend(leftover)
-    return (accepted[-1] if accepted else ""), tools
+    return (accepted[-1] if accepted else ""), tools, rejection
 
 
 def score_from_directory(tasks: list, directory: Path) -> list:
@@ -347,7 +354,7 @@ def main(argv=None) -> int:
                     print(f"running {label}", file=sys.stderr)
                     # a fresh session per run, so one sample cannot bias the next
                     eval_sessions.append(start_eval_session(f"eval {task.id} {run}"))
-                    manifest, tools = capture_answer(task.prompt)
+                    manifest, tools, rejection = capture_answer(task.prompt)
                     if capture_dir and manifest:
                         name = (
                             f"{task.id}.toml"
@@ -355,7 +362,7 @@ def main(argv=None) -> int:
                             else f"{task.id}.run{run}.toml"
                         )
                         (capture_dir / name).write_text(manifest)
-                    samples.append(score_manifest(task, manifest, tools))
+                    samples.append(score_manifest(task, manifest, tools, rejection))
                 results.append(TaskSamples(task.id, samples))
         finally:
             restore_session(user_session)
