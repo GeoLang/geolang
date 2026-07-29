@@ -151,7 +151,9 @@ def test_plain_question_completes():
 
 
 def test_geocode_eiffel_tower():
-    res = run_prompt("What are the exact coordinates of the Eiffel Tower?")
+    # tool named in the prompt: models sometimes answer landmark coordinates
+    # from their weights, and this test is about the geocoding tool path
+    res = run_prompt("Use the geocode_place tool to find the exact coordinates of the Eiffel Tower.")
     geocodes = res.calls("geocode_place")
     assert geocodes, f"geocode_place not called; called {[n for n, _ in res.tool_calls]}"
     assert any("eiffel" in a.lower() for a in geocodes)
