@@ -233,6 +233,7 @@ def test_plan_emits_the_structured_plan(geodukt):
     plan = plan_of(res)
     assert plan["title"] == "Depot catchment areas"
     assert plan["project"] == "depot-catchment"
+    assert plan["validated"] is True
     assert [(s["index"], s["kind"], s["name"]) for s in plan["steps"]] == [
         (1, "source", "depots"),
         (2, "transform", "catchment"),
@@ -296,13 +297,39 @@ def test_run_failure_message_is_lifted_out_of_the_error_body(geodukt):
     assert '{"kind"' not in res
 
 
+def test_a_mid_pipeline_failure_reports_the_status_reason(geodukt):
+    # geodukt answers a failed run with the run record, which echoes the whole
+    # manifest: the reason lives in status, and dumping the body would bury it
+    geodukt(
+        run=(
+            422,
+            {
+                "id": 0,
+                "status": {"Failed": "transform error for 'clip': no overlap"},
+                "manifest_name": "depot-catchment",
+                "manifest": MANIFEST,
+                "steps": [],
+            },
+        )
+    )
+
+    res = run_workflow(MANIFEST)
+
+    assert res.startswith("ERROR")
+    assert "transform error for 'clip': no overlap" in res
+    assert "[[source]]" not in res
+
+
 def test_plan_still_works_without_the_validate_route(geodukt):
     geodukt(validate=(404, ""))
 
     res = plan_workflow(MANIFEST)
 
     assert "not validated" in res
-    assert plan_of(res)["outputs"] == ["outputs/depot_catchment.gpkg"]
+    plan = plan_of(res)
+    assert plan["outputs"] == ["outputs/depot_catchment.gpkg"]
+    # the panel needs this as a flag, not as prose in the summary
+    assert plan["validated"] is False
 
 
 def test_run_workflow_reports_counts_and_outputs(geodukt):
@@ -388,6 +415,63 @@ def test_plan_marker_becomes_a_plan_event():
         ("plan", plan),
         ("text", "Here is the plan, shall I run it?"),
     ]
+
+
+def test_a_viewer_run_is_reported_back_into_the_session(geodukt, monkeypatch):
+    geodukt(run=(200, RUN_RECORD))
+    sent = []
+
+    async def fake_notify(text):
+        sent.append(text)
+
+    monkeypatch.setattr(server, "notify_agent", fake_notify)
+
+    body = server.run_tool(
+        "run_workflow",
+        server.ToolCallRequest(args={"manifest_toml": MANIFEST}, notify=True),
+    )
+
+    assert "catchment: 12 features" in body["result"]
+    assert len(sent) == 1
+    assert sent[0].startswith("[run_workflow run from the viewer]")
+    # the counts have to survive into the session or a follow-up question cannot use them
+    assert "catchment: 12 features" in sent[0]
+
+
+def test_the_models_own_run_is_not_reported_twice(geodukt, monkeypatch):
+    geodukt(run=(200, RUN_RECORD))
+    sent = []
+
+    async def fake_notify(text):
+        sent.append(text)
+
+    monkeypatch.setattr(server, "notify_agent", fake_notify)
+
+    # exactly the body sibyl sends: no notify field at all
+    body = server.run_tool(
+        "run_workflow", server.ToolCallRequest(**{"args": {"manifest_toml": MANIFEST}})
+    )
+
+    assert "catchment: 12 features" in body["result"]
+    assert sent == []
+
+
+def test_a_failed_viewer_run_is_still_reported(geodukt, monkeypatch):
+    geodukt(run=(422, {"kind": "sink", "message": "sink 'out' has no path"}))
+    sent = []
+
+    async def fake_notify(text):
+        sent.append(text)
+
+    monkeypatch.setattr(server, "notify_agent", fake_notify)
+
+    server.run_tool(
+        "run_workflow",
+        server.ToolCallRequest(args={"manifest_toml": MANIFEST}, notify=True),
+    )
+
+    assert len(sent) == 1
+    assert "sink 'out' has no path" in sent[0]
 
 
 def test_plan_event_renders_as_an_agui_custom_event():

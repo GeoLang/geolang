@@ -32,10 +32,16 @@ def error_detail(resp) -> str:
     """geodukt rejects a manifest with {"kind", "message"} JSON, older builds text."""
     try:
         body = resp.json()
-        if isinstance(body, dict) and body.get("message"):
-            return str(body["message"])
     except Exception:
-        pass
+        body = None
+    if isinstance(body, dict):
+        if body.get("message"):
+            return str(body["message"])
+        # a run that fails mid-pipeline answers with the run record itself, and
+        # the reason is inside its status rather than in a message field
+        status = body.get("status")
+        if isinstance(status, dict) and status:
+            return str(next(iter(status.values())))
     return (resp.text or "").strip()[:600] or f"HTTP {resp.status_code}"
 
 
@@ -118,12 +124,19 @@ def order_steps(steps: list, order: list) -> list:
     return sorted(steps, key=lambda step: rank[step["name"]])
 
 
-def plan_payload(title: str, manifest: dict, steps: list, manifest_toml: str) -> dict:
-    """Structured plan for the viewer, carrying the manifest run_workflow needs."""
+def plan_payload(
+    title: str, manifest: dict, steps: list, manifest_toml: str, validated: bool
+) -> dict:
+    """Structured plan for the viewer, carrying the manifest run_workflow needs.
+
+    `validated` is False when geodukt has no /validate route, so the panel can
+    say the plan was only parsed rather than checked.
+    """
     project = (manifest.get("project") or {}).get("name", "")
     return {
         "title": title or project or "workflow",
         "project": project,
+        "validated": validated,
         "steps": [dict(step, index=i + 1) for i, step in enumerate(steps)],
         "datasets": [s["path"] for s in steps if s["kind"] == "source" and s["path"]],
         "outputs": [s["path"] for s in steps if s["kind"] == "sink" and s["path"]],

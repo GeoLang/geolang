@@ -78,6 +78,8 @@ sibyl reads the manifest, picks a tool, and posts the arguments back for GeoLang
 ### `POST /tools/{name}`
 Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>" }`. `404` for an unknown tool. Bad arguments and tool exceptions come back as `200` with a `result` starting with ❌, so the agent can read the failure and recover. Calls can take minutes.
 
+Add `"notify": true` when running a tool outside the model's turn, such as the viewer's plan-approval button calling `run_workflow`: the result is appended to the active sibyl session so the model can answer follow-up questions about it. sibyl never sets the flag, so a run the model itself asked for is not reported back to it twice.
+
 ## Debug
 
 | Method | Path | Purpose |

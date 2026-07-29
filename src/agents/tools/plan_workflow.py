@@ -97,7 +97,7 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
             "and one [[sink]] table."
         )
 
-    plan = plan_payload(title, manifest, steps, manifest_toml)
+    plan = plan_payload(title, manifest, steps, manifest_toml, not route_missing)
     checked = (
         "not validated (this geodukt build has no /validate endpoint)"
         if route_missing

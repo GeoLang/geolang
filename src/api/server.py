@@ -149,6 +149,11 @@ def list_tools():
 
 class ToolCallRequest(BaseModel):
     args: dict = {}
+    # Set by callers that run a tool outside the model's turn, such as the
+    # viewer's plan-approval button: the result is appended to the sibyl session
+    # so the model knows it happened. sibyl itself never sets it, which is what
+    # keeps a run the model asked for from being reported back to it twice.
+    notify: bool = False
 
 
 # sync so FastAPI runs it in the threadpool: tools block for minutes
@@ -169,10 +174,16 @@ def run_tool(name: str, request: ToolCallRequest):
         return {"result": f"❌ Invalid arguments: {e}"}
 
     try:
-        return {"result": func(**args)}
+        result = func(**args)
     except Exception as e:
         logger.exception(f"Tool {name} failed")
-        return {"result": f"❌ Tool execution failed: {e}"}
+        result = f"❌ Tool execution failed: {e}"
+
+    if request.notify:
+        # this route is sync, so it runs in a worker thread with no event loop
+        asyncio.run(notify_agent(f"[{name} run from the viewer] {str(result)[:800]}"))
+
+    return {"result": result}
 
 
 async def agent_event_stream(message: str):
