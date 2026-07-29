@@ -74,6 +74,7 @@ format = "gpkg"
 path = "outputs/two_step.gpkg"
 """
 
+# an older geodukt build: a run status but no per-step one
 RUN_RECORD = {
     "id": 7,
     "status": "Completed",
@@ -82,6 +83,29 @@ RUN_RECORD = {
         {"name": "depots", "feature_count": 12},
         {"name": "catchment", "feature_count": 12},
         {"name": "out", "feature_count": 12},
+    ],
+}
+
+RUN_RECORD_WITH_STEP_STATUS = {
+    **RUN_RECORD,
+    "steps": [dict(s, status="Completed") for s in RUN_RECORD["steps"]],
+}
+
+# a run that died in the middle: the failing step names the reason and the steps
+# after it never started
+FAILED_RUN_RECORD = {
+    "id": 8,
+    "status": {"Failed": "transform error for 'catchment': no overlap"},
+    "manifest_name": "depot-catchment",
+    "manifest": MANIFEST,
+    "steps": [
+        {"name": "depots", "feature_count": 12, "status": "Completed"},
+        {
+            "name": "catchment",
+            "feature_count": 0,
+            "status": {"Failed": "no overlap"},
+        },
+        {"name": "out", "feature_count": 0, "status": "NotRun"},
     ],
 }
 
@@ -229,6 +253,16 @@ def plan_of(result: str) -> dict:
     return json.loads(result.split("__PLAN__:", 1)[1])
 
 
+def report_of(result: str) -> dict:
+    assert "__RUN__:" in result, result
+    return json.loads(result.split("__RUN__:", 1)[1])
+
+
+def prose_of(result: str) -> str:
+    """What the model and the panel show: everything above the marker."""
+    return result.split("__RUN__:", 1)[0]
+
+
 def test_manifest_toml_is_required(monkeypatch):
     with pytest.raises(ValidationError):
         PlanWorkflowArgs()
@@ -369,6 +403,72 @@ def test_run_workflow_reports_counts_and_outputs(geodukt):
     assert "wrote outputs/depot_catchment.gpkg (gpkg)" in res
     assert "emit_ui_spec" in res
     assert not res.startswith("ERROR")
+    # no per-step status from this build, but the run completed, so every step did
+    report = report_of(res)
+    assert {s["outcome"] for s in report["steps"]} == {"completed"}
+    assert report["outputs"] == [
+        {
+            "name": "out",
+            "path": "outputs/depot_catchment.gpkg",
+            "format": "gpkg",
+            "written": True,
+        }
+    ]
+
+
+def test_a_successful_run_emits_the_structured_report(geodukt):
+    geodukt(run=(200, RUN_RECORD_WITH_STEP_STATUS))
+
+    res = run_workflow(MANIFEST)
+
+    report = report_of(res)
+    assert report["id"] == 7
+    assert report["title"] == "depot-catchment"
+    assert report["status"] == "completed"
+    assert report["message"] == ""
+    assert [(s["name"], s["outcome"], s["feature_count"]) for s in report["steps"]] == [
+        ("depots", "completed", 12),
+        ("catchment", "completed", 12),
+        ("out", "completed", 12),
+    ]
+    # the panel only offers a download for a file that was actually written
+    assert [(o["path"], o["written"]) for o in report["outputs"]] == [
+        ("outputs/depot_catchment.gpkg", True)
+    ]
+    # the marker stays on one line so the stream parser can split on it
+    assert "\n" not in res.split("__RUN__:", 1)[1]
+    assert "__RUN__" not in prose_of(res)
+
+
+def test_a_mid_pipeline_failure_reports_every_step(geodukt):
+    # geodukt answers a failed run 4xx with the record, so the per-step detail is
+    # in the error body rather than in a successful reply
+    geodukt(run=(422, FAILED_RUN_RECORD))
+
+    res = run_workflow(MANIFEST)
+
+    assert res.startswith("ERROR")
+    assert "transform error for 'catchment': no overlap" in prose_of(res)
+    assert "catchment: failed: no overlap" in prose_of(res)
+    assert "out: did not run" in prose_of(res)
+    # a failed run wrote nothing, so it must not advertise the output
+    assert "wrote outputs" not in prose_of(res)
+    assert "emit_ui_spec" not in prose_of(res)
+    # the record echoes the whole manifest and neither the prose nor the report
+    # may drag it along
+    assert "[[source]]" not in res
+
+    report = report_of(res)
+    assert report["status"] == "failed"
+    assert report["message"] == "transform error for 'catchment': no overlap"
+    assert [(s["name"], s["outcome"], s["message"]) for s in report["steps"]] == [
+        ("depots", "completed", ""),
+        ("catchment", "failed", "no overlap"),
+        ("out", "not_run", ""),
+    ]
+    assert [(o["path"], o["written"]) for o in report["outputs"]] == [
+        ("outputs/depot_catchment.gpkg", False)
+    ]
 
 
 def test_the_run_goes_out_as_the_user_who_approved_it(geodukt):
@@ -477,6 +577,63 @@ def test_plan_marker_becomes_a_plan_event():
     ]
 
 
+def test_run_marker_becomes_a_run_event():
+    report = {
+        "id": 7,
+        "title": "depot-catchment",
+        "status": "completed",
+        "steps": [{"name": "out", "outcome": "completed", "feature_count": 12}],
+        "outputs": [{"path": "outputs/depot_catchment.gpkg", "written": True}],
+    }
+    body = _ndjson(
+        {"kind": "tool_call", "name": "run_workflow", "args": "{}"},
+        {
+            "kind": "tool_return",
+            "name": "run_workflow",
+            "content": "Workflow ran.\n__RUN__:" + json.dumps(report),
+        },
+        {"kind": "text", "content": "Done, it wrote the catchment layer."},
+        {"kind": "done"},
+    )
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        events = _collect()
+
+    assert ("run", report) in events
+    # the marker is for the panel: nothing the user reads may carry it
+    assert not [p for kind, p in events if kind == "text" and "__RUN__" in str(p)]
+
+
+def test_a_failed_run_streams_its_per_step_outcome():
+    report = {
+        "id": 8,
+        "status": "failed",
+        "message": "no overlap",
+        "steps": [
+            {"name": "depots", "outcome": "completed", "feature_count": 12},
+            {"name": "catchment", "outcome": "failed", "message": "no overlap"},
+            {"name": "out", "outcome": "not_run"},
+        ],
+        "outputs": [{"path": "outputs/depot_catchment.gpkg", "written": False}],
+    }
+    body = _ndjson(
+        {
+            "kind": "tool_return",
+            "name": "run_workflow",
+            "content": "ERROR: workflow run 8 failed: no overlap\n__RUN__:"
+            + json.dumps(report),
+        },
+        {"kind": "done"},
+    )
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        events = _collect()
+
+    # the tool error surfaces as progress, and the marker line is not part of it
+    assert ("progress", "ERROR: workflow run 8 failed: no overlap") in events
+    assert ("run", report) in events
+
+
 def test_a_viewer_run_is_reported_back_into_the_session(geodukt, monkeypatch):
     geodukt(run=(200, RUN_RECORD))
     sent = []
@@ -496,6 +653,9 @@ def test_a_viewer_run_is_reported_back_into_the_session(geodukt, monkeypatch):
     assert sent[0].startswith("[run_workflow run from the viewer]")
     # the counts have to survive into the session or a follow-up question cannot use them
     assert "catchment: 12 features" in sent[0]
+    # the viewer parses the marker itself: truncating it into the session would
+    # leave the model half a JSON blob
+    assert "__RUN__" not in sent[0]
 
 
 def test_an_approved_run_reaches_geodukt_as_the_approving_user(geodukt):

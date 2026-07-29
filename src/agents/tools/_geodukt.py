@@ -173,6 +173,60 @@ def plan_payload(
     }
 
 
+_STEP_OUTCOMES = {"completed": "completed", "notrun": "not_run"}
+
+
+def step_outcome(status, run_completed: bool):
+    """(outcome, message) for one step of a run record.
+
+    Older geodukt builds report no per-step status: every step of a completed
+    run did run, and for a failed one there is nothing to claim.
+    """
+    if isinstance(status, dict):
+        return "failed", str(next(iter(status.values()), "") or "")
+    if not status:
+        return ("completed" if run_completed else "unknown"), ""
+    return _STEP_OUTCOMES.get(str(status).lower().replace("_", ""), "unknown"), ""
+
+
+def run_payload(manifest: dict, record: dict, completed: bool, message: str) -> dict:
+    """Structured run report for the viewer: per-step outcome and written outputs.
+
+    `written` is what the panel offers as a download, so it stays false for any
+    sink whose step did not complete: that file is not there to fetch.
+    """
+    steps = []
+    for step in record.get("steps") or []:
+        outcome, detail = step_outcome(step.get("status"), completed)
+        steps.append(
+            {
+                "name": step.get("name", ""),
+                "outcome": outcome,
+                "feature_count": step.get("feature_count"),
+                "message": detail,
+            }
+        )
+    ran = {s["name"] for s in steps if s["outcome"] == "completed"}
+    project = (manifest.get("project") or {}).get("name", "")
+    return {
+        "id": record.get("id"),
+        "title": record.get("manifest_name") or project,
+        "status": "completed" if completed else "failed",
+        "message": message,
+        "steps": steps,
+        "outputs": [
+            {
+                "name": sink["name"],
+                "path": sink["path"],
+                "format": sink["format"],
+                "written": completed and (not steps or sink["name"] in ran),
+            }
+            for sink in manifest_steps(manifest)
+            if sink["kind"] == "sink" and sink["path"]
+        ],
+    }
+
+
 def plan_summary(plan: dict) -> str:
     """The same plan as prose, so the model can read it back to the user."""
     lines = []

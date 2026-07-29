@@ -1,10 +1,15 @@
-"""Execute a geodukt manifest through the server's synchronous /run endpoint."""
+"""Execute a geodukt manifest through the server's synchronous /run endpoint.
+
+Returns a readable summary for the model plus a ``__RUN__:{json}`` marker that
+server.py's agent_event_stream turns into a "run" event for the viewer, the same
+seam plan_workflow uses for the plan itself.
+"""
 
 from pydantic import BaseModel, Field
 
 from src.core.user_token import service_headers
 
-from ._geodukt import error_detail, geodukt_url, manifest_steps, parse_manifest
+from ._geodukt import error_detail, geodukt_url, parse_manifest, run_payload
 
 
 class RunWorkflowArgs(BaseModel):
@@ -22,6 +27,8 @@ def run_workflow(manifest_toml: str) -> str:
     the files it wrote. Only call this after plan_workflow and after the user has
     approved that plan. If the user asked for a change, revise the manifest and
     call plan_workflow again instead of running it."""
+    import json
+
     manifest, error = parse_manifest(manifest_toml)
     if error:
         return f"ERROR: {error}"
@@ -42,35 +49,51 @@ def run_workflow(manifest_toml: str) -> str:
     except Exception as e:
         return f"ERROR: geodukt is unreachable at {url}: {e}"
 
-    if resp.status_code >= 400:
-        return f"ERROR: geodukt failed to run the workflow: {error_detail(resp)}"
-
     try:
         record = resp.json()
     except Exception:
+        record = None
+
+    # a mid-pipeline failure answers 4xx with the run record itself, which still
+    # carries the per-step detail; a rejected manifest answers {"kind","message"}
+    # and never ran a step
+    is_record = isinstance(record, dict) and "status" in record
+    if resp.status_code >= 400 and not is_record:
+        return f"ERROR: geodukt failed to run the workflow: {error_detail(resp)}"
+    if not is_record:
         return f"ERROR: geodukt returned a non-JSON response: {resp.text[:300]}"
 
     # RunStatus serializes as "Completed" or {"Failed": "reason"}
-    status = record.get("status")
-    if isinstance(status, dict):
-        reason = next(iter(status.values()), "unknown reason")
-        return f"ERROR: workflow run {record.get('id')} failed: {reason}"
-
-    name = record.get("manifest_name") or (manifest.get("project") or {}).get(
-        "name", ""
+    status = record["status"]
+    completed = not isinstance(status, dict)
+    reason = (
+        "" if completed else str(next(iter(status.values()), "") or "unknown reason")
     )
-    lines = [f'Workflow "{name}" run {record.get("id")} {str(status).lower()}.']
-    for step in record.get("steps") or []:
-        lines.append(f"  {step.get('name')}: {step.get('feature_count')} features")
+    report = run_payload(manifest, record, completed, reason)
 
-    sinks = [s for s in manifest_steps(manifest) if s["kind"] == "sink" and s["path"]]
-    for sink in sinks:
-        lines.append(f"  wrote {sink['path']} ({sink['format']})")
-    if sinks:
+    if completed:
+        lines = [f'Workflow "{report["title"]}" run {report["id"]} completed.']
+    else:
+        lines = [f"ERROR: workflow run {report['id']} failed: {reason}"]
+    for step in report["steps"]:
+        if step["outcome"] == "failed":
+            detail = "failed"
+            if step["message"]:
+                detail += f": {step['message']}"
+        elif step["outcome"] == "not_run":
+            detail = "did not run"
+        else:
+            detail = f"{step['feature_count']} features"
+        lines.append(f"  {step['name']}: {detail}")
+
+    written = [out for out in report["outputs"] if out["written"]]
+    for out in written:
+        lines.append(f"  wrote {out['path']} ({out['format']})")
+    if written:
         lines.append(
             "Call emit_ui_spec with ui_type='map' to show the output on the map."
         )
-    return "\n".join(lines)
+    return "\n".join(lines) + f"\n__RUN__:{json.dumps(report, default=str)}"
 
 
 TOOL_FUNCTION = run_workflow

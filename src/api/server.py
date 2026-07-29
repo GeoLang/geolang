@@ -2,6 +2,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import uuid
 
 import asyncio
@@ -193,17 +194,33 @@ def run_tool(
         result = f"❌ Tool execution failed: {e}"
 
     if request.notify:
+        # the viewer parses the markers itself, and truncation would leave half a
+        # JSON blob in the session, so the model gets the prose only
+        prose = re.sub(r"\n?__[A-Z_]+__:.*", "", str(result))
         # this route is sync, so it runs in a worker thread with no event loop
-        asyncio.run(notify_agent(f"[{name} run from the viewer] {str(result)[:800]}"))
+        asyncio.run(notify_agent(f"[{name} run from the viewer] {prose[:800]}"))
 
     return {"result": result}
+
+
+def marker_payloads(content: str, marker: str):
+    """Every JSON payload on a ``MARKER:{json}`` line of a tool's output."""
+    for part in content.split(marker)[1:]:
+        line = part.split("\n")[0].strip()
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            logger.warning(f"unparseable {marker} payload: {line[:120]}")
+            continue
+        yield payload
 
 
 async def agent_event_stream(message: str, user_token: str | None = None):
     """Run a sibyl agent run and yield normalized (kind, payload) events.
 
     Single source of truth for the marker parsing. kinds:
-    "text", "progress", "viewer_cmd", "ui_spec", "plan", "error", "keepalive".
+    "text", "progress", "viewer_cmd", "ui_spec", "plan", "run", "error",
+    "keepalive".
     /chat/agui renders these as AG-UI events.
 
     `user_token` is the caller's bearer. sibyl holds it for the run and sends it
@@ -295,14 +312,13 @@ async def agent_event_stream(message: str, user_token: str | None = None):
                         pass
 
             # Workflow plan from plan_workflow, awaiting the user's approval
-            if "__PLAN__:" in content:
-                for part in content.split("__PLAN__:")[1:]:
-                    try:
-                        plan = json.loads(part.split("\n")[0].strip())
-                    except Exception:
-                        continue
-                    planned = True
-                    yield ("plan", plan)
+            for plan in marker_payloads(content, "__PLAN__:"):
+                planned = True
+                yield ("plan", plan)
+
+            # Per-step outcome of a run the model started itself, from run_workflow
+            for report in marker_payloads(content, "__RUN__:"):
+                yield ("run", report)
 
             if kind == "text":
                 yield ("text", content)
@@ -386,6 +402,10 @@ def render_agui_event(encoder: EventEncoder, kind: str, payload) -> str:
     if kind == "plan":
         return encoder.encode(
             CustomEvent(type=EventType.CUSTOM, name="plan", value=payload)
+        )
+    if kind == "run":
+        return encoder.encode(
+            CustomEvent(type=EventType.CUSTOM, name="run", value=payload)
         )
     if kind == "error":
         return encoder.encode(
