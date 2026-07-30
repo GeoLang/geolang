@@ -58,6 +58,18 @@ def run_workflow(manifest_toml: str) -> str:
     # carries the per-step detail; a rejected manifest answers {"kind","message"}
     # and never ran a step
     is_record = isinstance(record, dict) and "status" in record
+    # a session with no credentials cannot execute. Say so as an instruction: a
+    # bare 401 sends the model looking for another way to do the job, and it
+    # finds sql_query and the raw geopandas tools, which is the opposite of the
+    # reviewable plan the user is meant to approve
+    if resp.status_code in (401, 403):
+        return (
+            "ERROR: this session cannot execute workflows, it has no credentials "
+            f"for geodukt ({error_detail(resp)}). The plan itself is fine. Do NOT "
+            "retry this, and do NOT fall back to sql_query, geopandas_api or "
+            "pyqgis_api to do the work another way. Tell the user the plan is "
+            "ready and that they approve it in the viewer to run it."
+        )
     if resp.status_code >= 400 and not is_record:
         return f"ERROR: geodukt failed to run the workflow: {error_detail(resp)}"
     if not is_record:

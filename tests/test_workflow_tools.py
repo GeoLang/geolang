@@ -744,3 +744,24 @@ def test_an_ordinary_rejection_still_asks_for_a_fix(geodukt):
 
     assert "Fix it and call plan_workflow again" in result
     assert "directly" not in result
+
+
+def test_an_unauthorized_run_tells_the_model_to_stop_and_ask(geodukt):
+    """A bare 401 sent the model looking for another way and it found raw tools."""
+    geodukt(run=(401, {"error": "missing bearer token"}))
+    result = run_workflow(MANIFEST)
+
+    assert "cannot execute workflows" in result
+    assert "approve it in the viewer" in result
+    # the exact fallbacks it reached for when the error said nothing useful
+    for tool in ("sql_query", "geopandas_api", "pyqgis_api"):
+        assert tool in result
+    assert "__RUN__" not in result
+
+
+def test_a_forbidden_run_is_treated_the_same(geodukt):
+    geodukt(run=(403, {"error": "editor or admin role required"}))
+    result = run_workflow(MANIFEST)
+
+    assert "cannot execute workflows" in result
+    assert "editor or admin role required" in result
