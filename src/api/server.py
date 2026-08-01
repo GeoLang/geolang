@@ -473,10 +473,51 @@ async def chat_agui(input: RunAgentInput, request: Request):
     )
 
 
+# ── serving a file by name, without leaving the tree ─────────────────
+
+
+def allowed_roots() -> list[str]:
+    """Directories a served file may resolve into.
+
+    user_data subdirs are deliberately not listed. Confinement to the parents
+    covers them, and a subdir that is itself a symlink must not be able to
+    widen the boundary.
+    """
+    return [OUTPUTS_DIR, str(USER_DATA_DIR), EXEC_DIR]
+
+
+def name_candidates(filename: str) -> list[str]:
+    """The name as given, plus the extension-swapped form the viewer links to."""
+    stem, ext = os.path.splitext(filename)
+    return [filename, stem if ext else filename + ".gpkg"]
+
+
+def resolve_under(names, search_dirs, roots) -> str | None:
+    """First of `names` found in `search_dirs`, confined to `roots`.
+
+    Both sides are resolved before the comparison, so a `..` segment, an
+    absolute name, and a symlink pointing out of the tree all miss. Directory
+    order beats name order, which is the lookup the viewer already links
+    against.
+    """
+    resolved_roots = [Path(root).resolve() for root in roots]
+    for directory in search_dirs:
+        for name in names:
+            if not name:
+                continue
+            # an absolute name swallows the directory, and is then out of tree
+            candidate = (Path(directory) / name).resolve()
+            if not any(candidate.is_relative_to(r) for r in resolved_roots):
+                continue
+            if candidate.exists():
+                return str(candidate)
+    return None
+
+
 @app.get("/outputs/{filename}")
 async def get_output(filename: str):
-    path = os.path.join(OUTPUTS_DIR, filename)
-    if not os.path.exists(path):
+    path = resolve_under([filename], [OUTPUTS_DIR], [OUTPUTS_DIR])
+    if not path:
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path)
 
@@ -521,23 +562,7 @@ async def get_geojson(filename: str):
         os.path.join(EXEC_DIR, "natural_earth_10m"),
     ]
 
-    path = None
-    # Build candidate names: exact, without extension, with .gpkg added
-    stem, ext = os.path.splitext(filename)
-    candidates = [filename]
-    if ext:
-        candidates.append(stem)  # try without extension
-    else:
-        candidates.append(filename + ".gpkg")  # try with .gpkg
-
-    for d in search_dirs:
-        for name in candidates:
-            candidate = os.path.join(d, name)
-            if os.path.exists(candidate):
-                path = candidate
-                break
-        if path:
-            break
+    path = resolve_under(name_candidates(filename), search_dirs, allowed_roots())
 
     if not path:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
@@ -547,10 +572,11 @@ async def get_geojson(filename: str):
         if gdf.crs and gdf.crs.to_epsg() != 4326:
             gdf = gdf.to_crs("EPSG:4326")
         return JSONResponse(content=json.loads(gdf.to_json()))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to convert to GeoJSON: {str(e)}"
-        )
+    except Exception:
+        # the reader quotes the absolute path and the byte it choked on, so the
+        # reason is logged rather than returned
+        logger.exception(f"GeoJSON conversion failed for {filename}")
+        raise HTTPException(status_code=500, detail="Failed to convert to GeoJSON")
 
 
 @app.get("/datasets")
@@ -669,22 +695,7 @@ async def get_stats(filename: str):
     )
     search_dirs = [OUTPUTS_DIR, str(USER_DATA_DIR), *user_data_subdirs, EXEC_DIR]
 
-    path = None
-    stem, ext = os.path.splitext(filename)
-    candidates = [filename]
-    if ext:
-        candidates.append(stem)
-    else:
-        candidates.append(filename + ".gpkg")
-
-    for d in search_dirs:
-        for name in candidates:
-            candidate = os.path.join(d, name)
-            if os.path.exists(candidate):
-                path = candidate
-                break
-        if path:
-            break
+    path = resolve_under(name_candidates(filename), search_dirs, allowed_roots())
 
     if not path:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
@@ -794,8 +805,9 @@ async def get_stats(filename: str):
             "breakdown": breakdown,
             "numeric": numeric_stats[:3],
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception(f"Stats failed for {filename}")
+        raise HTTPException(status_code=500, detail="Could not read the layer")
 
 
 @app.get("/health")
