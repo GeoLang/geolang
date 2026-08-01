@@ -36,6 +36,7 @@ import httpx
 
 from src.agents.agent_manager import PERSONA, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
+from src.core.auth import require_platform_token
 from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
     EXEC_DIR,
@@ -172,7 +173,14 @@ def run_tool(
     sibyl passes the caller's bearer through on every tool call of a run, and the
     viewer sends its own on the plan-approval path. Whatever arrives is what the
     tool's outbound calls go out as.
+
+    With `PLATFORM_JWT_SECRET` set the bearer must be a live platform token.
+    Without the secret the route is open, which is the standalone dev flow.
     """
+    token = bearer_token(authorization)
+    # before the lookup, so an unauthenticated caller learns nothing from a 404
+    require_platform_token(token)
+
     # schema-less modules are not in the manifest either, so they are unknown here
     entry = next(
         (t for t in load_external_tools() if t[0].__name__ == name and t[1]), None
@@ -187,7 +195,7 @@ def run_tool(
         return {"result": f"❌ Invalid arguments: {e}"}
 
     try:
-        with user_token_scope(bearer_token(authorization)):
+        with user_token_scope(token):
             result = func(**args)
     except Exception as e:
         logger.exception(f"Tool {name} failed")

@@ -5,3 +5,4 @@ python-multipart
 playwright
 httpx
 ag-ui-protocol==0.1.19
+PyJWT==2.13.0

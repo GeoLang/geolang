@@ -138,6 +138,20 @@ scores 1.0, which is what keeps a task from expecting something impossible.
 When running as part of the full GeoLang platform (via `viewtopia/docker-compose.platform.yml`),
 GeoLang serves the API on port **8080** and sibyl runs alongside it on **8090**.
 
+### Authenticating tool execution
+
+`POST /tools/{name}` runs code and writes files, so on the platform it needs a
+caller. Set `PLATFORM_JWT_SECRET` to the shared platform secret and the route
+requires an `Authorization: Bearer <jwt>` header holding a live HS256 token,
+the same `{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts.
+Signature and `exp` are checked, nothing else, and the token is still forwarded
+to the services the tool calls, which enforce their own roles.
+
+Leave the variable unset and the route stays open. That is the standalone
+`docker compose up` flow, the test suite and the eval harness, none of which
+carry a token. `GET /tools` is never gated: sibyl fetches the manifest at
+startup, before anyone has signed in.
+
 ---
 
 ## License

@@ -84,6 +84,8 @@ Add `"notify": true` when running a tool outside the model's turn, such as the v
 
 An `Authorization: Bearer <jwt>` header sets the identity the tool's own outbound calls go out as, for the length of that call. `PTOLEMY_API_TOKEN` is the service account ptolemy falls back on when there is no caller.
 
+With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. Without the secret the route is open, which is the standalone dev flow and what the eval harness uses. `GET /tools` is never gated.
+
 ## Debug
 
 | Method | Path | Purpose |
