@@ -1,0 +1,21 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
+
+      # both requirements files, the same pair the image installs
+      - run: uv venv --python 3.11
+      - run: uv pip install -r requirements_client.txt -r requirements.txt pytest respx
+
+      - run: uvx ruff check .
+      - run: uv run python -m pytest tests/ -q

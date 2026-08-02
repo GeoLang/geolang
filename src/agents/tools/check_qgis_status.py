@@ -7,6 +7,7 @@ class CheckQgisStatusArgs(BaseModel):
 
 def check_qgis_status() -> str:
     """Diagnostic tool — run this FIRST."""
+    import importlib
     import os
     import sys
 
@@ -34,8 +35,9 @@ def check_qgis_status() -> str:
 
         processing_ok = False
         try:
-            import processing
-
+            # a real import, not find_spec: the plugin can be on the path and
+            # still fail to load without its qgis dependencies
+            importlib.import_module("processing")
             processing_ok = True
         except ImportError:
             pass

@@ -51,26 +51,27 @@ def query_zonal_population(
     outputs_dir = os.path.join(exec_dir, "outputs")
     os.makedirs(outputs_dir, exist_ok=True)
 
-    _res = lambda p: (
-        None
-        if not p
-        else (
-            p
-            if os.path.isabs(p) and os.path.exists(p)
-            else next(
-                (
-                    c
-                    for _b in (outputs_dir, exec_dir)
-                    for _n in (
-                        [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                    )
-                    for c in [os.path.join(_b, _n)]
-                    if os.path.exists(c)
-                ),
-                None,
+    def _res(p):
+        return (
+            None
+            if not p
+            else (
+                p
+                if os.path.isabs(p) and os.path.exists(p)
+                else next(
+                    (
+                        c
+                        for _b in (outputs_dir, exec_dir)
+                        for _n in (
+                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
+                        )
+                        for c in [os.path.join(_b, _n)]
+                        if os.path.exists(c)
+                    ),
+                    None,
+                )
             )
         )
-    )
 
     try:
         import geopandas as gpd
@@ -106,7 +107,6 @@ def query_zonal_population(
         if not raster_path:
             # Fallback: WorldPop bounding-box API
             import requests
-            from shapely.geometry import box as shapely_box
 
             total_bbox = gdf.total_bounds  # minx, miny, maxx, maxy
             west, south, east, north = total_bbox
@@ -137,11 +137,11 @@ def query_zonal_population(
                 )
             else:
                 return (
-                    f"No local GHSL raster found and WorldPop API returned no data. "
-                    f"To get accurate population figures, download the GHS-POP raster "
-                    f"(free) from https://ghsl.jrc.ec.europa.eu/ghs_pop2023.php "
-                    f"(epoch 2020, 1km resolution) and save as ghsl_pop.tif in the "
-                    f"project root or outputs/ directory."
+                    "No local GHSL raster found and WorldPop API returned no data. "
+                    "To get accurate population figures, download the GHS-POP raster "
+                    "(free) from https://ghsl.jrc.ec.europa.eu/ghs_pop2023.php "
+                    "(epoch 2020, 1km resolution) and save as ghsl_pop.tif in the "
+                    "project root or outputs/ directory."
                 )
 
         # --- Zonal stats using rasterstats ---

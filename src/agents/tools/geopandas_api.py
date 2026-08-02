@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Type
+from typing import Optional, List
 
 
 class GeopandasArgs(BaseModel):
@@ -123,7 +123,7 @@ def geopandas_api(
             if not os.path.exists(dataset_path):
                 log.append(f"Error: File not found: {dataset_path}")
                 log.append("\n=== FAILURE ===")
-                return "\n".join(log) + f"\n\nRESULT: Error: Dataset not found"
+                return "\n".join(log) + "\n\nRESULT: Error: Dataset not found"
 
             point = Point(point_coords[0], point_coords[1])
             gdf_point = gpd.GeoDataFrame(geometry=[point], crs="EPSG:4326")
@@ -160,7 +160,7 @@ def geopandas_api(
         if not func:
             log.append(f"Error: GeoPandas has no '{func_name}'")
             log.append("\n=== FAILURE ===")
-            return "\n".join(log) + f"\n\nRESULT: Error: Function not found"
+            return "\n".join(log) + "\n\nRESULT: Error: Function not found"
 
         if func_name in {"read_file", "to_file"} and not dataset_path:
             log.append("Error: Missing dataset_path")
@@ -170,7 +170,7 @@ def geopandas_api(
         if func_name == "read_file" and not os.path.exists(dataset_path):
             log.append(f"Error: File not found: {dataset_path}")
             log.append("\n=== FAILURE ===")
-            return "\n".join(log) + f"\n\nRESULT: Error: Dataset not found"
+            return "\n".join(log) + "\n\nRESULT: Error: Dataset not found"
 
         # Map dataset_path → correct parameter name for each function
         call_kwargs = dict(kwargs)

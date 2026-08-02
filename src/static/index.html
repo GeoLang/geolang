@@ -2457,7 +2457,8 @@
   // ── On load: check for ?share= param ──────────
   (async function checkShareParam() {
     const path = window.location.pathname;
-    const m = path.match(/\/share\/([a-f0-9\-]+)/i);
+    // url-safe base64, the shape secrets.token_urlsafe gives the share route
+    const m = path.match(/\/share\/([A-Za-z0-9_-]+)/);
     if (!m) return;
     const shareId = m[1];
     try {

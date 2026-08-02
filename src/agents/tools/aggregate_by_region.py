@@ -77,31 +77,31 @@ def aggregate_by_region(
     user_data_dir = os.path.join(exec_dir, "user_data")
     os.makedirs(outputs_dir, exist_ok=True)
 
-    _res = lambda p: (
-        None
-        if not p
-        else (
-            p
-            if os.path.isabs(p) and os.path.exists(p)
-            else next(
-                (
-                    c
-                    for _b in (outputs_dir, user_data_dir, exec_dir)
-                    for _n in (
-                        [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                    )
-                    for c in [os.path.join(_b, _n)]
-                    if os.path.exists(c)
-                ),
-                None,
+    def _res(p):
+        return (
+            None
+            if not p
+            else (
+                p
+                if os.path.isabs(p) and os.path.exists(p)
+                else next(
+                    (
+                        c
+                        for _b in (outputs_dir, user_data_dir, exec_dir)
+                        for _n in (
+                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
+                        )
+                        for c in [os.path.join(_b, _n)]
+                        if os.path.exists(c)
+                    ),
+                    None,
+                )
             )
         )
-    )
 
     try:
         import geopandas as gpd
         import pandas as pd
-        import numpy as np
         import re
 
         reg_full = _res(regions_path)
@@ -175,8 +175,6 @@ def aggregate_by_region(
         agg_func = agg_func.lower().strip()
         if agg_func not in ("sum", "mean", "count", "max", "min"):
             agg_func = "sum"
-
-        group_col = region_label_col if region_label_col else joined.index
 
         if agg_func == "count" or not agg_columns:
             # Count features per region

@@ -51,7 +51,6 @@ def compute_route(
 
     try:
         import requests
-        import json
         import osmnx as ox
         import geopandas as gpd
         from shapely.geometry import LineString

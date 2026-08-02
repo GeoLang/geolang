@@ -63,7 +63,6 @@ def score_sites(
     or find the best location based on multiple factors.
     """
     import os
-    import json
     import traceback
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")

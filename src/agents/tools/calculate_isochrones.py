@@ -105,7 +105,6 @@ def calculate_isochrones(
         # --- DRIVING: use Valhalla public API (fast, server-side, no timeout risk) ---
         if network_type == "drive":
             import requests
-            import json
 
             valhalla_url = "https://valhalla1.openstreetmap.de/isochrone"
             features = []

@@ -33,18 +33,19 @@ def clip_layer(input_path: str, clip_path: str, output_filename: str) -> str:
         import geopandas as gpd
 
         # Resolve relative paths — check exec_dir and outputs_dir
-        _res = lambda p: (
-            p
-            if (os.path.isabs(p) and os.path.exists(p))
-            else next(
-                (
-                    os.path.join(_b, p)
-                    for _b in (exec_dir, outputs_dir)
-                    if os.path.exists(os.path.join(_b, p))
-                ),
-                os.path.join(exec_dir, p),
+        def _res(p):
+            return (
+                p
+                if (os.path.isabs(p) and os.path.exists(p))
+                else next(
+                    (
+                        os.path.join(_b, p)
+                        for _b in (exec_dir, outputs_dir)
+                        if os.path.exists(os.path.join(_b, p))
+                    ),
+                    os.path.join(exec_dir, p),
+                )
             )
-        )
 
         input_full = _res(input_path)
         clip_full = _res(clip_path)

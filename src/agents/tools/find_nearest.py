@@ -64,30 +64,30 @@ def find_nearest(
     user_data_dir = os.path.join(exec_dir, "user_data")
     os.makedirs(outputs_dir, exist_ok=True)
 
-    _res = lambda p: (
-        None
-        if not p
-        else (
-            p
-            if os.path.isabs(p) and os.path.exists(p)
-            else next(
-                (
-                    c
-                    for _b in (outputs_dir, user_data_dir, exec_dir)
-                    for _n in (
-                        [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                    )
-                    for c in [os.path.join(_b, _n)]
-                    if os.path.exists(c)
-                ),
-                None,
+    def _res(p):
+        return (
+            None
+            if not p
+            else (
+                p
+                if os.path.isabs(p) and os.path.exists(p)
+                else next(
+                    (
+                        c
+                        for _b in (outputs_dir, user_data_dir, exec_dir)
+                        for _n in (
+                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
+                        )
+                        for c in [os.path.join(_b, _n)]
+                        if os.path.exists(c)
+                    ),
+                    None,
+                )
             )
         )
-    )
 
     try:
         import geopandas as gpd
-        import numpy as np
 
         orig_full = _res(origins_path)
         if not orig_full:

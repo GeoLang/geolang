@@ -93,7 +93,7 @@ def get_admin_boundary(
                 elements = data.get("elements", [])
 
                 if elements:
-                    from shapely.geometry import Polygon, MultiPolygon
+                    from shapely.geometry import Polygon
                     from shapely.ops import unary_union
 
                     polys = []

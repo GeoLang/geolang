@@ -38,8 +38,6 @@ def run_qgis_algorithm(
     Layers here are usually EPSG:4326, where units are degrees: to buffer in
     metres, first reproject to EPSG:3857 ('native:reprojectlayer'), run the
     buffer, then reproject back to EPSG:4326 for display."""
-    import json
-    import os
     import sys
     import traceback
 

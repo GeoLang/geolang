@@ -25,7 +25,6 @@ def query_elevation(place_name: str, output_filename: str = None) -> str:
     attribute for use in further spatial analysis.
     """
     import os
-    import json
     import traceback
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")

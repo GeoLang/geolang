@@ -58,7 +58,6 @@ def viewer_control(
     After geocoding a place, call this with action='fly_to' and the coordinates."""
     # NOTE: tools run in the geolang process now, but imports stay inside the
     # function body so each tool stays self-contained.
-    import json
 
     params = {}
     for key, val in [

@@ -47,7 +47,6 @@ def download_population_grid(
     import json
     import time
     import traceback
-    import math
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
     outputs_dir = os.path.join(exec_dir, "outputs")
@@ -57,7 +56,6 @@ def download_population_grid(
         import requests
         import osmnx as ox
         import geopandas as gpd
-        import pandas as pd
         from shapely.geometry import box
 
         lat, lon = ox.geocode(place_name)

@@ -62,7 +62,6 @@ def geocode_place(place_name: str) -> str:
 
     try:
         import geopandas as gpd
-        import pandas as pd
 
         gdf = None
         for path in search_paths:

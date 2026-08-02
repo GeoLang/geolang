@@ -441,9 +441,9 @@ def assess_environmental_risk(
         # Build response
         parts = [
             f"Environmental risk assessment for {place_name} ({radius_km}km radius):",
-            f"",
+            "",
             f"OVERALL: {overall}/10 — {overall_label}",
-            f"",
+            "",
             f"Flood risk:   {flood_score}/10 ({flood_label}) — mean elevation {elev_mean}m"
             + (
                 f", range {elev_min:.0f}–{elev_max:.0f}m"

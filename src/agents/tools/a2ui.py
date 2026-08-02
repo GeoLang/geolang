@@ -66,7 +66,6 @@ def emit_ui_spec(
     For maps: provide ui_type='map', center_lon, center_lat, zoom, and layers (semicolon-separated).
     For images: provide ui_type='image', image_path, and title.
     For tables: provide ui_type='table', title, columns, and rows."""
-    import json
 
     try:
         if ui_type == "map":

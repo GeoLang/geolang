@@ -16,7 +16,6 @@ def export_to_gpkg(
     layer_name: str = "layer",
 ) -> str:
     """Reliable GPKG export using GeoPandas."""
-    import os
     import geopandas as gpd
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")

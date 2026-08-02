@@ -67,31 +67,30 @@ def compare_layers(
     user_data_dir = os.path.join(exec_dir, "user_data")
     os.makedirs(outputs_dir, exist_ok=True)
 
-    _res = lambda p: (
-        None
-        if not p
-        else (
-            p
-            if os.path.isabs(p) and os.path.exists(p)
-            else next(
-                (
-                    c
-                    for _b in (outputs_dir, user_data_dir, exec_dir)
-                    for _n in (
-                        [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                    )
-                    for c in [os.path.join(_b, _n)]
-                    if os.path.exists(c)
-                ),
-                None,
+    def _res(p):
+        return (
+            None
+            if not p
+            else (
+                p
+                if os.path.isabs(p) and os.path.exists(p)
+                else next(
+                    (
+                        c
+                        for _b in (outputs_dir, user_data_dir, exec_dir)
+                        for _n in (
+                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
+                        )
+                        for c in [os.path.join(_b, _n)]
+                        if os.path.exists(c)
+                    ),
+                    None,
+                )
             )
         )
-    )
 
     try:
         import geopandas as gpd
-        import pandas as pd
-        import numpy as np
         from shapely.ops import unary_union
 
         a_full = _res(layer_a_path)
@@ -134,19 +133,20 @@ def compare_layers(
         utm_epsg = 32600 + utm_zone if centroid.y >= 0 else 32700 + utm_zone
         metric_crs = f"EPSG:{utm_epsg}"
 
-        _area_km2 = lambda geom: (
-            0.0
-            if geom.is_empty
-            else round(
-                float(
-                    gpd.GeoDataFrame(geometry=[geom], crs="EPSG:4326")
-                    .to_crs(metric_crs)
-                    .geometry.area.sum()
+        def _area_km2(geom):
+            return (
+                0.0
+                if geom.is_empty
+                else round(
+                    float(
+                        gpd.GeoDataFrame(geometry=[geom], crs="EPSG:4326")
+                        .to_crs(metric_crs)
+                        .geometry.area.sum()
+                    )
+                    / 1e6,
+                    2,
                 )
-                / 1e6,
-                2,
             )
-        )
 
         area_a = _area_km2(poly_a)
         area_b = _area_km2(poly_b)
@@ -168,7 +168,6 @@ def compare_layers(
 
         saved = []
 
-        inter_file = None
         if not intersection.is_empty:
             _gdf_inter = gpd.GeoDataFrame(
                 [
@@ -185,9 +184,7 @@ def compare_layers(
                 os.path.join(outputs_dir, f"{_fname_inter}.gpkg"), driver="GPKG"
             )
             saved.append(f"outputs/{_fname_inter}.gpkg")
-            inter_file = _fname_inter
 
-        only_a_file = None
         if not only_a.is_empty:
             _gdf_only_a = gpd.GeoDataFrame(
                 [
@@ -204,9 +201,7 @@ def compare_layers(
                 os.path.join(outputs_dir, f"{_fname_only_a}.gpkg"), driver="GPKG"
             )
             saved.append(f"outputs/{_fname_only_a}.gpkg")
-            only_a_file = _fname_only_a
 
-        only_b_file = None
         if not only_b.is_empty:
             _gdf_only_b = gpd.GeoDataFrame(
                 [
@@ -223,11 +218,10 @@ def compare_layers(
                 os.path.join(outputs_dir, f"{_fname_only_b}.gpkg"), driver="GPKG"
             )
             saved.append(f"outputs/{_fname_only_b}.gpkg")
-            only_b_file = _fname_only_b
 
         parts = [
             f"Spatial comparison: '{layer_a_label}' vs '{layer_b_label}'",
-            f"",
+            "",
             f"{layer_a_label} area:   {area_a} km²",
             f"{layer_b_label} area:   {area_b} km²",
             f"Intersection:         {area_inter} km² ({overlap_pct}% of union)",
@@ -235,7 +229,7 @@ def compare_layers(
             f"Only in {layer_b_label}: {area_only_b} km²",
             f"Union (total):        {area_union} km²",
             f"Jaccard similarity:   {jaccard} (0=no overlap, 1=identical)",
-            f"",
+            "",
         ]
         parts.append("Saved layers: " + ", ".join(saved))
         return "\n".join(parts)

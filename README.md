@@ -137,19 +137,30 @@ scores 1.0, which is what keeps a task from expecting something impossible.
 When running as part of the full GeoLang platform (via `viewtopia/docker-compose.platform.yml`),
 GeoLang serves the API on port **8080** and sibyl runs alongside it on **8090**.
 
-### Authenticating tool execution
+### Authenticating the API
 
-`POST /tools/{name}` runs code and writes files, so on the platform it needs a
-caller. Set `PLATFORM_JWT_SECRET` to the shared platform secret and the route
-requires an `Authorization: Bearer <jwt>` header holding a live HS256 token,
-the same `{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts.
-Signature and `exp` are checked, nothing else, and the token is still forwarded
-to the services the tool calls, which enforce their own roles.
+Set `PLATFORM_JWT_SECRET` to the shared platform secret and every route that
+runs code, writes a file, or reads back a session or a user's data requires an
+`Authorization: Bearer <jwt>` header holding a live HS256 token, the same
+`{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts. Signature
+and `exp` are checked, nothing else, and the token is forwarded unchanged to the
+services a tool calls, which enforce their own roles.
 
-Leave the variable unset and the route stays open. That is the standalone
+Gated: `POST /tools/{name}` and `POST /chat/agui`, the file writers `/upload`,
+`/draw`, `/export-pdf` and `/export-png`, the sibyl proxies `/sessions*`,
+`/models` and `/model`, and the reads `/datasets`, `/outputs/{file}`,
+`/download/{file}`, `/geojson/{file}` and `/stats/{file}`. Creating a share is
+gated too.
+
+Open: `/health`, the viewer's static assets, the `GET /tools` manifest sibyl
+fetches at startup before anyone has signed in, and reading a share by id, whose
+whole point is a link that works for someone who never signs in. That reader
+gets the view and the summary, not the layers behind them.
+
+Leave the variable unset and the whole API stays open. That is the standalone
 `docker compose up` flow, the test suite and the eval harness, none of which
-carry a token. `GET /tools` is never gated: sibyl fetches the manifest at
-startup, before anyone has signed in.
+carry a token. Turning it on means the client has to send the header on every
+call, layer fetches and download links included.
 
 ---
 

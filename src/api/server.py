@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import uuid
 
 import asyncio
@@ -13,7 +14,16 @@ from threading import Thread
 
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response, UploadFile, File
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,7 +46,7 @@ import httpx
 
 from src.agents.agent_manager import PERSONA, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
-from src.core.auth import require_platform_token
+from src.core.auth import platform_auth, require_platform_token
 from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
     EXEC_DIR,
@@ -349,10 +359,10 @@ async def agent_event_stream(message: str, user_token: str | None = None):
         if ui_spec and ui_spec.get("layers") and assistant_texts:
             agent_text = " ".join(assistant_texts)
             filtered = [
-                l
-                for l in ui_spec["layers"]
-                if l["file"] in agent_text
-                or l["file"].replace("outputs/", "") in agent_text
+                layer
+                for layer in ui_spec["layers"]
+                if layer["file"] in agent_text
+                or layer["file"].replace("outputs/", "") in agent_text
             ]
             if filtered:
                 ui_spec["layers"] = filtered
@@ -451,9 +461,13 @@ async def agui_stream(events, thread_id: str, run_id: str, accept: str | None = 
         )
 
 
-@app.post("/chat/agui")
+@app.post("/chat/agui", dependencies=[Depends(platform_auth)])
 async def chat_agui(input: RunAgentInput, request: Request):
-    """AG-UI event endpoint: the agent pipeline rendered as AG-UI SSE."""
+    """AG-UI event endpoint: the agent pipeline rendered as AG-UI SSE.
+
+    The same bearer the gate checks is what sibyl holds for the run and sends
+    back on every tool call, so the run acts as this caller.
+    """
     user_messages = [m for m in input.messages if getattr(m, "role", None) == "user"]
     if not user_messages:
         raise HTTPException(status_code=400, detail="No user message in input")
@@ -514,7 +528,7 @@ def resolve_under(names, search_dirs, roots) -> str | None:
     return None
 
 
-@app.get("/outputs/{filename}")
+@app.get("/outputs/{filename}", dependencies=[Depends(platform_auth)])
 async def get_output(filename: str):
     path = resolve_under([filename], [OUTPUTS_DIR], [OUTPUTS_DIR])
     if not path:
@@ -522,7 +536,7 @@ async def get_output(filename: str):
     return FileResponse(path)
 
 
-@app.get("/download/{filename}")
+@app.get("/download/{filename}", dependencies=[Depends(platform_auth)])
 async def download_file(filename: str):
     """Download an output file as an attachment."""
     safe = os.path.basename(filename)
@@ -540,7 +554,7 @@ async def download_file(filename: str):
     return FileResponse(path, filename=safe, media_type="application/octet-stream")
 
 
-@app.get("/geojson/{filename:path}")
+@app.get("/geojson/{filename:path}", dependencies=[Depends(platform_auth)])
 async def get_geojson(filename: str):
     """Convert a vector file (GPKG, SHP, GeoJSON) to GeoJSON for Leaflet."""
     import geopandas as gpd
@@ -579,12 +593,12 @@ async def get_geojson(filename: str):
         raise HTTPException(status_code=500, detail="Failed to convert to GeoJSON")
 
 
-@app.get("/datasets")
+@app.get("/datasets", dependencies=[Depends(platform_auth)])
 async def get_datasets():
     return load_catalogue()
 
 
-@app.post("/upload")
+@app.post("/upload", dependencies=[Depends(platform_auth)])
 async def upload_dataset(file: UploadFile = File(...)):
     import geopandas as gpd
     import pandas as pd
@@ -682,11 +696,10 @@ async def upload_dataset(file: UploadFile = File(...)):
     return metadata
 
 
-@app.get("/stats/{filename:path}")
+@app.get("/stats/{filename:path}", dependencies=[Depends(platform_auth)])
 async def get_stats(filename: str):
     """Return summary statistics for a vector layer."""
     import geopandas as gpd
-    import numpy as np
 
     user_data_subdirs = (
         [str(p) for p in USER_DATA_DIR.rglob("*") if p.is_dir()]
@@ -820,11 +833,10 @@ class DrawRequest(BaseModel):
     name: str = "drawn_area"
 
 
-@app.post("/draw")
+@app.post("/draw", dependencies=[Depends(platform_auth)])
 async def save_drawn_area(request: DrawRequest):
     """Save a GeoJSON feature drawn by the user on the map to a GPKG in user_data/."""
     import geopandas as gpd
-    import json as _json
     import re
 
     USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -890,7 +902,7 @@ class ExportPDFRequest(BaseModel):
     height: int = 900
 
 
-@app.post("/export-pdf")
+@app.post("/export-pdf", dependencies=[Depends(platform_auth)])
 async def export_pdf(request: ExportPDFRequest):
     """Generate a PDF report using a Playwright headless screenshot (captures real tile imagery)."""
     from playwright.async_api import async_playwright
@@ -944,7 +956,7 @@ class ExportPNGRequest(BaseModel):
     basemap: str = "osm"
 
 
-@app.post("/export-png")
+@app.post("/export-png", dependencies=[Depends(platform_auth)])
 async def export_png(request: ExportPNGRequest):
     from playwright.async_api import async_playwright
 
@@ -994,13 +1006,13 @@ class SwitchSessionRequest(BaseModel):
     session_id: str
 
 
-@app.get("/sessions")
+@app.get("/sessions", dependencies=[Depends(platform_auth)])
 async def list_sessions():
     response = await sibyl_request("GET", "/sessions")
     return response.json()
 
 
-@app.post("/sessions/new")
+@app.post("/sessions/new", dependencies=[Depends(platform_auth)])
 async def create_session():
     """Create a new session and make it the active one."""
     existing = (await sibyl_request("GET", "/sessions")).json()
@@ -1009,7 +1021,7 @@ async def create_session():
     return {"id": created["id"], "name": created["name"]}
 
 
-@app.post("/sessions/switch")
+@app.post("/sessions/switch", dependencies=[Depends(platform_auth)])
 async def switch_session(request: SwitchSessionRequest):
     """Switch to an existing session."""
     response = await sibyl_request(
@@ -1020,7 +1032,7 @@ async def switch_session(request: SwitchSessionRequest):
     return response.json()
 
 
-@app.put("/sessions/{session_id}/rename")
+@app.put("/sessions/{session_id}/rename", dependencies=[Depends(platform_auth)])
 async def rename_session(session_id: str, request: RenameSessionRequest):
     response = await sibyl_request(
         "PATCH", f"/sessions/{session_id}", json={"name": request.name}
@@ -1030,7 +1042,7 @@ async def rename_session(session_id: str, request: RenameSessionRequest):
     return {"id": session_id, "name": request.name}
 
 
-@app.delete("/sessions/{session_id}")
+@app.delete("/sessions/{session_id}", dependencies=[Depends(platform_auth)])
 async def delete_session(session_id: str):
     response = await sibyl_request("DELETE", f"/sessions/{session_id}")
     if response.status_code == 400:
@@ -1055,7 +1067,7 @@ def _sibyl_passthrough(response: httpx.Response) -> Response:
     )
 
 
-@app.get("/models")
+@app.get("/models", dependencies=[Depends(platform_auth)])
 async def list_models():
     """Sibyl's model profiles and which one is active."""
     return _sibyl_passthrough(
@@ -1063,7 +1075,7 @@ async def list_models():
     )
 
 
-@app.put("/model")
+@app.put("/model", dependencies=[Depends(platform_auth)])
 async def set_model(request: Request):
     """Switch sibyl's active model. 404 unknown profile, 409 not available."""
     return _sibyl_passthrough(
@@ -1087,12 +1099,12 @@ class ShareRequest(BaseModel):
     zoom: int = 12
 
 
-@app.post("/share")
+@app.post("/share", dependencies=[Depends(platform_auth)])
 async def create_share(request: ShareRequest):
     """Create a shareable snapshot of the current map state."""
-    import uuid
-
-    share_id = str(uuid.uuid4())[:8]
+    # reading a share needs no token, so the id is the credential and has to be
+    # long enough that guessing one is hopeless
+    share_id = secrets.token_urlsafe(16)
     shares = load_shares()
     shares[share_id] = {
         "title": request.title,
@@ -1106,6 +1118,10 @@ async def create_share(request: ShareRequest):
     return {"share_id": share_id, "url": f"/share/{share_id}"}
 
 
+# reading a share stays open on purpose: a share link is meant for someone who
+# never signs in, and the id is the only thing standing in for a credential. The
+# layers it names are still behind the gate, so a signed-out consumer gets the
+# view and the summary, not the data.
 @app.get("/share/{share_id}/data")
 async def get_share_data(share_id: str):
     """Return share metadata as JSON (for the client to reconstruct the view)."""

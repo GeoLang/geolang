@@ -25,7 +25,7 @@ The contract in both directions:
 - `POST /tools/{name}` with `{"args": {...}}` runs the tool **in the geolang process** and returns `{"result": "<string>"}`. Validation errors and exceptions come back as `200` with a ❌ result so the agent can recover. The routes are sync `def`, so FastAPI runs them in its threadpool, tools block for minutes.
 - `POST /runs` on sibyl takes `{"system_prompt", "message"}` and streams NDJSON events (`text`, `tool_call`, `tool_return`, `error`, `done`). `agent_event_stream` normalises those into the `(kind, payload)` tuples the AG-UI renderer consumes.
 
-With `PLATFORM_JWT_SECRET` set, `POST /tools/{name}` requires a live HS256 platform token and answers `401` otherwise. `GET /tools` stays open. Unset, both are open.
+With `PLATFORM_JWT_SECRET` set, every route that runs code, writes a file, or reads back a session or a user's data requires a live HS256 platform token and answers `401` otherwise. `/health`, the `GET /tools` manifest, the static viewer and reading a share by id stay open. Unset, all of it is open.
 
 There is no tool sandbox any more. A tool runs with the API's privileges, in its process, against the bind-mounted repo.
 

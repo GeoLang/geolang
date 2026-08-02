@@ -44,8 +44,6 @@ def download_osm_data(
 
     try:
         import osmnx as ox
-        import geopandas as gpd
-        import pandas as pd
 
         OSM_TAG_MAP = {
             "buildings": {"building": True},
