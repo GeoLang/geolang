@@ -83,7 +83,7 @@ PERSONA = (
     # TileTopia viewer control
     "IMPORTANT: When the user asks to fly to a location, zoom to coordinates, or navigate the 3D view, "
     "ALWAYS call viewer_control with action='fly_to' after geocoding the place. "
-    "When the user asks to show classification colours on point clouds, use viewer_control with action='classify'. "
+    "When the user asks to show classification colours on point clouds, use viewer_control with action='style_by_classification'. "
     "When the user asks to add a marker or pin, use viewer_control with action='add_marker'. "
     "When the user asks to load a 3D tileset, use viewer_control with action='load_tileset'. "
     "When the user asks to clear the view, use viewer_control with action='clear_entities'. "

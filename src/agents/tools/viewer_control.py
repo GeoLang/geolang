@@ -19,7 +19,7 @@ class ViewerControlArgs(BaseModel):
             "'add_marker' (lon, lat, label, color), "
             "'clear_entities', "
             "'load_tileset' (url, label), "
-            "'classify' (attribute), "
+            "'style_by_classification', "
             "'add_geojson' (url, color, label), "
             "'set_time' (iso), "
             "'screenshot'"
