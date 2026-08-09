@@ -146,6 +146,24 @@ runs code, writes a file, or reads back a session or a user's data requires an
 and `exp` are checked, nothing else, and the token is forwarded unchanged to the
 services a tool calls, which enforce their own roles.
 
+The service refuses to start without that variable, as ptolemy and interiora
+already do. Running with no authentication at all takes a second, explicit
+`GEOLANG_ALLOW_UNAUTHENTICATED=1`, which is what `docker-compose.yml` sets for
+the standalone stack. Never set it where the port is reachable.
+
+**Treat a platform token like an SSH key to this host.** Tools run in the API
+process with its privileges and no sandbox, and `geopandas_api`, `pyqgis_api`
+and `run_qgis_algorithm` take expressions and algorithm parameters the caller
+chooses. Anyone holding a live token can compute arbitrary things on this
+machine and read and write everything under `outputs/` and `user_data/`. That is
+by design for a geoprocessing agent, so the token is the security boundary and
+the only one. Scope it short, never commit it, and rotate it like a key.
+
+Gated deployments must also name the browser origins allowed to call the API in
+`CORS_ORIGINS`, comma separated. Startup fails without it, and `*` is refused
+while the gate is on, because a wildcard plus credentials means any page a
+signed-in user visits can spend their token here.
+
 Gated: `POST /tools/{name}` and `POST /chat/agui`, the file writers `/upload`,
 `/draw`, `/export-pdf` and `/export-png`, the sibyl proxies `/sessions*`,
 `/models` and `/model`, and the reads `/datasets`, `/outputs/{file}`,

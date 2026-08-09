@@ -8,6 +8,9 @@ services:
       # which caused docker to auto-create an empty stub directory and mount that.
       - .:/app/geolang:z
     environment:
+      # the standalone stack has no platform to mint tokens against, so it opts
+      # out of the gate. Never set this where the port is reachable.
+      GEOLANG_ALLOW_UNAUTHENTICATED: "1"
       TOOL_EXEC_DIR: "/app/geolang"
       SIBYL_URL: "http://sibyl:8090"
       QT_QPA_PLATFORM: "offscreen"

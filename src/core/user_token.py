@@ -54,9 +54,14 @@ def service_headers(fallback_env: str | None = None) -> dict:
 
     The caller's own token wins, so a tool acts as the person who asked.
     `fallback_env` names a service-account token variable to fall back on when
-    there is no caller.
+    there is no caller, which only happens with the gate switched off: with it
+    on there is always a caller, and falling back would let a request that
+    arrived with no identity act as the service.
     """
+    # imported here because auth.py reads bearer_token from this module
+    from src.core.auth import authentication_disabled
+
     token = current_user_token()
-    if not token and fallback_env:
+    if not token and fallback_env and authentication_disabled():
         token = (os.environ.get(fallback_env) or "").strip() or None
     return {"Authorization": f"Bearer {token}"} if token else {}

@@ -1,10 +1,15 @@
 """The bearer gate on the API.
 
 Platform JWTs are HS256 over `{sub, exp, role}`, the shape ptolemy mints and
-geodukt validates, so one token works across the platform. Setting
-`PLATFORM_JWT_SECRET` turns the gate on, the same opt-in geodukt's `/run` uses.
-Unset or empty means dev mode and no gate: the standalone stack, the test suite
-and the eval harness all call the API without a token.
+geodukt validates, so one token works across the platform.
+`PLATFORM_JWT_SECRET` carries it and the service refuses to start without one,
+which is what ptolemy and interiora already do.
+
+Running with no gate at all takes `GEOLANG_ALLOW_UNAUTHENTICATED=1` as well, so
+it is a thing someone chose rather than a variable someone forgot. That is the
+standalone stack, the test suite and the eval harness, none of which hold a
+token. A platform token is worth as much as an SSH key to this host: any holder
+can run tools in this process, so treat it that way.
 
 Only the signature and `exp` are checked. `role` is not: the services a tool
 calls enforce their own rules and the token reaches them unchanged, so a role
@@ -33,11 +38,32 @@ from fastapi import Header, HTTPException
 from src.core.user_token import bearer_token
 
 SECRET_ENV = "PLATFORM_JWT_SECRET"
+UNAUTHENTICATED_ENV = "GEOLANG_ALLOW_UNAUTHENTICATED"
+TRUTHY = {"1", "true", "yes", "on"}
 
 
 def platform_secret() -> str | None:
     """The shared HS256 secret, or None when the gate is off."""
     return (os.environ.get(SECRET_ENV) or "").strip() or None
+
+
+def authentication_disabled() -> bool:
+    """Whether this process was told in writing to run without the gate."""
+    return (os.environ.get(UNAUTHENTICATED_ENV) or "").strip().lower() in TRUTHY
+
+
+def require_configuration() -> None:
+    """Refuse to start unauthenticated unless someone asked for that.
+
+    An unset secret used to mean an open API, so one missing variable served
+    every tool to anyone who could reach the port and still looked healthy.
+    """
+    if platform_secret() is None and not authentication_disabled():
+        raise RuntimeError(
+            f"{SECRET_ENV} is not set. Set it to the shared platform secret, or "
+            f"set {UNAUTHENTICATED_ENV}=1 to serve every tool to anyone who can "
+            "reach this port."
+        )
 
 
 def platform_token_error(token: str | None) -> str | None:

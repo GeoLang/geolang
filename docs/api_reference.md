@@ -169,6 +169,9 @@ Adding a tool is a single file: drop a module into `src/agents/tools/` exporting
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `PLATFORM_JWT_SECRET` | — | Shared HS256 secret. Required: the service refuses to start without it unless `GEOLANG_ALLOW_UNAUTHENTICATED` is set. |
+| `GEOLANG_ALLOW_UNAUTHENTICATED` | unset | `1` runs with no gate at all, and is the only thing that keeps the `*_API_TOKEN` service-account fallbacks and the `CORS_ORIGINS` wildcard available. Standalone stack only. |
+| `CORS_ORIGINS` | — | Comma-separated browser origins allowed to call the API. Required when the gate is on, where `*` is refused. |
 | `SIBYL_URL` | `http://localhost:8090` | sibyl agent service endpoint. |
 | `MCP_ALLOWED_HOSTS` | localhost only | Comma-separated `Host` values `/mcp` answers on, read at startup. A `host:*` entry matches any port. |
 | `AGORA_URL` | `http://agora:3000` | agora live document service. The websocket follows it, so `https` there means `wss`. |

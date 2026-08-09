@@ -54,7 +54,13 @@ from src.api.live_document import (
     LIVE_DATA_TOKEN_PATTERN,
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
-from src.core.auth import platform_auth, require_platform_token
+from src.core.auth import (
+    SECRET_ENV,
+    authentication_disabled,
+    platform_auth,
+    require_configuration,
+    require_platform_token,
+)
 from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
 from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
@@ -156,11 +162,45 @@ async def lifespan(_app: FastAPI):
         yield
 
 
+CORS_ORIGINS_ENV = "CORS_ORIGINS"
+
+
+def cors_origins() -> list[str]:
+    """The origins a browser may call this API from, as configured.
+
+    Named origins, comma separated. With the gate on the variable is required
+    and `*` is refused: a wildcard plus credentials is every page the user
+    visits able to spend their token.
+    """
+    configured = [
+        origin.strip()
+        for origin in os.environ.get(CORS_ORIGINS_ENV, "").split(",")
+        if origin.strip()
+    ]
+    if authentication_disabled():
+        return configured or ["*"]
+    if not configured:
+        raise RuntimeError(
+            f"{CORS_ORIGINS_ENV} is not set. Name the browser origins that may "
+            "call this API, comma separated. Behind the platform proxy that is "
+            "the public origin the viewer is served from."
+        )
+    if "*" in configured:
+        raise RuntimeError(
+            f"{CORS_ORIGINS_ENV} may not be '*' while {SECRET_ENV} is set: a "
+            "wildcard origin lets any page a signed-in user visits spend their "
+            "token here."
+        )
+    return configured
+
+
+require_configuration()
+
 app = FastAPI(title="GeoLang API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
