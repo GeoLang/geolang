@@ -9,16 +9,24 @@ checks the Host header, so the client speaks to localhost rather than
 TestClient's default `testserver`.
 """
 
+import asyncio
 import json
+import threading
+from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
+import respx
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from websockets.asyncio.server import serve
 
 from src.api import mcp_server, server
+from src.api.live_document import DOCUMENT_HEADER
+from src.core import agora
 from src.core.auth import SECRET_ENV
 from src.core.user_token import current_user_token
+from tests.test_agora import FakeAgora
 from tests.test_route_auth import SECRET, mint
 
 MCP_HEADERS = {
@@ -27,6 +35,7 @@ MCP_HEADERS = {
 }
 
 VIEWER_CMD = {"action": "fly_to", "params": {"lon": 2.35, "lat": 48.85}}
+DOCUMENT_ID = "0f8b1c2d-3e4f-4a5b-8c7d-9e0f1a2b3c4d"
 
 
 @pytest.fixture(scope="module")
@@ -45,10 +54,12 @@ def open_mode(monkeypatch):
     monkeypatch.delenv(SECRET_ENV, raising=False)
 
 
-def call(client, method, params=None, token=None, request_id=1):
+def call(client, method, params=None, token=None, request_id=1, document=None):
     headers = dict(MCP_HEADERS)
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if document:
+        headers[DOCUMENT_HEADER] = document
     body = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:
         body["params"] = params
@@ -148,6 +159,114 @@ def test_the_callers_bearer_is_what_the_tool_acts_as(gated, client, monkeypatch)
     assert seen == [token]
     # and the scope is not left behind for the next caller
     assert current_user_token() is None
+
+
+# ── the live document a call can bind itself to ──────────────────────────
+
+
+@contextmanager
+def agora_serving(fake, monkeypatch):
+    """`fake` on a loopback port, served from a thread of its own.
+
+    The endpoint answers in the test client's event loop, so the document it
+    writes to has to be served from another one.
+    """
+    ready = threading.Event()
+    state = {}
+
+    def serve_until_stopped():
+        async def main():
+            async with serve(fake.handle, "127.0.0.1", 0) as server:
+                state["port"] = server.sockets[0].getsockname()[1]
+                state["stop"] = asyncio.Event()
+                ready.set()
+                await state["stop"].wait()
+
+        state["loop"] = asyncio.new_event_loop()
+        state["loop"].run_until_complete(main())
+
+    thread = threading.Thread(target=serve_until_stopped, daemon=True)
+    thread.start()
+    assert ready.wait(10), "the fake agora never came up"
+    monkeypatch.setenv(agora.AGORA_URL_ENV, f"http://127.0.0.1:{state['port']}")
+    try:
+        yield state["port"]
+    finally:
+        state["loop"].call_soon_threadsafe(state["stop"].set)
+        thread.join(10)
+
+
+def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
+    gated, client, monkeypatch
+):
+    fake = FakeAgora()
+
+    with agora_serving(fake, monkeypatch) as port:
+        with respx.mock(base_url=f"http://127.0.0.1:{port}") as mock:
+            grant = mock.put(
+                f"/documents/{DOCUMENT_ID}/members/agent:u1"
+            ).respond(204)
+            response = call(
+                client,
+                "tools/call",
+                {
+                    "name": "viewer_control",
+                    "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
+                },
+                token=mint(),
+                document=DOCUMENT_ID,
+            )
+
+    content = result_of(response)["content"]
+    # the tool's own text is untouched, the document write is reported beside it
+    assert content[0]["text"] == f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
+    assert content[1]["text"] == "Live document: camera moved."
+    assert grant.call_count == 1
+    assert [frame["type"] for frame in fake.received] == ["presence"]
+    assert fake.received[0]["viewport"] == {"center": [2.35, 48.85], "zoom": 16}
+
+
+def test_a_document_that_cannot_be_written_never_costs_the_result(
+    gated, client, monkeypatch
+):
+    monkeypatch.setenv(agora.AGORA_URL_ENV, "http://127.0.0.1:1")
+
+    with respx.mock(base_url="http://127.0.0.1:1") as mock:
+        mock.put(url__startswith="http://").respond(204)
+        response = call(
+            client,
+            "tools/call",
+            {
+                "name": "viewer_control",
+                "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
+            },
+            token=mint(),
+            document=DOCUMENT_ID,
+        )
+
+    result = result_of(response)
+    assert result["isError"] is False
+    assert result["content"][0]["text"].startswith("__VIEWER_CMD__:")
+    assert "nothing was written" in result["content"][1]["text"]
+
+
+def test_an_unbound_call_is_exactly_what_it_was(gated, client, monkeypatch):
+    """No header, no document, and nothing added to the result."""
+    monkeypatch.setattr(
+        mcp_server, "publish", lambda *args: pytest.fail("published without a binding")
+    )
+
+    response = call(
+        client,
+        "tools/call",
+        {
+            "name": "viewer_control",
+            "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
+        },
+        token=mint(),
+    )
+
+    assert text_of(response) == f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
 
 
 # ── the gate ─────────────────────────────────────────────────────────────

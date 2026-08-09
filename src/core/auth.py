@@ -12,8 +12,10 @@ check here would be a second, drifting copy of theirs.
 
 Gated: everything that runs code, writes a file, or reads back a session or a
 user's data. Open: `/health`, the `GET /tools` manifest sibyl fetches at startup
-before anyone has signed in, the static viewer, and reading a share by id, whose
-whole point is a link that works for someone who never signs in.
+before anyone has signed in, the static viewer, reading a share by id, whose
+whole point is a link that works for someone who never signs in, and reading a
+live layer by its token, which a share link guest in a live document has to be
+able to fetch without ever signing in.
 
 `/mcp` is gated too, by ASGI middleware rather than a route dependency: it is a
 mounted app, not a FastAPI route, so the dependency system never sees it.
@@ -22,6 +24,7 @@ mounted app, not a FastAPI route, so the dependency system never sees it.
 from __future__ import annotations
 
 import os
+import time
 from typing import Annotated
 
 import jwt
@@ -74,3 +77,37 @@ def require_platform_token(token: str | None) -> None:
 def platform_auth(authorization: Annotated[str | None, Header()] = None) -> None:
     """Route dependency form of the gate, for routes that never read the token."""
     require_platform_token(bearer_token(authorization))
+
+
+def platform_claims(token: str | None) -> dict | None:
+    """The claims of a live platform token, or None when it is not one.
+
+    Verified again rather than read: an unverified claim is an attacker's
+    input, and this one decides which identity a document write is made under.
+    """
+    secret = platform_secret()
+    if secret is None or not token:
+        return None
+    try:
+        return jwt.decode(
+            token, secret, algorithms=["HS256"], options={"require": ["exp"]}
+        )
+    except jwt.PyJWTError:
+        return None
+
+
+def sign_platform_token(subject: str, name: str, lifetime_seconds: int) -> str | None:
+    """Mint a platform token of our own, or None when the gate is off.
+
+    The only caller is the live document bridge, which needs an identity of its
+    own to write as. Nothing here decides what that identity may do: the
+    document's member list does, and only the caller's own token can add to it.
+    """
+    secret = platform_secret()
+    if secret is None:
+        return None
+    return jwt.encode(
+        {"sub": subject, "name": name, "exp": int(time.time()) + lifetime_seconds},
+        secret,
+        algorithm="HS256",
+    )

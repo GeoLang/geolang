@@ -232,6 +232,40 @@ def test_more_operations_than_a_batch_holds_are_split(monkeypatch):
     assert [frame["clientSeq"] for frame in fake.received] == [1, 2]
 
 
+def test_a_batch_is_split_before_it_grows_past_the_frame_limit(monkeypatch):
+    """agora closes the connection on an oversized frame instead of refusing it."""
+    fake = FakeAgora()
+    value = {"blob": "x" * (32 * 1024)}
+    operations = [(f"layers/l{index}", value) for index in range(8)]
+
+    async def scenario(session):
+        await session.send_operations(operations)
+
+    monkeypatch.setattr(agora, "BATCH_INTERVAL_SECONDS", 0)
+    run_against(fake, scenario, monkeypatch)
+
+    assert len(fake.received) > 1
+    for frame in fake.received:
+        assert len(json.dumps(frame)) <= agora.MAXIMUM_FRAME_BYTES
+    sent = [op["key"] for frame in fake.received for op in frame["ops"]]
+    assert sent == [key for key, _ in operations]
+
+
+def test_an_oversized_value_stops_the_write_before_any_frame(monkeypatch):
+    """One refusable operation fails the whole write rather than half of it."""
+    fake = FakeAgora()
+    huge = {"blob": "x" * (agora.MAXIMUM_OPERATION_VALUE_BYTES + 1)}
+    operations = [("layers/a", {"name": "A"}), ("layers/b", huge)]
+
+    async def scenario(session):
+        with pytest.raises(agora.AgoraError, match="operation cap"):
+            await session.send_operations(operations)
+
+    run_against(fake, scenario, monkeypatch)
+
+    assert fake.received == []
+
+
 def test_nothing_is_sent_for_an_empty_write(monkeypatch):
     fake = FakeAgora()
 

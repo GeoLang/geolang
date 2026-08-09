@@ -29,6 +29,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.agents.agent_manager import load_external_tools
+from src.api.live_document import document_binding, publish
 from src.core.auth import platform_token_error
 from src.core.user_token import bearer_token, user_token_scope
 
@@ -126,12 +127,18 @@ def _text_result(text: str, is_error: bool = False) -> mcp_types.CallToolResult:
 
 def create_mcp_app(
     tool_manifest: Callable[[], list[dict]],
+    read_geojson: Callable[[str], dict | None],
 ) -> tuple[ASGIApp, StreamableHTTPSessionManager]:
     """The MCP endpoint as an ASGI app, plus the session manager to run.
 
     The session manager has to be entered from the parent app's lifespan: its
     task group is what serves every request, and without it the first call
     fails.
+
+    `read_geojson` turns a layer file this service holds into features a live
+    document can carry. It is passed in rather than imported: the file routes
+    own the confinement rules, and this module must not be a second place that
+    decides which files may be read.
     """
 
     async def list_tools(
@@ -186,7 +193,20 @@ def create_mcp_app(
             logger.exception(f"Tool {params.name} failed")
             return _text_result(f"❌ Tool execution failed: {e}", is_error=True)
 
-        return _text_result(str(result))
+        text = str(result)
+        binding = document_binding(ctx.request.headers) if ctx.request else None
+        if binding is None:
+            return _text_result(text)
+
+        # the tool ran, so its result reaches the caller whatever the document
+        # did: the write is reported beside it, never in place of it
+        note = await publish(binding, token, text, read_geojson)
+        if note is None:
+            return _text_result(text)
+        return mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(text=text), mcp_types.TextContent(text=note)],
+            is_error=False,
+        )
 
     server = Server(
         SERVER_NAME,

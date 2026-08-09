@@ -1,10 +1,10 @@
 """The file-serving routes must not leave the tree.
 
-`/outputs/{filename}`, `/geojson/{filename:path}` and `/stats/{filename:path}`
-all take a name from the URL and look it up in a list of directories. Every
-lookup goes through `resolve_under`, which resolves both sides and drops
-anything landing outside the allowed roots, so `..`, an absolute name and a
-symlink out of the tree all read as "not found".
+`/outputs/{filename}`, `/geojson/{filename:path}`, `/stats/{filename:path}` and
+`/live-data/{token}` all take a name from the URL and look it up in a list of
+directories. Every lookup goes through `resolve_under`, which resolves both
+sides and drops anything landing outside the allowed roots, so `..`, an absolute
+name and a symlink out of the tree all read as "not found".
 
 The routes read `OUTPUTS_DIR` and friends at call time, so these tests point
 `TOOL_EXEC_DIR` at a tmp_path and reload the modules that cached them.
@@ -270,6 +270,71 @@ def test_geojson_does_not_echo_the_parse_position(client, tree):
     assert response.status_code == 500
     assert "Unexpected character" not in response.text
     assert response.json()["detail"] == "Failed to convert to GeoJSON"
+
+
+# ── /live-data ───────────────────────────────────────────────────────────
+#
+# the one route that serves a file without a platform token, so the token in the
+# url is the whole credential and nothing else in the path may be honoured
+
+
+def published(exec_dir, token, text='{"type":"FeatureCollection","features":[]}'):
+    directory = exec_dir / "live_data"
+    directory.mkdir(exist_ok=True)
+    (directory / f"{token}.geojson").write_text(text)
+    return token
+
+
+TOKEN = "TAtDU_iGhkTfZlYyEezXgw0LrfjTKzL8hYbG1SUdWHo"
+
+
+def test_live_data_serves_a_published_layer(client, tree):
+    _, exec_dir, _ = tree
+    published(exec_dir, TOKEN, '{"type":"FeatureCollection","features":[1]}')
+
+    response = client.get(f"/live-data/{TOKEN}")
+
+    assert response.status_code == 200
+    assert response.json()["features"] == [1]
+
+
+def test_live_data_needs_no_token_of_the_callers_own(client, tree, monkeypatch):
+    """A share link guest in a live document never signs in."""
+    from src.core.auth import SECRET_ENV
+
+    monkeypatch.setenv(SECRET_ENV, "test-platform-secret-0123456789ab")
+    _, exec_dir, _ = tree
+    published(exec_dir, TOKEN)
+
+    assert client.get(f"/live-data/{TOKEN}").status_code == 200
+
+
+def test_live_data_refuses_an_unpublished_token(client, tree):
+    assert client.get(f"/live-data/{TOKEN}").status_code == 404
+
+
+def test_live_data_refuses_anything_that_is_not_a_token(tree):
+    server, exec_dir, outside = tree
+    published(exec_dir, TOKEN)
+
+    for attempt in (
+        "../../outside/secret.txt",
+        f"../live_data/{TOKEN}",
+        str(outside / "secret.txt"),
+        f"{TOKEN}.geojson",
+        "short",
+        "",
+    ):
+        assert status_of(server.get_live_data(attempt)) == 404, attempt
+
+
+def test_live_data_refuses_a_symlink_out_of_the_tree(tree):
+    server, exec_dir, outside = tree
+    directory = exec_dir / "live_data"
+    directory.mkdir(exist_ok=True)
+    (directory / f"{TOKEN}.geojson").symlink_to(outside / "secret.txt")
+
+    assert status_of(server.get_live_data(TOKEN)) == 404
 
 
 # ── /stats ───────────────────────────────────────────────────────────────

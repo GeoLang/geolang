@@ -102,6 +102,9 @@ UNGATED_PATHS = {
     "/debug/tools",  # tool names, which the manifest already lists
     "/share/{share_id}",  # a share link is meant for someone who never signs in
     "/share/{share_id}/data",
+    # a live document's guests never sign in either, and cannot draw a layer
+    # they cannot fetch. The token names one file this service published itself.
+    "/live-data/{token}",
     "/",  # the viewer shell, no data of its own
     "/static",  # js and css
     # fastapi's own, mounted below the dependency system

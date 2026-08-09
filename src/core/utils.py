@@ -12,6 +12,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 EXEC_DIR = os.environ.get("TOOL_EXEC_DIR", str(_REPO_ROOT))
 OUTPUTS_DIR = os.path.join(EXEC_DIR, "outputs")
 SHARES_FILE = os.path.join(EXEC_DIR, ".shares.json")
+# layer data published to a live document, readable without a platform token by
+# whoever holds the file's token
+LIVE_DATA_DIR = Path(EXEC_DIR) / "live_data"
 USER_DATA_DIR = Path(EXEC_DIR) / "user_data"
 CATALOGUE_FILE = USER_DATA_DIR / "catalogue.json"
 

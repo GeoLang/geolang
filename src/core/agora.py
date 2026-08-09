@@ -36,6 +36,11 @@ VIEW_ROLE = "view"
 MAXIMUM_OPERATION_VALUE_BYTES = 64 * 1024
 MAXIMUM_OPERATIONS_PER_SECOND = 60
 MAXIMUM_OPERATIONS_PER_BATCH = 50
+# agora closes the connection on a larger frame instead of refusing it, so a
+# batch is split by encoded size as well as by count
+MAXIMUM_FRAME_BYTES = 128 * 1024
+FRAME_ENVELOPE_BYTES = 64
+OPERATION_ENVELOPE_BYTES = 20
 # agora counts one message per operation, so back to back full frames would trip
 # its per-second limit
 BATCH_INTERVAL_SECONDS = 1.0
@@ -69,6 +74,31 @@ def _encode(frame: dict) -> str:
 def value_bytes(value: object) -> int:
     """Size of an operation value on the wire, which is what agora measures."""
     return len(_encode(value).encode("utf-8"))
+
+
+def batched(operations: list[tuple[str, object]]) -> list[list[tuple[str, object]]]:
+    """Split operations into frames agora will accept, in order.
+
+    A single operation always fits a frame of its own: its value is capped well
+    below the frame limit before it gets here.
+    """
+    frames: list[list[tuple[str, object]]] = []
+    current: list[tuple[str, object]] = []
+    size = 0
+    budget = MAXIMUM_FRAME_BYTES - FRAME_ENVELOPE_BYTES
+    for key, value in operations:
+        cost = (
+            len(key.encode("utf-8")) + value_bytes(value) + OPERATION_ENVELOPE_BYTES
+        )
+        full = len(current) >= MAXIMUM_OPERATIONS_PER_BATCH or size + cost > budget
+        if current and full:
+            frames.append(current)
+            current, size = [], 0
+        current.append((key, value))
+        size += cost
+    if current:
+        frames.append(current)
+    return frames
 
 
 async def _receive(connection, timeout: float) -> dict:
@@ -112,11 +142,11 @@ class AgoraSession:
             raise AgoraError("this session may not write to the document")
         if not operations:
             return
-        frames = [
-            operations[start : start + MAXIMUM_OPERATIONS_PER_BATCH]
-            for start in range(0, len(operations), MAXIMUM_OPERATIONS_PER_BATCH)
-        ]
-        for index, frame_operations in enumerate(frames):
+        for key, value in operations:
+            size = value_bytes(value)
+            if size > MAXIMUM_OPERATION_VALUE_BYTES:
+                raise AgoraError(f"{key} is {size} bytes, over agora's operation cap")
+        for index, frame_operations in enumerate(batched(operations)):
             if index:
                 await asyncio.sleep(BATCH_INTERVAL_SECONDS)
             await self._send_frame(frame_operations)
@@ -131,11 +161,6 @@ class AgoraSession:
         )
 
     async def _send_frame(self, operations: list[tuple[str, object]]) -> None:
-        for key, value in operations:
-            size = value_bytes(value)
-            if size > MAXIMUM_OPERATION_VALUE_BYTES:
-                raise AgoraError(f"{key} is {size} bytes, over agora's operation cap")
-
         self.client_seq += 1
         client_seq = self.client_seq
         if len(operations) == 1:

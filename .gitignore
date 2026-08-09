@@ -5,6 +5,7 @@ env/
 cache/
 outputs/
 user_data/
+live_data/
 natural_earth*/
 .shares.json
 ghsl_pop.tif

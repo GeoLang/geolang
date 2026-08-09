@@ -48,11 +48,14 @@ import httpx
 
 from src.agents.agent_manager import PERSONA, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
+from src.api.live_document import LIVE_DATA_PATH, LIVE_DATA_TOKEN_PATTERN
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.core.auth import platform_auth, require_platform_token
+from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
 from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
     EXEC_DIR,
+    LIVE_DATA_DIR,
     OUTPUTS_DIR,
     SIBYL_URL,
     USER_DATA_DIR,
@@ -118,7 +121,27 @@ def tool_manifest() -> list[dict]:
     return tools
 
 
-mcp_app, mcp_session_manager = create_mcp_app(tool_manifest)
+def layer_geojson(filename: str) -> dict | None:
+    """A named layer file as GeoJSON, or None when no such file is in the tree.
+
+    The one place that turns a layer name into features: the `/geojson` route
+    and the live document bridge both read through it, so what may be read
+    cannot drift between them.
+    """
+    import geopandas as gpd
+
+    path = resolve_under(
+        name_candidates(filename), geojson_search_dirs(), allowed_roots()
+    )
+    if not path:
+        return None
+    gdf = gpd.read_file(path)
+    if gdf.crs and gdf.crs.to_epsg() != 4326:
+        gdf = gdf.to_crs("EPSG:4326")
+    return json.loads(gdf.to_json())
+
+
+mcp_app, mcp_session_manager = create_mcp_app(tool_manifest, layer_geojson)
 
 
 @asynccontextmanager
@@ -239,18 +262,6 @@ def run_tool(
     return {"result": result}
 
 
-def marker_payloads(content: str, marker: str):
-    """Every JSON payload on a ``MARKER:{json}`` line of a tool's output."""
-    for part in content.split(marker)[1:]:
-        line = part.split("\n")[0].strip()
-        try:
-            payload = json.loads(line)
-        except ValueError:
-            logger.warning(f"unparseable {marker} payload: {line[:120]}")
-            continue
-        yield payload
-
-
 async def agent_event_stream(message: str, user_token: str | None = None):
     """Run a sibyl agent run and yield normalized (kind, payload) events.
 
@@ -339,13 +350,8 @@ async def agent_event_stream(message: str, user_token: str | None = None):
                     pass
 
             # Viewer commands from the viewer_control tool
-            if "__VIEWER_CMD__:" in content:
-                for part in content.split("__VIEWER_CMD__:")[1:]:
-                    try:
-                        cmd = json.loads(part.split("\n")[0].strip())
-                        yield ("viewer_cmd", cmd)
-                    except Exception:
-                        pass
+            for command in marker_payloads(content, VIEWER_COMMAND_MARKER):
+                yield ("viewer_cmd", command)
 
             # Workflow plan from plan_workflow, awaiting the user's approval
             for plan in marker_payloads(content, "__PLAN__:"):
@@ -572,18 +578,14 @@ async def download_file(filename: str):
     return FileResponse(path, filename=safe, media_type="application/octet-stream")
 
 
-@app.get("/geojson/{filename:path}", dependencies=[Depends(platform_auth)])
-async def get_geojson(filename: str):
-    """Convert a vector file (GPKG, SHP, GeoJSON) to GeoJSON for Leaflet."""
-    import geopandas as gpd
-
-    # Search in outputs, user_data (and subdirs), and natural_earth directories
+def geojson_search_dirs() -> list[str]:
+    """Where a layer is looked up: outputs, user_data and the natural earth sets."""
     user_data_subdirs = (
         [str(p) for p in USER_DATA_DIR.rglob("*") if p.is_dir()]
         if USER_DATA_DIR.exists()
         else []
     )
-    search_dirs = [
+    return [
         OUTPUTS_DIR,
         str(USER_DATA_DIR),
         *user_data_subdirs,
@@ -594,21 +596,38 @@ async def get_geojson(filename: str):
         os.path.join(EXEC_DIR, "natural_earth_10m"),
     ]
 
-    path = resolve_under(name_candidates(filename), search_dirs, allowed_roots())
 
-    if not path:
-        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-
+@app.get("/geojson/{filename:path}", dependencies=[Depends(platform_auth)])
+async def get_geojson(filename: str):
+    """Convert a vector file (GPKG, SHP, GeoJSON) to GeoJSON for Leaflet."""
     try:
-        gdf = gpd.read_file(path)
-        if gdf.crs and gdf.crs.to_epsg() != 4326:
-            gdf = gdf.to_crs("EPSG:4326")
-        return JSONResponse(content=json.loads(gdf.to_json()))
+        content = layer_geojson(filename)
     except Exception:
         # the reader quotes the absolute path and the byte it choked on, so the
         # reason is logged rather than returned
         logger.exception(f"GeoJSON conversion failed for {filename}")
         raise HTTPException(status_code=500, detail="Failed to convert to GeoJSON")
+
+    if content is None:
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+    return JSONResponse(content=content)
+
+
+# reading live layer data stays open on purpose: a live document's members
+# include share link guests who never sign in, and they cannot draw a layer they
+# cannot fetch. The token in the url is the whole credential, so it is minted
+# with 32 random bytes and names a file written once and never rewritten.
+@app.get(f"/{LIVE_DATA_PATH}/{{token}}")
+async def get_live_data(token: str):
+    """Features published to a live document, by the token that names them."""
+    if not LIVE_DATA_TOKEN_PATTERN.fullmatch(token):
+        raise HTTPException(status_code=404, detail="Not found")
+    path = resolve_under(
+        [f"{token}.geojson"], [str(LIVE_DATA_DIR)], [str(LIVE_DATA_DIR)]
+    )
+    if not path:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="application/geo+json")
 
 
 @app.get("/datasets", dependencies=[Depends(platform_auth)])
