@@ -77,13 +77,14 @@ FastAPI deprecated the event hooks in favour of the `lifespan` context manager. 
 
 `GET /health` currently returns `{"status": "ok"}` regardless of whether sibyl is reachable. For load-balancer use, ping sibyl and return non-200 on failure. Keep a `/health/live` (always 200) vs `/health/ready` (dependency-aware) split.
 
-## 🟡 Nothing prunes published live layer data
+## 🟡 Orphaned live layer data is never pruned
 
 A layer too large to carry inside a live document is written to `live_data/` and
-served open by its token. The files are never revisited, so a long lived
-deployment grows one per publish and every one of them stays fetchable forever.
-Wanted: an age or size bound, and a decision on whether a token should expire
-with the document that referenced it.
+served open by its token. Republishing a layer now deletes the file the previous
+entry named, once the replacing write is acked. Nothing else does: a member
+deleting the layer, or the whole document going away, leaves the file in place
+and fetchable forever, because agora never tells this service either happened.
+Wanted: an age bound, or a token that expires with the document that named it.
 
 ## 🟡 Add a request log
 

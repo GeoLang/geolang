@@ -19,6 +19,28 @@ USER_DATA_DIR = Path(EXEC_DIR) / "user_data"
 CATALOGUE_FILE = USER_DATA_DIR / "catalogue.json"
 
 
+def resolve_under(names, search_dirs, roots) -> str | None:
+    """First of `names` found in `search_dirs`, confined to `roots`.
+
+    Both sides are resolved before the comparison, so a `..` segment, an
+    absolute name, and a symlink pointing out of the tree all miss. Directory
+    order beats name order, which is the lookup the viewer already links
+    against.
+    """
+    resolved_roots = [Path(root).resolve() for root in roots]
+    for directory in search_dirs:
+        for name in names:
+            if not name:
+                continue
+            # an absolute name swallows the directory, and is then out of tree
+            candidate = (Path(directory) / name).resolve()
+            if not any(candidate.is_relative_to(r) for r in resolved_roots):
+                continue
+            if candidate.exists():
+                return str(candidate)
+    return None
+
+
 def load_catalogue() -> list:
     if not CATALOGUE_FILE.exists():
         return []

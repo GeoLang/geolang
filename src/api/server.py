@@ -61,6 +61,7 @@ from src.core.utils import (
     USER_DATA_DIR,
     load_catalogue,
     load_shares,
+    resolve_under,
     save_catalogue,
     save_shares,
 )
@@ -528,28 +529,6 @@ def name_candidates(filename: str) -> list[str]:
     """The name as given, plus the extension-swapped form the viewer links to."""
     stem, ext = os.path.splitext(filename)
     return [filename, stem if ext else filename + ".gpkg"]
-
-
-def resolve_under(names, search_dirs, roots) -> str | None:
-    """First of `names` found in `search_dirs`, confined to `roots`.
-
-    Both sides are resolved before the comparison, so a `..` segment, an
-    absolute name, and a symlink pointing out of the tree all miss. Directory
-    order beats name order, which is the lookup the viewer already links
-    against.
-    """
-    resolved_roots = [Path(root).resolve() for root in roots]
-    for directory in search_dirs:
-        for name in names:
-            if not name:
-                continue
-            # an absolute name swallows the directory, and is then out of tree
-            candidate = (Path(directory) / name).resolve()
-            if not any(candidate.is_relative_to(r) for r in resolved_roots):
-                continue
-            if candidate.exists():
-                return str(candidate)
-    return None
 
 
 @app.get("/outputs/{filename}", dependencies=[Depends(platform_auth)])

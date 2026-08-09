@@ -152,9 +152,28 @@ def test_a_ui_spec_layer_becomes_an_entry_the_viewer_can_draw(caller, monkeypatc
         "visible": True,
         "opacity": 1,
         "order": "V",
+        "styleOverrides": {"color": "#3388ff"},
         "source": {"kind": "geojson", "geojson": POINT},
     }
     assert note == "Live document: 1 layer published."
+
+
+def test_a_layer_with_no_colour_carries_no_overrides(caller, monkeypatch):
+    fake = FakeAgora()
+    spec = json.dumps(
+        {"type": "map", "layers": [{"name": "Depots", "file": "depots.gpkg"}]}
+    )
+
+    publish(
+        fake,
+        "__UI_SPEC__:" + spec,
+        monkeypatch,
+        read=reader(**{"depots.gpkg": POINT}),
+        token=caller,
+    )
+
+    (_, entry), = operations(fake)
+    assert "styleOverrides" not in entry
 
 
 def test_a_layer_id_is_the_same_however_the_file_was_named():
@@ -228,6 +247,7 @@ def test_rewriting_a_layer_keeps_what_the_document_says_about_it(caller, monkeyp
     assert entry["visible"] is False
     assert entry["opacity"] == 0.5
     assert entry["order"] == "b"
+    # the ui_spec colour does not overwrite a member's own styling
     assert entry["styleOverrides"] == {"style": {"opacity": 0.2}}
     assert entry["source"]["geojson"] == POINT
 
@@ -341,6 +361,188 @@ def test_a_layer_too_large_to_publish_is_left_out(caller, monkeypatch, tmp_path)
     assert fake.received == []
     assert note == "Live document: nothing to publish. big.gpkg is too large to publish."
     assert not (tmp_path / "live_data").exists()
+
+
+# ── pruning what a replaced layer leaves behind ──────────────────────────
+
+
+def published_file(directory, token, text="{}"):
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{token}.geojson").write_text(text)
+    return directory / f"{token}.geojson"
+
+
+def entry_with_url(url, layer_id):
+    return {
+        layer_id: {
+            "layerId": layer_id,
+            "name": "Depots",
+            "type": "geojson",
+            "visible": True,
+            "opacity": 1,
+            "order": "V",
+            "source": {"kind": "url", "url": url, "format": "geojson"},
+        }
+    }
+
+
+OLD_TOKEN = "TAtDU_iGhkTfZlYyEezXgw0LrfjTKzL8hYbG1SUdWHo"
+
+
+@pytest.fixture
+def live_data(monkeypatch, tmp_path):
+    """A throwaway published-layer directory, and the url prefix that names it."""
+    directory = tmp_path / "live_data"
+    monkeypatch.setattr(utils, "LIVE_DATA_DIR", directory)
+    monkeypatch.setenv(live_document.PUBLIC_URL_ENV, "/agent")
+    return directory
+
+
+def test_replacing_a_url_layer_deletes_the_file_it_leaves_behind(
+    caller, monkeypatch, live_data
+):
+    layer_id = live_document.layer_id_for("depots.gpkg")
+    old = published_file(live_data, OLD_TOKEN)
+    fake = FakeAgora(
+        snapshot={
+            **SNAPSHOT,
+            "state": {
+                "layers": entry_with_url(f"/agent/live-data/{OLD_TOKEN}", layer_id)
+            },
+        }
+    )
+
+    publish(
+        fake,
+        ui_spec("depots.gpkg"),
+        monkeypatch,
+        read=reader(**{"depots.gpkg": big_feature_collection(300)}),
+        token=caller,
+    )
+
+    (_, entry), = operations(fake)
+    new = entry["source"]["url"].rsplit("/", 1)[1]
+    assert not old.exists()
+    assert (live_data / f"{new}.geojson").exists()
+
+
+def test_a_layer_that_shrinks_back_inline_still_prunes(caller, monkeypatch, live_data):
+    """The replacement carries its own features, and the old file is still dead."""
+    layer_id = live_document.layer_id_for("depots.gpkg")
+    old = published_file(live_data, OLD_TOKEN)
+    fake = FakeAgora(
+        snapshot={
+            **SNAPSHOT,
+            "state": {
+                "layers": entry_with_url(f"/agent/live-data/{OLD_TOKEN}", layer_id)
+            },
+        }
+    )
+
+    publish(
+        fake,
+        ui_spec("depots.gpkg"),
+        monkeypatch,
+        read=reader(**{"depots.gpkg": POINT}),
+        token=caller,
+    )
+
+    (_, entry), = operations(fake)
+    assert entry["source"]["kind"] == "geojson"
+    assert not old.exists()
+
+
+def test_a_url_this_service_did_not_publish_is_left_alone(caller, monkeypatch, live_data):
+    """A member can point a layer anywhere, and nothing there is ours to delete."""
+    layer_id = live_document.layer_id_for("depots.gpkg")
+    ours = published_file(live_data, OLD_TOKEN)
+    for url in (
+        f"https://elsewhere.example.com/live-data/{OLD_TOKEN}",
+        f"/other/live-data/{OLD_TOKEN}",
+        "/agent/live-data/short",
+        f"/agent/live-data/{OLD_TOKEN}/../{OLD_TOKEN}",
+    ):
+        fake = FakeAgora(
+            snapshot={**SNAPSHOT, "state": {"layers": entry_with_url(url, layer_id)}}
+        )
+
+        publish(
+            fake,
+            ui_spec("depots.gpkg"),
+            monkeypatch,
+            read=reader(**{"depots.gpkg": POINT}),
+            token=caller,
+        )
+
+        assert ours.exists(), url
+
+
+def test_a_refused_write_prunes_nothing(caller, monkeypatch, live_data):
+    layer_id = live_document.layer_id_for("depots.gpkg")
+    old = published_file(live_data, OLD_TOKEN)
+    fake = FakeAgora(
+        error="document state limit reached",
+        snapshot={
+            **SNAPSHOT,
+            "state": {
+                "layers": entry_with_url(f"/agent/live-data/{OLD_TOKEN}", layer_id)
+            },
+        },
+    )
+
+    publish(
+        fake,
+        ui_spec("depots.gpkg"),
+        monkeypatch,
+        read=reader(**{"depots.gpkg": POINT}),
+        token=caller,
+    )
+
+    # the entry still names it, so the file has to outlive the failed write
+    assert old.exists()
+
+
+def test_a_file_already_gone_does_not_fail_the_publish(caller, monkeypatch, live_data):
+    layer_id = live_document.layer_id_for("depots.gpkg")
+    fake = FakeAgora(
+        snapshot={
+            **SNAPSHOT,
+            "state": {
+                "layers": entry_with_url(f"/agent/live-data/{OLD_TOKEN}", layer_id)
+            },
+        }
+    )
+
+    note = publish(
+        fake,
+        ui_spec("depots.gpkg"),
+        monkeypatch,
+        read=reader(**{"depots.gpkg": POINT}),
+        token=caller,
+    )
+
+    assert note == "Live document: 1 layer published."
+
+
+def test_pruning_never_leaves_the_published_directory(live_data, tmp_path):
+    outside = tmp_path / "secret.geojson"
+    outside.write_text("do not delete me")
+    published_file(live_data, OLD_TOKEN)
+    (live_data / "escape.geojson").symlink_to(outside)
+
+    live_document.prune_layer_data(["../secret", "escape", f"{OLD_TOKEN}.geojson"])
+
+    assert outside.exists()
+    assert (live_data / f"{OLD_TOKEN}.geojson").exists()
+
+
+def test_a_published_url_is_recognised_as_ours(live_data):
+    assert live_document.live_data_token(f"/agent/live-data/{OLD_TOKEN}") == OLD_TOKEN
+    assert live_document.live_data_token(f"/agent/live-data/{OLD_TOKEN}.geojson") is None
+    assert live_document.live_data_token(f"/agent/live-data/{OLD_TOKEN}/more") is None
+    assert live_document.live_data_token("/agent/live-data/short") is None
+    assert live_document.live_data_token("/agent/live-data/") is None
+    assert live_document.live_data_token("") is None
 
 
 # ── the camera ───────────────────────────────────────────────────────────

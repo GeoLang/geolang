@@ -122,7 +122,9 @@ Add `X-Agora-Document` and a call's map effects also land in a live [agora](http
 } } }
 ```
 
-What travels: the layers of an `__UI_SPEC__` map become `layers/<id>` entries, and a `fly_to` or `set_view` from `__VIEWER_CMD__` becomes one presence viewport, which peers following the agent match. Other markers are ignored. A layer's features ride inside the document while they fit under 48KiB, and above that are written to `GET /live-data/{token}`, which every member fetches. That route needs no bearer: a share link guest has none, and the 32-byte token in the URL is the whole credential.
+What travels: the layers of an `__UI_SPEC__` map become `layers/<id>` entries, and a `fly_to` or `set_view` from `__VIEWER_CMD__` becomes one presence viewport, which peers following the agent match. Other markers are ignored. A layer's colour becomes `styleOverrides.color`, but only on an entry that carries no overrides yet, so a member's own restyle survives a re-run.
+
+A layer's features ride inside the document while they fit under 48KiB, and above that are written to `GET /live-data/{token}`, which every member fetches. That route needs no bearer: a share link guest has none, and the 32-byte token in the URL is the whole credential. Republishing a layer deletes the file its previous entry named, once the replacing write is acked. A file the document stops naming any other way stays.
 
 The tool's own result text is never changed by any of this. A document write is reported as a second text content block beside it, whether it succeeded or failed, so a document that could not be written never costs the caller the tool result.
 

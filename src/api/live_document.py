@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import uuid
+from pathlib import Path
 
 import anyio.to_thread
 
@@ -136,8 +137,9 @@ def store_layer_data(body: bytes) -> str:
     The token in the name is the whole credential, so it is minted here and the
     file is never written to again.
 
-    TODO: nothing prunes these, so a long lived deployment grows a file per
-    published layer too large to inline.
+    TODO: replacing a layer prunes the file it leaves behind, but a member
+    deleting the layer or the document does not, so those stay until someone
+    clears the directory.
     """
     token = secrets.token_urlsafe(LIVE_DATA_TOKEN_BYTES)
     directory = utils.LIVE_DATA_DIR
@@ -146,8 +148,69 @@ def store_layer_data(body: bytes) -> str:
     return f"{public_url()}/{LIVE_DATA_PATH}/{token}"
 
 
+def live_data_token(url: str) -> str | None:
+    """The token of a url this service published, or None for any other url.
+
+    A layer entry can name any url a member put there, and only the ones this
+    service serves are ours to delete.
+    """
+    prefix = f"{public_url()}/{LIVE_DATA_PATH}/"
+    if not url.startswith(prefix):
+        return None
+    token = url[len(prefix) :]
+    return token if LIVE_DATA_TOKEN_PATTERN.fullmatch(token) else None
+
+
+def replaced_layer_data(operations: list, entries: dict) -> list[str]:
+    """Tokens of the files the operations are about to leave unreferenced."""
+    tokens = []
+    for key, _ in operations:
+        current = entries.get(key.split("/", 1)[-1])
+        if not isinstance(current, dict):
+            continue
+        source = current.get("source")
+        if not isinstance(source, dict) or source.get("kind") != "url":
+            continue
+        token = live_data_token(str(source.get("url") or ""))
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+def prune_layer_data(tokens: list) -> None:
+    """Delete published files nothing points at any more.
+
+    Only ever called once the write that replaced them is acked, so a file is
+    gone only when the entry that named it is.
+    """
+    for token in tokens:
+        try:
+            path = utils.resolve_under(
+                [f"{token}.geojson"],
+                [str(utils.LIVE_DATA_DIR)],
+                [str(utils.LIVE_DATA_DIR)],
+            )
+            if path:
+                Path(path).unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning(f"could not prune published layer data: {e}")
+
+
+def style_overrides(layer: dict, current: dict) -> dict | None:
+    """How the layer is drawn: what the document says, else the ui_spec colour.
+
+    A member who restyled the layer keeps their styling, so the colour is only
+    offered to an entry that carries no overrides yet.
+    """
+    if current.get("styleOverrides"):
+        return current["styleOverrides"]
+    color = str(layer.get("color") or "").strip()
+    return {"color": color} if color else None
+
+
 def layer_entry(layer: dict, layer_id: str, current: dict, order: str) -> dict:
     """One layer as the viewer reads it, keeping what the document already says."""
+    overrides = style_overrides(layer, current)
     return {
         "layerId": layer_id,
         "name": str(current.get("name") or layer.get("name") or layer_id),
@@ -155,11 +218,7 @@ def layer_entry(layer: dict, layer_id: str, current: dict, order: str) -> dict:
         "visible": current.get("visible", True),
         "opacity": current.get("opacity", 1),
         "order": order,
-        **(
-            {"styleOverrides": current["styleOverrides"]}
-            if current.get("styleOverrides")
-            else {}
-        ),
+        **({"styleOverrides": overrides} if overrides else {}),
     }
 
 
@@ -342,7 +401,9 @@ async def publish(binding: str, caller_token: str | None, result: str, read_geoj
             operations, problems = await anyio.to_thread.run_sync(
                 layer_operations, layers, session.layers, read_geojson
             )
+            replaced = replaced_layer_data(operations, session.layers)
             await session.send_operations(operations)
+            prune_layer_data(replaced)
             if viewport is not None:
                 await session.send_presence(viewport)
         return summary(len(operations), viewport is not None, problems)
