@@ -43,6 +43,8 @@ There is no tool sandbox any more. A tool runs with the API's privileges, in its
 
 `/mcp` no longer offers `sql_query` at all, so what is left is the `/chat` path, where the SQL's author and the browser running it are the same person. A tool module declares itself with `TOOL_RUNS_CALLER_CODE = True` and the MCP endpoint drops it from both the manifest and the call path.
 
+`/mcp` also takes a token of its own now, minted by `POST /mcp/token` and marked with a private `geolang_use` claim, so reaching an outside agent in is a deliberate act with an expiry rather than a paste of the token you already hold. What it is not is a reduced credential: tools call downstream with the token that arrived, so everywhere but this endpoint it is worth exactly what the minting token was worth. Narrowing that too needs per-tool scopes the platform has no notion of yet.
+
 Still open, and viewer-side rather than here: DuckDB-WASM will fetch any domain the SQL names, so a `/chat` user's own agent can be talked into reading `http://attacker.example/leak` or an address on their corporate network. An allowlist of fetchable domains belongs in the viewer.
 
 ## A platform token is equivalent to code execution here

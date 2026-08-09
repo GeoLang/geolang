@@ -175,28 +175,51 @@ fetches at startup before anyone has signed in, and reading a share by id, whose
 whole point is a link that works for someone who never signs in. That reader
 gets the view and the summary, not the layers behind them.
 
-Leave the variable unset and the whole API stays open. That is the standalone
-`docker compose up` flow, the test suite and the eval harness, none of which
-carry a token. Turning it on means the client has to send the header on every
-call, layer fetches and download links included.
+With `GEOLANG_ALLOW_UNAUTHENTICATED=1` and no secret the whole API stays open.
+That is the standalone `docker compose up` flow, the test suite and the eval
+harness, none of which carry a token. With the gate on the client has to send
+the header on every call, layer fetches and download links included.
 
 ### MCP for outside agents
 
 The tools are served over the Model Context Protocol at `POST /mcp`,
-`/agent/mcp` from outside. Point Claude, Cursor or any MCP client at it:
+`/agent/mcp` from outside. It takes a token of its own, so mint one first:
+
+```bash
+curl -X POST https://<host>/agent/mcp/token \
+  -H "Authorization: Bearer <your platform jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"lifetime_seconds": 604800}'
+# {"token": "<mcp jwt>", "expires_at": 1760000000}
+```
+
+`lifetime_seconds` is yours to choose up to 30 days, and defaults to 30 days.
+Then point Claude, Cursor or any MCP client at it:
 
 ```json
 { "mcpServers": { "geolang": {
     "type": "http",
     "url": "https://<host>/agent/mcp",
-    "headers": { "Authorization": "Bearer <jwt>" }
+    "headers": { "Authorization": "Bearer <mcp jwt>" }
 } } }
 ```
 
-The bearer is required on every MCP request when `PLATFORM_JWT_SECRET` is set,
-and is the identity the tools act as. Set `MCP_ALLOWED_HOSTS` to the public
-hostname, otherwise the transport's DNS-rebinding check answers `421` to
-everything. See [`docs/api_reference.md`](docs/api_reference.md#mcp).
+**Migration:** a plain platform token used to work here and now answers `401`
+with `this endpoint needs a token from POST /mcp/token`. Mint one and swap it
+into the client config.
+
+The bearer is required on every MCP request when the gate is on, and is the
+identity the tools act as. Set `MCP_ALLOWED_HOSTS` to the public hostname,
+otherwise the transport's DNS-rebinding check answers `421` to everything. See
+[`docs/api_reference.md`](docs/api_reference.md#mcp).
+
+**An MCP token is not a reduced token.** It carries a private `geolang_use`
+claim that decides which door of *this* service it opens, and nothing else
+reads that claim. A tool's outbound calls go out as the token that arrived, so
+at ptolemy, tiletopia, geodukt and agora it is an ordinary platform token with
+your full reach. Minting narrows what gets onto `/mcp`, not what the credential
+is worth once it is there. Treat it like the SSH key described above, and pick
+the shortest lifetime you can live with.
 
 `sql_query` is the one tool `/chat` has that this does not: it runs SQL the
 caller wrote in a browser, which only makes sense when they are the same person.

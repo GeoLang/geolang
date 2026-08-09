@@ -28,7 +28,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from starlette.routing import Route
 
 from ag_ui.core import (
@@ -55,11 +55,14 @@ from src.api.live_document import (
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.core.auth import (
+    MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
     SECRET_ENV,
     authentication_disabled,
     platform_auth,
+    platform_claims,
     require_configuration,
     require_platform_token,
+    sign_mcp_token,
 )
 from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
 from src.core.user_token import bearer_token, user_token_scope
@@ -246,6 +249,44 @@ async def notify_agent(text: str) -> None:
 def list_tools():
     """Tool manifest for sibyl: what it can call and with which arguments."""
     return {"tools": tool_manifest()}
+
+
+class McpTokenRequest(BaseModel):
+    lifetime_seconds: int = Field(
+        MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
+        gt=0,
+        le=MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
+        description="How long the token stays valid, up to 30 days.",
+    )
+
+
+@app.post("/mcp/token")
+def mint_mcp_token(
+    request: McpTokenRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Mint the token an outside MCP client authenticates with.
+
+    Signed for the caller, so the agent acts as them and nobody else. It is a
+    second credential rather than a scoped one: on every other service it is
+    worth exactly what the token used to mint it was worth.
+    """
+    token = bearer_token(authorization)
+    require_platform_token(token)
+
+    claims = platform_claims(token)
+    if claims is None or not claims.get("sub"):
+        raise HTTPException(
+            status_code=503,
+            detail=f"minting needs {SECRET_ENV} set and a caller with a subject",
+        )
+
+    minted = sign_mcp_token(
+        str(claims["sub"]), str(claims.get("name") or ""), request.lifetime_seconds
+    )
+    # read back through the verifying decode, so the expiry reported is the one
+    # in the token rather than one computed a second earlier
+    return {"token": minted, "expires_at": platform_claims(minted)["exp"]}
 
 
 class ToolCallRequest(BaseModel):

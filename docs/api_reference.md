@@ -94,6 +94,15 @@ The tools over the [Model Context Protocol](https://modelcontextprotocol.io/), s
 
 A tool whose module sets `TOOL_RUNS_CALLER_CODE = True` is left out of both `tools/list` and `tools/call`, and answers `-32602` like any other unknown name. `sql_query` is the only one: it runs SQL the caller wrote in whichever browser receives the command, which the `/chat` path can assume is the caller's own and this one cannot.
 
+Every request, `initialize` included, needs a bearer minted by `POST /mcp/token`. A plain platform token answers `401` with `this endpoint needs a token from POST /mcp/token`, so an unauthenticated caller never learns which tools exist.
+
+### `POST /mcp/token`
+Mints the token an MCP client authenticates with. Needs a live platform token of its own, and signs for that caller's `sub`, so the outside agent acts as whoever asked for it and nobody else.
+
+Request `{"lifetime_seconds": <int>}`, optional, defaulting to and capped at `MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS` (30 days). Outside `0 < n <= cap` the route answers `422`. Response `{"token": "<jwt>", "expires_at": <unix seconds>}`, where `expires_at` is read back out of the minted token rather than computed beside it. With no secret set the route answers `503`: there is nothing to sign with.
+
+The token is an ordinary platform token carrying one extra private claim, `geolang_use: "mcp"`. Only this service reads it, and only to decide what may be presented at `/mcp`. Downstream services ignore it, and a tool's outbound calls carry this very token, so the credential's reach at ptolemy, tiletopia, geodukt and agora is unchanged. The claim is private rather than `aud` on purpose: every platform service decodes with an audience of `None`, which rejects any token that carries an `aud` at all, so an `aud` here would break the tools rather than scope them. The live document bridge's own `agent:<sub>` tokens are minted without the claim and are unaffected.
+
 The endpoint is stateless: no session id is issued and nothing is kept between requests, so a call is only ever as authorised as the bearer it arrives with.
 
 Every request needs `Authorization: Bearer <jwt>`, `initialize` included, and that bearer is the identity the tool's outbound calls go out as. A missing or bad token is `401` with `WWW-Authenticate: Bearer`. Without `PLATFORM_JWT_SECRET` the endpoint is open, like the rest of the API.

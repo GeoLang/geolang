@@ -15,6 +15,7 @@ import threading
 from contextlib import contextmanager
 from datetime import timedelta
 
+import jwt
 import pytest
 import respx
 from fastapi.testclient import TestClient
@@ -25,7 +26,13 @@ from src.agents.agent_manager import load_external_tools
 from src.api import mcp_server, server
 from src.api.live_document import DOCUMENT_HEADER
 from src.core import agora
-from src.core.auth import SECRET_ENV
+from src.core.auth import (
+    MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
+    MCP_CLAIM,
+    MCP_CLAIM_VALUE,
+    SECRET_ENV,
+    sign_platform_token,
+)
 from src.core.user_token import current_user_token
 from tests.test_agora import FakeAgora
 from tests.test_route_auth import SECRET, mint
@@ -37,6 +44,11 @@ MCP_HEADERS = {
 
 VIEWER_CMD = {"action": "fly_to", "params": {"lon": 2.35, "lat": 48.85}}
 DOCUMENT_ID = "0f8b1c2d-3e4f-4a5b-8c7d-9e0f1a2b3c4d"
+
+
+def mcp_mint(**claims):
+    """A token for this endpoint, carrying what `POST /mcp/token` puts in one."""
+    return mint(**{MCP_CLAIM: MCP_CLAIM_VALUE, **claims})
 
 
 @pytest.fixture(scope="module")
@@ -180,7 +192,7 @@ def test_the_callers_bearer_is_what_the_tool_acts_as(gated, client, monkeypatch)
     record_token.__name__ = "record_token"
     monkeypatch.setattr(mcp_server, "load_external_tools", lambda: [(record_token, NoArgs)])
 
-    token = mint()
+    token = mcp_mint()
     response = call(
         client, "tools/call", {"name": "record_token", "arguments": {}}, token=token
     )
@@ -243,7 +255,7 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
                     "name": "viewer_control",
                     "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
                 },
-                token=mint(),
+                token=mcp_mint(),
                 document=DOCUMENT_ID,
             )
 
@@ -270,7 +282,7 @@ def test_a_document_that_cannot_be_written_never_costs_the_result(
                 "name": "viewer_control",
                 "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
             },
-            token=mint(),
+            token=mcp_mint(),
             document=DOCUMENT_ID,
         )
 
@@ -293,7 +305,7 @@ def test_an_unbound_call_is_exactly_what_it_was(gated, client, monkeypatch):
             "name": "viewer_control",
             "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
         },
-        token=mint(),
+        token=mcp_mint(),
     )
 
     assert text_of(response) == f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
@@ -335,13 +347,83 @@ def test_a_forged_or_expired_token_is_rejected(gated, client, token):
 
 
 def test_a_live_token_gets_through(gated, client):
-    tools = result_of(call(client, "tools/list", {}, token=mint()))["tools"]
+    tools = result_of(call(client, "tools/list", {}, token=mcp_mint()))["tools"]
 
     assert len(tools) > 30
 
 
 def test_without_a_secret_a_tokenless_call_is_served(open_mode, client):
     assert result_of(call(client, "tools/list", {}))["tools"]
+
+
+# ── the token this endpoint takes ────────────────────────────────────────
+
+
+def test_a_plain_platform_token_does_not_open_this_door(gated, client):
+    """Holding a platform token is not the same as having been given MCP access."""
+    response = call(client, "tools/list", {}, token=mint())
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "this endpoint needs a token from POST /mcp/token"}
+
+
+def test_minting_needs_a_caller_of_its_own(gated, client):
+    assert client.post("/mcp/token", json={}).status_code == 401
+
+
+def test_a_minted_token_is_what_gets_in(gated, client):
+    minted = client.post(
+        "/mcp/token", json={}, headers={"Authorization": f"Bearer {mint()}"}
+    ).json()
+
+    tools = result_of(call(client, "tools/list", {}, token=minted["token"]))["tools"]
+
+    assert len(tools) > 30
+    assert minted["expires_at"] > 0
+
+
+def test_a_minted_token_acts_as_whoever_asked_for_it(gated, client):
+    minted = client.post(
+        "/mcp/token",
+        json={"lifetime_seconds": 3600},
+        headers={"Authorization": f"Bearer {mint(sub='someone-else')}"},
+    ).json()
+
+    claims = jwt.decode(minted["token"], SECRET, algorithms=["HS256"])
+
+    assert claims["sub"] == "someone-else"
+    assert claims[MCP_CLAIM] == MCP_CLAIM_VALUE
+    assert claims["exp"] == minted["expires_at"]
+
+
+@pytest.mark.parametrize(
+    "lifetime", [MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS + 1, 0, -60]
+)
+def test_a_lifetime_outside_the_cap_is_refused(gated, client, lifetime):
+    response = client.post(
+        "/mcp/token",
+        json={"lifetime_seconds": lifetime},
+        headers={"Authorization": f"Bearer {mint()}"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_minting_says_so_when_there_is_nothing_to_sign_with(open_mode, client):
+    """The authless stack needs no token, so there is nothing to mint one from."""
+    response = client.post("/mcp/token", json={})
+
+    assert response.status_code == 503
+
+
+def test_the_bridges_agent_token_is_not_an_mcp_token(gated):
+    """It writes to agora, never back to us, so it must not carry the marker."""
+    token = sign_platform_token("agent:u1", "GeoLang agent", 120)
+
+    claims = jwt.decode(token, SECRET, algorithms=["HS256"])
+
+    assert claims["sub"] == "agent:u1"
+    assert MCP_CLAIM not in claims
 
 
 # ── transport ────────────────────────────────────────────────────────────

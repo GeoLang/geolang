@@ -23,7 +23,15 @@ live layer by its token, which a share link guest in a live document has to be
 able to fetch without ever signing in.
 
 `/mcp` is gated too, by ASGI middleware rather than a route dependency: it is a
-mounted app, not a FastAPI route, so the dependency system never sees it.
+mounted app, not a FastAPI route, so the dependency system never sees it. It
+takes a token minted by `POST /mcp/token`, marked with a private claim. A plain
+platform token is refused there, so handing an outside agent a way in is a
+deliberate act with an expiry on it rather than pasting the token you already
+hold.
+
+That marker only narrows which door of geolang the token opens. It is still an
+ordinary platform token everywhere else, because a tool's outbound calls go out
+as the token that arrived.
 """
 
 from __future__ import annotations
@@ -40,6 +48,12 @@ from src.core.user_token import bearer_token
 SECRET_ENV = "PLATFORM_JWT_SECRET"
 UNAUTHENTICATED_ENV = "GEOLANG_ALLOW_UNAUTHENTICATED"
 TRUTHY = {"1", "true", "yes", "on"}
+
+# which of geolang's doors a token is for. A private claim, so it is ignored by
+# every other service rather than rejected the way an `aud` would be.
+MCP_CLAIM = "geolang_use"
+MCP_CLAIM_VALUE = "mcp"
+MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS = 30 * 24 * 60 * 60
 
 
 def platform_secret() -> str | None:
@@ -122,6 +136,14 @@ def platform_claims(token: str | None) -> dict | None:
         return None
 
 
+def _sign(claims: dict) -> str | None:
+    """One place that signs, or None when the gate is off."""
+    secret = platform_secret()
+    if secret is None:
+        return None
+    return jwt.encode(claims, secret, algorithm="HS256")
+
+
 def sign_platform_token(subject: str, name: str, lifetime_seconds: int) -> str | None:
     """Mint a platform token of our own, or None when the gate is off.
 
@@ -129,11 +151,44 @@ def sign_platform_token(subject: str, name: str, lifetime_seconds: int) -> str |
     own to write as. Nothing here decides what that identity may do: the
     document's member list does, and only the caller's own token can add to it.
     """
-    secret = platform_secret()
-    if secret is None:
-        return None
-    return jwt.encode(
-        {"sub": subject, "name": name, "exp": int(time.time()) + lifetime_seconds},
-        secret,
-        algorithm="HS256",
+    return _sign(
+        {"sub": subject, "name": name, "exp": int(time.time()) + lifetime_seconds}
     )
+
+
+def sign_mcp_token(subject: str, name: str, lifetime_seconds: int) -> str | None:
+    """Mint a token `/mcp` will accept, or None when the gate is off.
+
+    The marker is a private claim rather than `aud` because every service in the
+    platform decodes with an audience of None, which rejects any token carrying
+    one. A tool's outbound calls go out as this very token, so an `aud` here
+    would fail at ptolemy, geodukt and agora rather than at us.
+    """
+    return _sign(
+        {
+            "sub": subject,
+            "name": name,
+            "exp": int(time.time()) + lifetime_seconds,
+            MCP_CLAIM: MCP_CLAIM_VALUE,
+        }
+    )
+
+
+def mcp_token_error(token: str | None) -> str | None:
+    """Why `token` may not be presented at `/mcp`, or None when it may.
+
+    The marker says which door the token is for, and nothing more: everywhere
+    else in the platform this is an ordinary token with an ordinary token's
+    reach.
+    """
+    detail = platform_token_error(token)
+    if detail is not None:
+        return detail
+
+    claims = platform_claims(token)
+    if claims is None:
+        return None
+
+    if claims.get(MCP_CLAIM) != MCP_CLAIM_VALUE:
+        return "this endpoint needs a token from POST /mcp/token"
+    return None

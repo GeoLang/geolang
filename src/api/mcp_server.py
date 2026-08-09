@@ -30,7 +30,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.agents.agent_manager import load_external_tools, runs_caller_code
 from src.api.live_document import document_binding, publish
-from src.core.auth import platform_token_error
+from src.core.auth import mcp_token_error
 from src.core.user_token import bearer_token, user_token_scope
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,9 @@ class PlatformTokenGate:
     """The platform gate in front of the mounted MCP app.
 
     Every MCP request carries the bearer, including `initialize`, so an
-    unauthenticated caller never learns which tools exist.
+    unauthenticated caller never learns which tools exist. The token has to be
+    one minted for this endpoint, not any platform token the caller happens to
+    hold.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -82,7 +84,7 @@ class PlatformTokenGate:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
             token = bearer_token(Headers(scope=scope).get("authorization"))
-            detail = platform_token_error(token)
+            detail = mcp_token_error(token)
             if detail is not None:
                 response = JSONResponse(
                     {"detail": detail},
@@ -175,7 +177,7 @@ def create_mcp_app(
         # before the lookup, so an unauthenticated caller learns nothing from an
         # unknown-tool error. The gate already ran, this is what stops a message
         # that reached a handler without one from executing anything.
-        detail = platform_token_error(token)
+        detail = mcp_token_error(token)
         if detail is not None:
             raise MCPError(code=mcp_types.INVALID_REQUEST, message=detail)
 
