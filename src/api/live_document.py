@@ -304,7 +304,7 @@ async def open_binding(binding: str, caller_token: str | None):
 # ── the write ────────────────────────────────────────────────────────────
 
 
-def summary(published: int, moved: bool, problems: list) -> str | None:
+def summary(published: int, moved: bool, problems: list) -> str:
     done = []
     if published:
         done.append(f"{published} layer{'s' if published != 1 else ''} published")
