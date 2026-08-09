@@ -54,7 +54,16 @@ HTTP_TIMEOUT_SECONDS = 10.0
 
 
 class AgoraError(Exception):
-    """agora refused something, or could not be reached."""
+    """agora refused something, or could not be reached.
+
+    `reason` is agora's own word for a refusal, when it gave one. A caller that
+    has to tell one refusal from another matches on that rather than on the
+    message here, which is ours and not a contract.
+    """
+
+    def __init__(self, message: str, reason: str | None = None):
+        super().__init__(message)
+        self.reason = reason
 
 
 def agora_url() -> str:
@@ -190,7 +199,8 @@ class AgoraSession:
                 raise AgoraError(f"agora did not acknowledge write {client_seq}")
             message = await _receive(self.connection, remaining)
             if message.get("type") == "error":
-                raise AgoraError(f"agora refused the write: {message.get('reason')}")
+                reason = str(message.get("reason") or "")
+                raise AgoraError(f"agora refused the write: {reason}", reason)
             if message.get("type") == "ack" and message.get("clientSeq") == client_seq:
                 return
 
@@ -219,7 +229,8 @@ async def _read_opening(connection) -> AgoraSession:
                 connection=connection, actor=actor, role=role, document=document
             )
         elif kind == "error":
-            raise AgoraError(f"agora refused the join: {message.get('reason')}")
+            reason = str(message.get("reason") or "")
+            raise AgoraError(f"agora refused the join: {reason}", reason)
 
 
 @asynccontextmanager
@@ -266,7 +277,8 @@ async def _request(method: str, path: str, token: str | None, **kwargs) -> dict:
     except httpx.HTTPError as e:
         raise AgoraError(f"agora is unreachable: {e}") from e
     if response.status_code >= 400:
-        raise AgoraError(f"agora refused the request: {_refusal(response)}")
+        reason = _refusal(response)
+        raise AgoraError(f"agora refused the request: {reason}", reason)
     if not response.content:
         return {}
     return response.json()

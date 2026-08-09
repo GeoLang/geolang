@@ -12,6 +12,8 @@ The routes read `OUTPUTS_DIR` and friends at call time, so these tests point
 
 import asyncio
 import importlib
+import os
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -307,6 +309,19 @@ def test_live_data_needs_no_token_of_the_callers_own(client, tree, monkeypatch):
     published(exec_dir, TOKEN)
 
     assert client.get(f"/live-data/{TOKEN}").status_code == 200
+
+
+def test_reading_a_published_layer_dates_it_as_used(client, tree):
+    """A fetch is what keeps a file from expiring, so the read has to record it."""
+    _, exec_dir, _ = tree
+    published(exec_dir, TOKEN)
+    path = exec_dir / "live_data" / f"{TOKEN}.geojson"
+    long_ago = time.time() - 100 * 24 * 60 * 60
+    os.utime(path, (long_ago, long_ago))
+
+    assert client.get(f"/live-data/{TOKEN}").status_code == 200
+
+    assert time.time() - path.stat().st_mtime < 60
 
 
 def test_live_data_refuses_an_unpublished_token(client, tree):

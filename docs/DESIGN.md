@@ -77,14 +77,33 @@ FastAPI deprecated the event hooks in favour of the `lifespan` context manager. 
 
 `GET /health` currently returns `{"status": "ok"}` regardless of whether sibyl is reachable. For load-balancer use, ping sibyl and return non-200 on failure. Keep a `/health/live` (always 200) vs `/health/ready` (dependency-aware) split.
 
-## 🟡 Orphaned live layer data is never pruned
+## Published live layer data has a lifetime
 
 A layer too large to carry inside a live document is written to `live_data/` and
-served open by its token. Republishing a layer now deletes the file the previous
-entry named, once the replacing write is acked. Nothing else does: a member
-deleting the layer, or the whole document going away, leaves the file in place
-and fetchable forever, because agora never tells this service either happened.
-Wanted: an age bound, or a token that expires with the document that named it.
+served open by its token, so cleaning it up is this service's problem: agora
+never says a layer or a document went away. Every publish does the cleaning, and
+nothing schedules anything.
+
+Each file is tagged with the document it was published into, and with the agent
+subject when there was one. A publish then drops that document's files it no
+longer references once they are a day old, and rejoins up to three other
+documents it has files for to do the same to theirs.
+
+A rejoin that agora refuses keeps every file, and only its exact "no such
+document" deletes one. Today nothing produces that: agora has no deletion route,
+and `members` cascades on document delete, so a rejoin to a document that went
+away is refused as "not a member" instead, which is also what a plain member
+removal looks like. Deleting on that would take out files a live document still
+draws, so the branch stays pinned to the narrow reason and those files are left
+to expiry below. It starts doing work if agora ever reports a document as gone.
+
+A share link publishes with no subject to rejoin as, because agora keeps share
+tokens hashed at rest and its session tokens embed the raw one, so persisting a
+way back in would undo that. Those documents, and files written before tagging
+existed, are covered by the last rule instead: a file expires 90 days after the
+last fetch or the last time a document confirmed it. A viewer join fetches what
+it draws, so use is what keeps a file alive. The accepted cost is that a
+document untouched and unviewed for 90 days loses its oversized layers.
 
 ## 🟡 Add a request log
 

@@ -10,6 +10,7 @@ key names below are the ones viewtopia reads, so a drift there fails here.
 
 import asyncio
 import json
+import os
 import time
 
 import jwt
@@ -20,10 +21,11 @@ from websockets.asyncio.server import serve
 from src.api import live_document
 from src.core import agora, utils
 from src.core.auth import SECRET_ENV
-from tests.test_agora import SNAPSHOT, FakeAgora
+from tests.test_agora import PEERS, SNAPSHOT, FakeAgora
 from tests.test_route_auth import SECRET, mint
 
 DOCUMENT_ID = "0f8b1c2d-3e4f-4a5b-8c7d-9e0f1a2b3c4d"
+OTHER_DOCUMENT = "11111111-2222-4333-8444-555555555555"
 LINK_TOKEN = "kXv3-2_QeR9tYuI0pAsDfg"
 
 POINT = {
@@ -536,6 +538,431 @@ def test_pruning_never_leaves_the_published_directory(live_data, tmp_path):
     assert (live_data / f"{OLD_TOKEN}.geojson").exists()
 
 
+# ── tagging a published file, and clearing it when its layer goes ────────
+
+
+OLD_ENOUGH = live_document.UNREFERENCED_AGE_SECONDS + 60
+UNUSED_TOO_LONG = live_document.MAXIMUM_UNUSED_AGE_SECONDS + 60
+OTHER_TOKEN = "9ZKq4mBc7XdWnRtYuIoPaSdFgHjKlZxCvBnMqWeRtYu"
+
+
+def tagged_file(directory, token, document, subject=None, age_seconds=0):
+    """A published file as `store_layer_data` leaves it, optionally backdated."""
+    directory.mkdir(parents=True, exist_ok=True)
+    data = directory / f"{token}{live_document.LAYER_DATA_SUFFIX}"
+    data.write_text('{"type":"FeatureCollection","features":[]}')
+    tag = directory / f"{token}{live_document.LAYER_TAG_SUFFIX}"
+    payload = {"document": document}
+    if subject:
+        payload["subject"] = subject
+    tag.write_text(json.dumps(payload))
+    if age_seconds:
+        when = time.time() - age_seconds
+        os.utime(data, (when, when))
+        os.utime(tag, (when, when))
+    return data, tag
+
+
+def url_of(token):
+    return f"/agent/live-data/{token}"
+
+
+class ManyDocuments:
+    """A fake agora serving several documents, each with its own answer.
+
+    A document maps to the layers it holds, or to the reason it refuses a join.
+    """
+
+    def __init__(self, documents):
+        self.documents = documents
+        self.joined = []
+        self.received = []
+        self.authorization = None
+
+    async def handle(self, connection):
+        self.authorization = connection.request.headers.get("authorization")
+        document_id = connection.request.path.split("doc=")[1]
+        self.joined.append(document_id)
+        answer = self.documents.get(document_id, {})
+        if isinstance(answer, str):
+            await connection.send(json.dumps({"type": "error", "reason": answer}))
+            return
+        await connection.send(json.dumps({**SNAPSHOT, "state": {"layers": answer}}))
+        await connection.send(json.dumps(PEERS))
+        async for raw in connection:
+            frame = json.loads(raw)
+            self.received.append(frame)
+            if frame["type"] == "presence":
+                continue
+            await connection.send(
+                json.dumps({"type": "ack", "clientSeq": frame["clientSeq"], "seq": 8})
+            )
+
+
+def layer_holding(token, layer_id="held"):
+    return {
+        layer_id: {
+            "layerId": layer_id,
+            "name": "Held",
+            "order": "V",
+            "source": {"kind": "url", "url": url_of(token), "format": "geojson"},
+        }
+    }
+
+
+def test_a_published_file_is_tagged_with_its_document(caller, monkeypatch, live_data):
+    fake = FakeAgora()
+
+    publish(
+        fake,
+        ui_spec("big.gpkg"),
+        monkeypatch,
+        read=reader(**{"big.gpkg": big_feature_collection(300)}),
+        token=caller,
+    )
+
+    (_, entry), = operations(fake)
+    token = entry["source"]["url"].rsplit("/", 1)[1]
+    tag = json.loads((live_data / f"{token}.json").read_text())
+    assert tag == {"document": DOCUMENT_ID, "subject": "agent:u1"}
+
+
+def test_a_share_link_tags_the_document_but_never_the_link(monkeypatch, live_data):
+    """agora keeps share tokens hashed, so ours must not sit in a file."""
+    fake = FakeAgora()
+
+    async def main():
+        async with serve(fake.handle, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            base = f"http://127.0.0.1:{port}"
+            monkeypatch.setenv(agora.AGORA_URL_ENV, base)
+            with respx.mock(base_url=base, assert_all_called=False) as mock:
+                mock.get(f"/links/{LINK_TOKEN}").respond(
+                    200,
+                    json={
+                        "doc": DOCUMENT_ID,
+                        "role": "edit",
+                        "sessionToken": "session.jwt",
+                    },
+                )
+                await live_document.publish(
+                    LINK_TOKEN,
+                    None,
+                    ui_spec("big.gpkg"),
+                    reader(**{"big.gpkg": big_feature_collection(300)}),
+                )
+
+    asyncio.run(main())
+
+    (_, entry), = operations(fake)
+    token = entry["source"]["url"].rsplit("/", 1)[1]
+    written = (live_data / f"{token}.json").read_text()
+    assert json.loads(written) == {"document": DOCUMENT_ID}
+    assert LINK_TOKEN not in written
+    assert "session.jwt" not in written
+
+
+def test_a_layer_a_member_deleted_is_swept_on_the_next_publish(
+    caller, monkeypatch, live_data
+):
+    """The document no longer names the file, so the next publish clears it."""
+    data, tag = tagged_file(
+        live_data, OLD_TOKEN, DOCUMENT_ID, "agent:u1", age_seconds=OLD_ENOUGH
+    )
+    fake = FakeAgora()
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert not data.exists()
+    assert not tag.exists()
+
+
+def test_a_file_the_document_still_names_survives_the_sweep(
+    caller, monkeypatch, live_data
+):
+    data, _ = tagged_file(
+        live_data, OLD_TOKEN, DOCUMENT_ID, "agent:u1", age_seconds=OLD_ENOUGH
+    )
+    fake = FakeAgora(
+        snapshot={**SNAPSHOT, "state": {"layers": layer_holding(OLD_TOKEN)}}
+    )
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert data.exists()
+
+
+def test_a_young_unreferenced_file_is_left_alone(caller, monkeypatch, live_data):
+    """A publish happening right now has not had its own operation acked yet."""
+    data, _ = tagged_file(live_data, OLD_TOKEN, DOCUMENT_ID, "agent:u1")
+    fake = FakeAgora()
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert data.exists()
+
+
+def test_a_file_with_no_tag_is_never_swept_by_document(caller, monkeypatch, live_data):
+    """Nothing says which document it belongs to, so nothing may conclude it died."""
+    live_data.mkdir(parents=True, exist_ok=True)
+    orphan = live_data / f"{OLD_TOKEN}.geojson"
+    orphan.write_text("{}")
+    when = time.time() - OLD_ENOUGH
+    os.utime(orphan, (when, when))
+    fake = FakeAgora()
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert orphan.exists()
+
+
+def test_an_unreadable_tag_makes_its_file_untouchable(live_data):
+    tagged_file(live_data, OLD_TOKEN, DOCUMENT_ID, "agent:u1")
+    (live_data / f"{OLD_TOKEN}.json").write_text("not json at all")
+
+    assert live_document.published_layers() == []
+
+
+def test_a_tag_naming_anything_but_our_agent_offers_no_identity(live_data):
+    """A tampered tag must not make us mint a token for someone else."""
+    tagged_file(live_data, OLD_TOKEN, DOCUMENT_ID, subject="u1")
+
+    (published,) = live_document.published_layers()
+    assert published.subject is None
+
+
+# ── sweeping the documents this publish did not touch ────────────────────
+
+
+def test_a_document_that_is_gone_loses_its_files(caller, monkeypatch, live_data):
+    data, tag = tagged_file(
+        live_data, OLD_TOKEN, OTHER_DOCUMENT, "agent:u1", age_seconds=OLD_ENOUGH
+    )
+    fake = ManyDocuments(
+        {DOCUMENT_ID: {}, OTHER_DOCUMENT: live_document.DOCUMENT_GONE_REASON}
+    )
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert fake.joined == [DOCUMENT_ID, OTHER_DOCUMENT]
+    assert not data.exists()
+    assert not tag.exists()
+
+
+def test_a_live_document_keeps_what_it_references_and_loses_what_it_dropped(
+    caller, monkeypatch, live_data
+):
+    kept, _ = tagged_file(
+        live_data, OLD_TOKEN, OTHER_DOCUMENT, "agent:u1", age_seconds=OLD_ENOUGH
+    )
+    dropped, _ = tagged_file(
+        live_data, OTHER_TOKEN, OTHER_DOCUMENT, "agent:u1", age_seconds=OLD_ENOUGH
+    )
+    fake = ManyDocuments(
+        {DOCUMENT_ID: {}, OTHER_DOCUMENT: layer_holding(OLD_TOKEN)}
+    )
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert kept.exists()
+    assert not dropped.exists()
+
+
+def test_any_other_refusal_keeps_every_file(caller, monkeypatch, live_data):
+    """A reworded refusal must stop the sweep, not empty a live document."""
+    for reason in ("document has too many peers", "database error", "not found"):
+        data, tag = tagged_file(
+            live_data, OLD_TOKEN, OTHER_DOCUMENT, "agent:u1", age_seconds=OLD_ENOUGH
+        )
+        fake = ManyDocuments({DOCUMENT_ID: {}, OTHER_DOCUMENT: reason})
+
+        publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+        assert data.exists(), reason
+        assert tag.exists(), reason
+
+
+def test_a_rejoin_refused_at_the_gate_keeps_every_file(caller, monkeypatch, live_data):
+    """What a deleted document really answers, since its members cascade away.
+
+    agora refuses the upgrade itself with a 403, which is also what a member
+    removal looks like, so nothing may read it as the document having died.
+    """
+
+    class RefusingUpgrade(ManyDocuments):
+        async def handle(self, connection):
+            document_id = connection.request.path.split("doc=")[1]
+            self.joined.append(document_id)
+            if document_id == OTHER_DOCUMENT:
+                await connection.close(code=1008, reason="not a member")
+                return
+            await super().handle(connection)
+
+    data, tag = tagged_file(
+        live_data, OLD_TOKEN, OTHER_DOCUMENT, "agent:u1", age_seconds=OLD_ENOUGH
+    )
+    fake = RefusingUpgrade({DOCUMENT_ID: {}})
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert OTHER_DOCUMENT in fake.joined
+    assert data.exists()
+    assert tag.exists()
+
+
+def test_a_document_with_no_stored_subject_is_never_rejoined(
+    caller, monkeypatch, live_data
+):
+    """A share link published it, and we hold no identity to go back with."""
+    data, _ = tagged_file(
+        live_data, OLD_TOKEN, OTHER_DOCUMENT, age_seconds=OLD_ENOUGH
+    )
+    fake = ManyDocuments(
+        {DOCUMENT_ID: {}, OTHER_DOCUMENT: live_document.DOCUMENT_GONE_REASON}
+    )
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert fake.joined == [DOCUMENT_ID]
+    assert data.exists()
+
+
+def test_a_document_holding_one_recent_file_is_left_for_later(
+    caller, monkeypatch, live_data
+):
+    tagged_file(live_data, OLD_TOKEN, OTHER_DOCUMENT, "agent:u1", age_seconds=OLD_ENOUGH)
+    tagged_file(live_data, OTHER_TOKEN, OTHER_DOCUMENT, "agent:u1")
+    fake = ManyDocuments(
+        {DOCUMENT_ID: {}, OTHER_DOCUMENT: live_document.DOCUMENT_GONE_REASON}
+    )
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert fake.joined == [DOCUMENT_ID]
+
+
+def test_the_sweep_rejoins_no_more_documents_than_its_cap(
+    caller, monkeypatch, live_data
+):
+    """What a tool call pays for housekeeping has to stay bounded."""
+    documents = {DOCUMENT_ID: {}}
+    for index in range(5):
+        document_id = f"1111111{index}-2222-4333-8444-555555555555"
+        documents[document_id] = live_document.DOCUMENT_GONE_REASON
+        tagged_file(
+            live_data,
+            f"{index}Kq4mBc7XdWnRtYuIoPaSdFgHjKlZxCvBnMqWeRtYu",
+            document_id,
+            "agent:u1",
+            age_seconds=OLD_ENOUGH + index,
+        )
+    fake = ManyDocuments(documents)
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert len(fake.joined) == 1 + live_document.SWEEP_DOCUMENT_LIMIT
+
+
+# ── expiry, for the files no document can answer for ─────────────────────
+
+
+def test_a_file_nothing_has_drawn_for_long_enough_expires(
+    caller, monkeypatch, live_data
+):
+    """No tag to trace, no fetch in the window: the last line reaches it."""
+    live_data.mkdir(parents=True, exist_ok=True)
+    stale = live_data / f"{OLD_TOKEN}.geojson"
+    stale.write_text("{}")
+    when = time.time() - UNUSED_TOO_LONG
+    os.utime(stale, (when, when))
+    tag = live_data / f"{OTHER_TOKEN}.json"
+    tagged_file(
+        live_data, OTHER_TOKEN, OTHER_DOCUMENT, age_seconds=UNUSED_TOO_LONG
+    )
+    fake = FakeAgora()
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert not stale.exists()
+    assert not (live_data / f"{OTHER_TOKEN}.geojson").exists()
+    assert not tag.exists()
+
+
+def test_a_young_file_is_never_expired(caller, monkeypatch, live_data):
+    live_data.mkdir(parents=True, exist_ok=True)
+    fresh = live_data / f"{OLD_TOKEN}.geojson"
+    fresh.write_text("{}")
+    fake = FakeAgora()
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert fresh.exists()
+
+
+def test_a_file_the_sweep_verified_is_kept_however_old_it_is(
+    caller, monkeypatch, live_data
+):
+    """The document still draws it, so age is no evidence it is dead."""
+    data, _ = tagged_file(
+        live_data, OLD_TOKEN, OTHER_DOCUMENT, "agent:u1", age_seconds=UNUSED_TOO_LONG
+    )
+    fake = ManyDocuments(
+        {DOCUMENT_ID: {}, OTHER_DOCUMENT: layer_holding(OLD_TOKEN)}
+    )
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert data.exists()
+    # and it was dated as used, so the next publish need not rejoin to keep it
+    assert time.time() - data.stat().st_mtime < 60
+
+
+def test_a_file_the_bound_document_draws_is_kept_however_old_it_is(
+    caller, monkeypatch, live_data
+):
+    live_data.mkdir(parents=True, exist_ok=True)
+    grandfathered = live_data / f"{OLD_TOKEN}.geojson"
+    grandfathered.write_text("{}")
+    when = time.time() - UNUSED_TOO_LONG
+    os.utime(grandfathered, (when, when))
+    fake = FakeAgora(
+        snapshot={**SNAPSHOT, "state": {"layers": layer_holding(OLD_TOKEN)}}
+    )
+
+    publish(fake, viewer_command(lon=2.35, lat=48.85), monkeypatch, token=caller)
+
+    assert grandfathered.exists()
+
+
+def test_expiry_never_leaves_the_published_directory(live_data, tmp_path):
+    outside = tmp_path / "secret.geojson"
+    outside.write_text("do not delete me")
+    live_data.mkdir(parents=True, exist_ok=True)
+    link = live_data / f"{OLD_TOKEN}.geojson"
+    link.symlink_to(outside)
+    when = time.time() - UNUSED_TOO_LONG
+    os.utime(link, (when, when), follow_symlinks=False)
+
+    live_document.expire_layer_data(set())
+
+    # the link resolves out of the tree, so confinement drops it whatever its age
+    assert outside.exists()
+    assert link.exists()
+
+
+def test_refreshing_only_dates_files_inside_the_directory(live_data, tmp_path):
+    outside = tmp_path / "secret.geojson"
+    outside.write_text("do not touch me")
+    when = time.time() - UNUSED_TOO_LONG
+    os.utime(outside, (when, when))
+    live_data.mkdir(parents=True, exist_ok=True)
+    (live_data / f"{OLD_TOKEN}.geojson").symlink_to(outside)
+
+    live_document.refresh_layer_data([OLD_TOKEN, "../secret", "short"])
+
+    assert time.time() - outside.stat().st_mtime > UNUSED_TOO_LONG - 60
+
+
 def test_a_published_url_is_recognised_as_ours(live_data):
     assert live_document.live_data_token(f"/agent/live-data/{OLD_TOKEN}") == OLD_TOKEN
     assert live_document.live_data_token(f"/agent/live-data/{OLD_TOKEN}.geojson") is None
@@ -692,12 +1119,13 @@ def test_the_membership_grant_is_made_with_the_callers_own_token(caller, monkeyp
             route = mock.put(f"/documents/{DOCUMENT_ID}/members/agent:u1").respond(204)
             return route, await live_document.open_binding(DOCUMENT_ID, caller)
 
-    route, (document_id, token) = asyncio.run(main())
+    route, bound = asyncio.run(main())
 
-    assert document_id == DOCUMENT_ID
+    assert bound.document_id == DOCUMENT_ID
+    assert bound.subject == "agent:u1"
     # the agent writes as itself, never as the caller
-    assert token != caller
-    assert jwt.decode(token, SECRET, algorithms=["HS256"])["sub"] == "agent:u1"
+    assert bound.token != caller
+    assert jwt.decode(bound.token, SECRET, algorithms=["HS256"])["sub"] == "agent:u1"
     request = route.calls.last.request
     assert request.headers["authorization"] == f"Bearer {caller}"
     assert json.loads(request.content) == {"role": "edit"}

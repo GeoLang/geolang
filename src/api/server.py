@@ -48,7 +48,11 @@ import httpx
 
 from src.agents.agent_manager import PERSONA, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
-from src.api.live_document import LIVE_DATA_PATH, LIVE_DATA_TOKEN_PATTERN
+from src.api.live_document import (
+    LAYER_DATA_SUFFIX,
+    LIVE_DATA_PATH,
+    LIVE_DATA_TOKEN_PATTERN,
+)
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.core.auth import platform_auth, require_platform_token
 from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
@@ -602,10 +606,16 @@ async def get_live_data(token: str):
     if not LIVE_DATA_TOKEN_PATTERN.fullmatch(token):
         raise HTTPException(status_code=404, detail="Not found")
     path = resolve_under(
-        [f"{token}.geojson"], [str(LIVE_DATA_DIR)], [str(LIVE_DATA_DIR)]
+        [f"{token}{LAYER_DATA_SUFFIX}"], [str(LIVE_DATA_DIR)], [str(LIVE_DATA_DIR)]
     )
     if not path:
         raise HTTPException(status_code=404, detail="Not found")
+    # a fetch is how a published file earns its keep, so the read is what dates
+    # it. atime is not dependable enough to read this off, so it is set here.
+    try:
+        os.utime(path)
+    except OSError:
+        logger.warning("could not date a published layer on read")
     return FileResponse(path, media_type="application/geo+json")
 
 

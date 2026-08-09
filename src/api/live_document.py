@@ -24,7 +24,9 @@ import math
 import os
 import re
 import secrets
+import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import anyio.to_thread
@@ -56,6 +58,24 @@ LIVE_DATA_PATH = "live-data"
 # what a minted token looks like, so the open route can refuse anything else
 # before it goes anywhere near the filesystem
 LIVE_DATA_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{22,64}")
+LAYER_DATA_SUFFIX = ".geojson"
+LAYER_TAG_SUFFIX = ".json"
+# how long a published file nothing references is kept, so a publish happening
+# right now is never swept before its own operation is acked
+UNREFERENCED_AGE_SECONDS = 24 * 60 * 60
+# how long a published file survives with nothing fetching it and no document we
+# can check naming it. Every viewer join fetches the layers it draws, so this
+# only comes for a file nobody has drawn and nothing reachable references.
+MAXIMUM_UNUSED_AGE_SECONDS = 90 * 24 * 60 * 60
+# documents rejoined per publish, which is what bounds what a tool call pays
+SWEEP_DOCUMENT_LIMIT = 3
+# agora's own word for a document that is not there, from its join refusal.
+# Anything else keeps the files, so a rewording stops the sweep rather than
+# emptying a document that is alive. Nothing in agora answers this yet: a
+# deleted document cascades its members away, so the rejoin is refused as "not a
+# member", which is what a plain removal looks like too and is no evidence the
+# document died.
+DOCUMENT_GONE_REASON = "no such document"
 LAYER_TYPE = "geojson"
 LAYER_ID_PREFIX = "geolang-"
 LAYER_ID_DIGEST_CHARS = 12
@@ -73,6 +93,18 @@ MAXIMUM_ZOOM = 18
 
 def public_url() -> str:
     return (os.environ.get(PUBLIC_URL_ENV) or DEFAULT_PUBLIC_URL).rstrip("/")
+
+
+@dataclass(frozen=True)
+class Binding:
+    """The document a request writes to, and the identity it writes as."""
+
+    document_id: str
+    token: str
+    # the agent subject, when there is one to rejoin the document as later. A
+    # share link has none: its token is agora's to keep hashed, not ours to
+    # write to disk.
+    subject: str | None
 
 
 def document_binding(headers) -> str | None:
@@ -131,21 +163,76 @@ def layer_id_for(file: str) -> str:
     return f"{LAYER_ID_PREFIX}{digest[:LAYER_ID_DIGEST_CHARS]}"
 
 
-def store_layer_data(body: bytes) -> str:
+def store_layer_data(body: bytes, binding: Binding) -> str:
     """Write features guests can fetch, and answer with the url that serves them.
 
     The token in the name is the whole credential, so it is minted here and the
-    file is never written to again.
+    file is never written to again. Beside it goes the document the file was
+    published into, which is the only handle a later publish has for deciding
+    the file is dead. The data lands first, so a crash between the two leaves a
+    tagless file expiry will reap rather than a tag pointing at nothing.
 
-    TODO: replacing a layer prunes the file it leaves behind, but a member
-    deleting the layer or the document does not, so those stay until someone
-    clears the directory.
+    The tag's own timestamp stays at the publish, which is what the
+    unreferenced age is measured from. The data file's is the last use.
     """
     token = secrets.token_urlsafe(LIVE_DATA_TOKEN_BYTES)
     directory = utils.LIVE_DATA_DIR
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{token}.geojson").write_bytes(body)
+    (directory / f"{token}{LAYER_DATA_SUFFIX}").write_bytes(body)
+
+    tag = {"document": binding.document_id}
+    if binding.subject:
+        tag["subject"] = binding.subject
+    (directory / f"{token}{LAYER_TAG_SUFFIX}").write_text(json.dumps(tag))
     return f"{public_url()}/{LIVE_DATA_PATH}/{token}"
+
+
+@dataclass(frozen=True)
+class PublishedLayer:
+    """A file this service published, as its tag describes it."""
+
+    token: str
+    document: str
+    # who to rejoin the document as, absent when a share link published the file
+    subject: str | None
+    written_at: float
+
+
+def published_layers() -> list[PublishedLayer]:
+    """Every published file whose tag says which document it belongs to.
+
+    A file with no tag, an unreadable one, or one naming anything but this
+    service's own agent identity is left out, so a tag that cannot be trusted
+    makes its file untouchable rather than fair game.
+    """
+    directory = utils.LIVE_DATA_DIR
+    if not directory.is_dir():
+        return []
+
+    found = []
+    for path in sorted(directory.glob(f"*{LAYER_TAG_SUFFIX}")):
+        token = path.name[: -len(LAYER_TAG_SUFFIX)]
+        if not LIVE_DATA_TOKEN_PATTERN.fullmatch(token):
+            continue
+        try:
+            tag = json.loads(path.read_text())
+            document = str(tag["document"])
+            written_at = path.stat().st_mtime
+        except (OSError, ValueError, TypeError, KeyError):
+            logger.warning(f"published layer {token} has no readable tag")
+            continue
+        if not document:
+            continue
+        subject = str(tag.get("subject") or "")
+        found.append(
+            PublishedLayer(
+                token=token,
+                document=document,
+                subject=subject if subject.startswith(AGENT_SUBJECT_PREFIX) else None,
+                written_at=written_at,
+            )
+        )
+    return found
 
 
 def live_data_token(url: str) -> str | None:
@@ -161,20 +248,53 @@ def live_data_token(url: str) -> str | None:
     return token if LIVE_DATA_TOKEN_PATTERN.fullmatch(token) else None
 
 
+def entry_layer_data(entry: object) -> str | None:
+    """The published file a layer entry draws from, when it draws from one."""
+    if not isinstance(entry, dict):
+        return None
+    source = entry.get("source")
+    if not isinstance(source, dict) or source.get("kind") != "url":
+        return None
+    return live_data_token(str(source.get("url") or ""))
+
+
 def replaced_layer_data(operations: list, entries: dict) -> list[str]:
     """Tokens of the files the operations are about to leave unreferenced."""
     tokens = []
     for key, _ in operations:
-        current = entries.get(key.split("/", 1)[-1])
-        if not isinstance(current, dict):
-            continue
-        source = current.get("source")
-        if not isinstance(source, dict) or source.get("kind") != "url":
-            continue
-        token = live_data_token(str(source.get("url") or ""))
+        token = entry_layer_data(entries.get(key.split("/", 1)[-1]))
         if token:
             tokens.append(token)
     return tokens
+
+
+def referenced_layer_data(entries: dict, operations: list) -> set[str]:
+    """Every published file the document names once the operations land."""
+    layers = dict(entries)
+    for key, value in operations:
+        layer_id = key.split("/", 1)[-1]
+        if value is None:
+            layers.pop(layer_id, None)
+        else:
+            layers[layer_id] = value
+    return {
+        token for token in map(entry_layer_data, layers.values()) if token is not None
+    }
+
+
+def delete_layer_data(token: str) -> None:
+    """Delete a published file and its tag, if the token names one of ours.
+
+    The pattern and the confinement below are the whole check: nothing here
+    trusts that a token came from a url or a filename we wrote.
+    """
+    if not LIVE_DATA_TOKEN_PATTERN.fullmatch(token):
+        return
+    directory = str(utils.LIVE_DATA_DIR)
+    for suffix in (LAYER_DATA_SUFFIX, LAYER_TAG_SUFFIX):
+        path = utils.resolve_under([f"{token}{suffix}"], [directory], [directory])
+        if path:
+            Path(path).unlink(missing_ok=True)
 
 
 def prune_layer_data(tokens: list) -> None:
@@ -185,15 +305,126 @@ def prune_layer_data(tokens: list) -> None:
     """
     for token in tokens:
         try:
-            path = utils.resolve_under(
-                [f"{token}.geojson"],
-                [str(utils.LIVE_DATA_DIR)],
-                [str(utils.LIVE_DATA_DIR)],
-            )
-            if path:
-                Path(path).unlink(missing_ok=True)
+            delete_layer_data(token)
         except OSError as e:
             logger.warning(f"could not prune published layer data: {e}")
+
+
+def refresh_layer_data(tokens) -> None:
+    """Date a file as used now, which is what keeps expiry away from it."""
+    directory = str(utils.LIVE_DATA_DIR)
+    for token in tokens:
+        if not LIVE_DATA_TOKEN_PATTERN.fullmatch(token):
+            continue
+        path = utils.resolve_under(
+            [f"{token}{LAYER_DATA_SUFFIX}"], [directory], [directory]
+        )
+        if not path:
+            continue
+        try:
+            os.utime(path)
+        except OSError as e:
+            logger.warning(f"could not date published layer data: {e}")
+
+
+def reconcile_document(document_id: str, referenced: set) -> None:
+    """Match this document's published files to what it still references.
+
+    A member deleting a layer leaves its file behind, and the document itself is
+    the only record that it is gone. Files younger than the unreferenced age are
+    left alone whatever the document says: a publish in flight elsewhere has not
+    had its own operation acked yet.
+
+    Referencing covers files tagged to another document, or to none at all, so a
+    file this document draws is kept alive by being drawn.
+    """
+    refresh_layer_data(referenced)
+    now = time.time()
+    for published in published_layers():
+        if published.document != document_id or published.token in referenced:
+            continue
+        if now - published.written_at < UNREFERENCED_AGE_SECONDS:
+            continue
+        prune_layer_data([published.token])
+
+
+def expire_layer_data(verified: set) -> None:
+    """Delete published files nothing has drawn or claimed for a long time.
+
+    The last line, and the only one that reaches a file whose document cannot be
+    checked at all: one published through a share link, or one written before
+    tags existed. `verified` is what a document confirmed it references during
+    this publish, which is never expired however old the file is.
+    """
+    directory = utils.LIVE_DATA_DIR
+    if not directory.is_dir():
+        return
+    now = time.time()
+    for path in sorted(directory.glob(f"*{LAYER_DATA_SUFFIX}")):
+        token = path.name[: -len(LAYER_DATA_SUFFIX)]
+        if token in verified or not LIVE_DATA_TOKEN_PATTERN.fullmatch(token):
+            continue
+        try:
+            if now - path.stat().st_mtime < MAXIMUM_UNUSED_AGE_SECONDS:
+                continue
+        except OSError as e:
+            logger.warning(f"could not read the age of a published layer: {e}")
+            continue
+        prune_layer_data([token])
+
+
+def sweepable_documents(current_document: str) -> list[tuple[str, str]]:
+    """Other documents worth rejoining, oldest first, and who to rejoin as.
+
+    A document holding even one recent file is left alone, and one with no
+    stored subject cannot be rejoined at all.
+    """
+    now = time.time()
+    grouped: dict[str, list[PublishedLayer]] = {}
+    for published in published_layers():
+        if published.document != current_document:
+            grouped.setdefault(published.document, []).append(published)
+
+    ready = []
+    for document_id, files in grouped.items():
+        if any(now - file.written_at < UNREFERENCED_AGE_SECONDS for file in files):
+            continue
+        subject = next((file.subject for file in files if file.subject), None)
+        if subject is None:
+            continue
+        ready.append((min(file.written_at for file in files), document_id, subject))
+
+    ready.sort()
+    return [(document_id, subject) for _, document_id, subject in ready[:SWEEP_DOCUMENT_LIMIT]]
+
+
+async def sweep_other_documents(current_document: str) -> set[str]:
+    """Rejoin a few documents we published into, and clear what they dropped.
+
+    Runs after the write, so agora answered a moment ago and each join here is
+    a live round trip rather than a timeout. Answers with the files those
+    documents confirmed they still reference.
+    """
+    verified: set[str] = set()
+    for document_id, subject in await anyio.to_thread.run_sync(
+        sweepable_documents, current_document
+    ):
+        token = sign_platform_token(subject, AGENT_NAME, AGENT_TOKEN_LIFETIME_SECONDS)
+        if token is None:
+            return verified
+        try:
+            async with agora.open_session(document_id, token) as session:
+                referenced = referenced_layer_data(session.layers, [])
+        except agora.AgoraError as e:
+            if e.reason != DOCUMENT_GONE_REASON:
+                # anything but "the document is gone" leaves the files alone: a
+                # refused join is no evidence that nothing references them
+                logger.info(f"live data sweep left {document_id} alone: {e}")
+                continue
+            referenced = set()
+        verified |= referenced
+        await anyio.to_thread.run_sync(reconcile_document, document_id, referenced)
+    return verified
 
 
 def style_overrides(layer: dict, current: dict) -> dict | None:
@@ -222,7 +453,9 @@ def layer_entry(layer: dict, layer_id: str, current: dict, order: str) -> dict:
     }
 
 
-def layer_operations(layers: list, entries: dict, read_geojson) -> tuple[list, list]:
+def layer_operations(
+    layers: list, entries: dict, read_geojson, binding: Binding
+) -> tuple[list, list]:
     """Operations for the layers of a ui_spec, plus what could not be published.
 
     Features travel inside the document while they fit under the viewer's inline
@@ -260,7 +493,7 @@ def layer_operations(layers: list, entries: dict, read_geojson) -> tuple[list, l
                 continue
             entry["source"] = {
                 "kind": "url",
-                "url": store_layer_data(body),
+                "url": store_layer_data(body, binding),
                 "format": "geojson",
             }
 
@@ -334,7 +567,7 @@ def document_id_of(binding: str) -> str | None:
         return None
 
 
-async def open_binding(binding: str, caller_token: str | None):
+async def open_binding(binding: str, caller_token: str | None) -> Binding:
     """Resolve the header to a document and a token that may write to it."""
     document_id = document_id_of(binding)
     if document_id is None:
@@ -345,7 +578,7 @@ async def open_binding(binding: str, caller_token: str | None):
         document = str(resolution.get("doc") or "")
         if not session_token or not document:
             raise agora.AgoraError("that share link did not resolve to a document")
-        return document, session_token
+        return Binding(document_id=document, token=session_token, subject=None)
 
     identity = agent_identity(caller_token)
     if identity is None:
@@ -357,7 +590,7 @@ async def open_binding(binding: str, caller_token: str | None):
     token = sign_platform_token(subject, name, AGENT_TOKEN_LIFETIME_SECONDS)
     # the caller's own token, so agora refuses a grant the caller may not make
     await agora.grant_edit_role(document_id, subject, caller_token)
-    return document_id, token
+    return Binding(document_id=document_id, token=token, subject=subject)
 
 
 # ── the write ────────────────────────────────────────────────────────────
@@ -394,21 +627,34 @@ async def publish(binding: str, caller_token: str | None, result: str, read_geoj
         return None
 
     try:
-        document_id, token = await open_binding(binding, caller_token)
-        async with agora.open_session(document_id, token) as session:
+        bound = await open_binding(binding, caller_token)
+        async with agora.open_session(bound.document_id, bound.token) as session:
+            entries = session.layers
             # reading a layer file blocks for seconds, and this loop is serving
             # every other request
             operations, problems = await anyio.to_thread.run_sync(
-                layer_operations, layers, session.layers, read_geojson
+                layer_operations, layers, entries, read_geojson, bound
             )
-            replaced = replaced_layer_data(operations, session.layers)
+            replaced = replaced_layer_data(operations, entries)
             await session.send_operations(operations)
             prune_layer_data(replaced)
+            referenced = referenced_layer_data(entries, operations)
             if viewport is not None:
                 await session.send_presence(viewport)
-        return summary(len(operations), viewport is not None, problems)
+        note = summary(len(operations), viewport is not None, problems)
     except agora.AgoraError as e:
         return f"Live document: nothing was written, {e}"
     except Exception as e:
         logger.exception("live document write failed")
         return f"Live document: nothing was written, {type(e).__name__}: {e}"
+
+    # the write is done and reported: housekeeping below must not take it back
+    try:
+        await anyio.to_thread.run_sync(
+            reconcile_document, bound.document_id, referenced
+        )
+        verified = referenced | await sweep_other_documents(bound.document_id)
+        await anyio.to_thread.run_sync(expire_layer_data, verified)
+    except Exception:
+        logger.exception("live data cleanup failed")
+    return note

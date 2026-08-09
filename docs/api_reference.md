@@ -124,7 +124,11 @@ Add `X-Agora-Document` and a call's map effects also land in a live [agora](http
 
 What travels: the layers of an `__UI_SPEC__` map become `layers/<id>` entries, and a `fly_to` or `set_view` from `__VIEWER_CMD__` becomes one presence viewport, which peers following the agent match. Other markers are ignored. A layer's colour becomes `styleOverrides.color`, but only on an entry that carries no overrides yet, so a member's own restyle survives a re-run.
 
-A layer's features ride inside the document while they fit under 48KiB, and above that are written to `GET /live-data/{token}`, which every member fetches. That route needs no bearer: a share link guest has none, and the 32-byte token in the URL is the whole credential. Republishing a layer deletes the file its previous entry named, once the replacing write is acked. A file the document stops naming any other way stays.
+A layer's features ride inside the document while they fit under 48KiB, and above that are written to `GET /live-data/{token}`, which every member fetches. That route needs no bearer: a share link guest has none, and the 32-byte token in the URL is the whole credential.
+
+Published files are cleaned up by the publishes that follow them, with no scheduler anywhere. Republishing a layer deletes the file its previous entry named, once the replacing write is acked. Every publish also drops that document's files it has stopped naming, once they are a day old, and rejoins up to three other documents it published into to do the same. A rejoin agora refuses keeps every file: only its exact "no such document" deletes one, and nothing in agora produces that today, so a document that went away is reaped by expiry instead.
+
+Last, a file expires **90 days** after the last time anything fetched it or a document confirmed it still draws it. A viewer join fetches the layers it draws, so any document someone still opens keeps its files whatever it was published through. The accepted consequence: a document nobody has opened or republished for 90 days loses its oversized layers, and the next person to open it sees those layer entries with no features behind them. Layers small enough to ride inside the document are unaffected, since no file backs them.
 
 The tool's own result text is never changed by any of this. A document write is reported as a second text content block beside it, whether it succeeded or failed, so a document that could not be written never costs the caller the tool result.
 
