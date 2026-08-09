@@ -180,6 +180,26 @@ and is the identity the tools act as. Set `MCP_ALLOWED_HOSTS` to the public
 hostname, otherwise the transport's DNS-rebinding check answers `421` to
 everything. See [`docs/api_reference.md`](docs/api_reference.md#mcp).
 
+Add one more header and the call's map effects also land in a live agora
+document, so every open viewer redraws while the outside agent works:
+
+```json
+{ "mcpServers": { "geolang": {
+    "type": "http",
+    "url": "https://<host>/agent/mcp",
+    "headers": {
+      "Authorization": "Bearer <jwt>",
+      "X-Agora-Document": "<document id or share link token>"
+    }
+} } }
+```
+
+The layers a tool emits become document layers and a `fly_to` moves the agent's
+presence. The agent joins as its own member, put there by a grant made with the
+caller's token, so it can only reach documents its caller could already edit.
+`AGORA_URL` says where agora is. See
+[writing to a live map](docs/api_reference.md#writing-to-a-live-map).
+
 ---
 
 ## License

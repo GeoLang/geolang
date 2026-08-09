@@ -66,6 +66,7 @@ User-uploaded files for the agent to operate on.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/share` | Create a shareable link for a dataset / view. |
+| `GET` | `/live-data/{token}` | Features published to a live document, open read. See [writing to a live map](#writing-to-a-live-map). |
 
 ## Tools
 
@@ -84,12 +85,12 @@ Add `"notify": true` when running a tool outside the model's turn, such as the v
 
 An `Authorization: Bearer <jwt>` header sets the identity the tool's own outbound calls go out as, for the length of that call. `PTOLEMY_API_TOKEN` is the service account ptolemy falls back on when there is no caller.
 
-With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`) and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer and reading a share by id are never gated.
+With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`) and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer, reading a share by id and reading a live layer by its token are never gated.
 
 ## MCP
 
 ### `POST /mcp`
-The same tools over the [Model Context Protocol](https://modelcontextprotocol.io/), streamable HTTP transport, for external agents such as Claude or Cursor. Externally that is `/agent/mcp`. `tools/list` returns the manifest above with `parameters` renamed to `inputSchema`; `tools/call` runs the tool and returns its string as one text content block, markers included. Bad arguments and tool exceptions come back as a result with `isError` and a ❌ text, an unknown tool as JSON-RPC `-32602`.
+The same tools over the [Model Context Protocol](https://modelcontextprotocol.io/), streamable HTTP transport, for external agents such as Claude or Cursor. Externally that is `/agent/mcp`. `tools/list` returns the manifest above with `parameters` renamed to `inputSchema`; `tools/call` runs the tool and returns its string as one text content block, markers included, plus a second block when the call is bound to a live document. Bad arguments and tool exceptions come back as a result with `isError` and a ❌ text, an unknown tool as JSON-RPC `-32602`.
 
 The endpoint is stateless: no session id is issued and nothing is kept between requests, so a call is only ever as authorised as the bearer it arrives with.
 
@@ -105,6 +106,27 @@ Client config:
     "headers": { "Authorization": "Bearer <jwt>" }
 } } }
 ```
+
+### Writing to a live map
+
+Add `X-Agora-Document` and a call's map effects also land in a live [agora](https://github.com/GeoLang/agora) document, so every open viewer sees them as the tool runs. The value is a document id or a share link token. Without the header nothing is bound and a call behaves exactly as above.
+
+```json
+{ "mcpServers": { "geolang": {
+    "type": "http",
+    "url": "https://<host>/agent/mcp",
+    "headers": {
+      "Authorization": "Bearer <jwt>",
+      "X-Agora-Document": "<document id or share link token>"
+    }
+} } }
+```
+
+What travels: the layers of an `__UI_SPEC__` map become `layers/<id>` entries, and a `fly_to` or `set_view` from `__VIEWER_CMD__` becomes one presence viewport, which peers following the agent match. Other markers are ignored. A layer's features ride inside the document while they fit under 48KiB, and above that are written to `GET /live-data/{token}`, which every member fetches. That route needs no bearer: a share link guest has none, and the 32-byte token in the URL is the whole credential.
+
+The tool's own result text is never changed by any of this. A document write is reported as a second text content block beside it, whether it succeeded or failed, so a document that could not be written never costs the caller the tool result.
+
+The agent joins as `agent:<caller sub>`, a short-lived identity geolang signs with `PLATFORM_JWT_SECRET`. It is put on the document by a membership grant made with the **caller's own** token, so it can never reach a document its caller could not edit. Binding to a document id therefore needs that secret set and a live platform token; a share link binding writes as the link's own session instead and is refused unless the link grants edit.
 
 ## Debug
 
@@ -141,6 +163,8 @@ Adding a tool is a single file: drop a module into `src/agents/tools/` exporting
 |---|---|---|
 | `SIBYL_URL` | `http://localhost:8090` | sibyl agent service endpoint. |
 | `MCP_ALLOWED_HOSTS` | localhost only | Comma-separated `Host` values `/mcp` answers on, read at startup. A `host:*` entry matches any port. |
+| `AGORA_URL` | `http://agora:3000` | agora live document service. The websocket follows it, so `https` there means `wss`. |
+| `GEOLANG_PUBLIC_URL` | `/agent` | Where a browser reaches this service, used to build the `/live-data/{token}` URLs published into a document. |
 | `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O, outputs, catalogue. |
 | `APP_BASE_URL` | `http://localhost:8080` | URL Playwright loads for `/export-pdf` and `/export-png`. |
 | `PTOLEMY_URL` | `http://ptolemy:3000` | Ptolemy geodatabase endpoint (`ptolemy_query`). |
