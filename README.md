@@ -10,7 +10,7 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 39 geospatial tools served to sibyl over HTTP and executed in-process
+- 39 geospatial tools served to sibyl over HTTP and executed in-process, and to outside agents over MCP
 - Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan for the user to approve, `run_workflow` executes it
 - AG-UI event stream for ViewTopia
 
@@ -161,6 +161,24 @@ Leave the variable unset and the whole API stays open. That is the standalone
 `docker compose up` flow, the test suite and the eval harness, none of which
 carry a token. Turning it on means the client has to send the header on every
 call, layer fetches and download links included.
+
+### MCP for outside agents
+
+The same tools are served over the Model Context Protocol at `POST /mcp`,
+`/agent/mcp` from outside. Point Claude, Cursor or any MCP client at it:
+
+```json
+{ "mcpServers": { "geolang": {
+    "type": "http",
+    "url": "https://<host>/agent/mcp",
+    "headers": { "Authorization": "Bearer <jwt>" }
+} } }
+```
+
+The bearer is required on every MCP request when `PLATFORM_JWT_SECRET` is set,
+and is the identity the tools act as. Set `MCP_ALLOWED_HOSTS` to the public
+hostname, otherwise the transport's DNS-rebinding check answers `421` to
+everything. See [`docs/api_reference.md`](docs/api_reference.md#mcp).
 
 ---
 

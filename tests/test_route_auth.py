@@ -98,6 +98,7 @@ UNGATED_PATHS = {
     "/health",
     "/tools",  # manifest, sibyl fetches it before anyone has signed in
     "/tools/{name}",  # gated in the handler, which needs the token itself
+    "/mcp",  # gated by its own ASGI middleware, see test_mcp
     "/debug/tools",  # tool names, which the manifest already lists
     "/share/{share_id}",  # a share link is meant for someone who never signs in
     "/share/{share_id}/data",

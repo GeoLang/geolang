@@ -1,6 +1,6 @@
 # API Reference
 
-The GeoLang FastAPI app ([`src/api/server.py`](../src/api/server.py)) exposes the agent, dataset, session, share, and export surfaces. All routes are unversioned and return JSON unless noted.
+The GeoLang FastAPI app ([`src/api/server.py`](../src/api/server.py)) exposes the agent, dataset, session, share, export, and MCP surfaces. All routes are unversioned and return JSON unless noted.
 
 Base URL in development: `http://localhost:8080`. In the bundled platform deployment: `http://<host>:8080/agent/*` (path-stripped by the load balancer).
 
@@ -86,6 +86,26 @@ An `Authorization: Bearer <jwt>` header sets the identity the tool's own outboun
 
 With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`) and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer and reading a share by id are never gated.
 
+## MCP
+
+### `POST /mcp`
+The same tools over the [Model Context Protocol](https://modelcontextprotocol.io/), streamable HTTP transport, for external agents such as Claude or Cursor. Externally that is `/agent/mcp`. `tools/list` returns the manifest above with `parameters` renamed to `inputSchema`; `tools/call` runs the tool and returns its string as one text content block, markers included. Bad arguments and tool exceptions come back as a result with `isError` and a ❌ text, an unknown tool as JSON-RPC `-32602`.
+
+The endpoint is stateless: no session id is issued and nothing is kept between requests, so a call is only ever as authorised as the bearer it arrives with.
+
+Every request needs `Authorization: Bearer <jwt>`, `initialize` included, and that bearer is the identity the tool's outbound calls go out as. A missing or bad token is `401` with `WWW-Authenticate: Bearer`. Without `PLATFORM_JWT_SECRET` the endpoint is open, like the rest of the API.
+
+`MCP_ALLOWED_HOSTS` must name the public hostname, or every call answers `421`: the transport checks the `Host` header against it to block DNS rebinding, and behind the platform proxy the Host is the public name rather than localhost.
+
+Client config:
+```json
+{ "mcpServers": { "geolang": {
+    "type": "http",
+    "url": "https://<host>/agent/mcp",
+    "headers": { "Authorization": "Bearer <jwt>" }
+} } }
+```
+
 ## Debug
 
 | Method | Path | Purpose |
@@ -120,6 +140,7 @@ Adding a tool is a single file: drop a module into `src/agents/tools/` exporting
 | Variable | Default | Meaning |
 |---|---|---|
 | `SIBYL_URL` | `http://localhost:8090` | sibyl agent service endpoint. |
+| `MCP_ALLOWED_HOSTS` | localhost only | Comma-separated `Host` values `/mcp` answers on, read at startup. A `host:*` entry matches any port. |
 | `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O, outputs, catalogue. |
 | `APP_BASE_URL` | `http://localhost:8080` | URL Playwright loads for `/export-pdf` and `/export-png`. |
 | `PTOLEMY_URL` | `http://ptolemy:3000` | Ptolemy geodatabase endpoint (`ptolemy_query`). |

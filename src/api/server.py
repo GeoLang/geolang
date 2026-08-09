@@ -8,6 +8,7 @@ import uuid
 
 import asyncio
 import zipfile
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from threading import Thread
@@ -28,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
+from starlette.routing import Route
 
 from ag_ui.core import (
     CustomEvent,
@@ -46,6 +48,7 @@ import httpx
 
 from src.agents.agent_manager import PERSONA, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
+from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.core.auth import platform_auth, require_platform_token
 from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
@@ -61,15 +64,6 @@ from src.core.utils import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-app = FastAPI(title="GeoLang API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # sibyl owns the agent loop and session history, geolang runs the tools
 SIBYL_TIMEOUT = 30.0
@@ -89,9 +83,63 @@ def _preload_geo_stack():
         logger.warning(f"Geo stack preload failed (first tool call will be slow): {e}")
 
 
-@app.on_event("startup")
-async def startup():
+def _slim_schema(node):
+    """strip pydantic boilerplate the model doesn't need: titles, anyOf-null wrappers, null defaults"""
+    if isinstance(node, dict):
+        options = [o for o in node.get("anyOf", []) if o != {"type": "null"}]
+        if len(options) == 1:
+            del node["anyOf"]
+            node.update(options[0])
+        node.pop("title", None)
+        if "default" in node and node["default"] is None:
+            del node["default"]
+        for child in node.values():
+            _slim_schema(child)
+    elif isinstance(node, list):
+        for child in node:
+            _slim_schema(child)
+    return node
+
+
+def tool_manifest() -> list[dict]:
+    """What geolang can run and with which arguments, one entry per tool."""
+    tools = []
+    for func, schema in load_external_tools():
+        if schema is None:
+            logger.warning(f"Tool {func.__name__} has no TOOL_SCHEMA, skipping")
+            continue
+        tools.append(
+            {
+                "name": func.__name__,
+                "description": inspect.getdoc(func) or "",
+                "parameters": _slim_schema(schema.model_json_schema()),
+            }
+        )
+    return tools
+
+
+mcp_app, mcp_session_manager = create_mcp_app(tool_manifest)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     Thread(target=_preload_geo_stack, daemon=True).start()
+    async with mcp_session_manager.run():
+        yield
+
+
+app = FastAPI(title="GeoLang API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# a raw ASGI endpoint, not a FastAPI route: the MCP app answers POST, GET and
+# DELETE on the one path and carries its own bearer gate
+app.router.routes.append(Route(MCP_PATH, endpoint=mcp_app))
 
 
 async def sibyl_request(method: str, path: str, **kwargs) -> httpx.Response:
@@ -126,40 +174,10 @@ async def notify_agent(text: str) -> None:
         logger.warning(f"Could not notify agent: {e}")
 
 
-def _slim_schema(node):
-    """strip pydantic boilerplate the model doesn't need: titles, anyOf-null wrappers, null defaults"""
-    if isinstance(node, dict):
-        options = [o for o in node.get("anyOf", []) if o != {"type": "null"}]
-        if len(options) == 1:
-            del node["anyOf"]
-            node.update(options[0])
-        node.pop("title", None)
-        if "default" in node and node["default"] is None:
-            del node["default"]
-        for child in node.values():
-            _slim_schema(child)
-    elif isinstance(node, list):
-        for child in node:
-            _slim_schema(child)
-    return node
-
-
 @app.get("/tools")
 def list_tools():
     """Tool manifest for sibyl: what it can call and with which arguments."""
-    tools = []
-    for func, schema in load_external_tools():
-        if schema is None:
-            logger.warning(f"Tool {func.__name__} has no TOOL_SCHEMA, skipping")
-            continue
-        tools.append(
-            {
-                "name": func.__name__,
-                "description": inspect.getdoc(func) or "",
-                "parameters": _slim_schema(schema.model_json_schema()),
-            }
-        )
-    return {"tools": tools}
+    return {"tools": tool_manifest()}
 
 
 class ToolCallRequest(BaseModel):

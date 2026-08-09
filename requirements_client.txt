@@ -6,3 +6,4 @@ playwright
 httpx
 ag-ui-protocol==0.1.19
 PyJWT==2.13.0
+mcp>=2.0.0,<3

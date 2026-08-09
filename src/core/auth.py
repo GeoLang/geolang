@@ -14,6 +14,9 @@ Gated: everything that runs code, writes a file, or reads back a session or a
 user's data. Open: `/health`, the `GET /tools` manifest sibyl fetches at startup
 before anyone has signed in, the static viewer, and reading a share by id, whose
 whole point is a link that works for someone who never signs in.
+
+`/mcp` is gated too, by ASGI middleware rather than a route dependency: it is a
+mounted app, not a FastAPI route, so the dependency system never sees it.
 """
 
 from __future__ import annotations
@@ -34,14 +37,18 @@ def platform_secret() -> str | None:
     return (os.environ.get(SECRET_ENV) or "").strip() or None
 
 
-def require_platform_token(token: str | None) -> None:
-    """Reject anything that is not a live platform token. No-op in dev mode."""
+def platform_token_error(token: str | None) -> str | None:
+    """Why `token` is not a live platform token, or None when it is one.
+
+    The transports differ in how they answer (an HTTP status here, a JSON-RPC
+    error on the MCP endpoint), so the check is separate from the rejection.
+    """
     secret = platform_secret()
     if secret is None:
-        return
+        return None
 
     if not token:
-        raise HTTPException(status_code=401, detail="missing bearer token")
+        return "missing bearer token"
 
     try:
         # naming the algorithm keeps a token that asks for "none", or an RS256
@@ -52,7 +59,16 @@ def require_platform_token(token: str | None) -> None:
     except jwt.PyJWTError:
         # the reason is not echoed back: separating "expired" from "bad
         # signature" helps an attacker more than a caller
-        raise HTTPException(status_code=401, detail="invalid or expired token")
+        return "invalid or expired token"
+
+    return None
+
+
+def require_platform_token(token: str | None) -> None:
+    """Reject anything that is not a live platform token. No-op in dev mode."""
+    detail = platform_token_error(token)
+    if detail is not None:
+        raise HTTPException(status_code=401, detail=detail)
 
 
 def platform_auth(authorization: Annotated[str | None, Header()] = None) -> None:
