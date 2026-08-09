@@ -46,6 +46,8 @@ Both let the LLM hand the browser arbitrary instructions. DuckDB-WASM is sandbox
 
 **Plan:** lock down acceptable `viewer_control` actions to an enum; for `sql_query` consider an opt-in allowlist of domains that DuckDB may fetch from (configured at the viewer side, not the agent).
 
+`/mcp` no longer offers `sql_query` at all, so what is left here is the `/chat` path, where the SQL's author and the browser running it are the same person. A tool module declares itself with `TOOL_RUNS_CALLER_CODE = True` and the MCP endpoint drops it from both the manifest and the call path.
+
 ## 🟡 Decide what to do with `core/qgis_engine.py`
 
 A 1-line stub after the `server.py` split. A `QGISEngine` class would only have value if multiple tools shared a common init pattern, and today they don't. Preference: delete it.

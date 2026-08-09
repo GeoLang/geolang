@@ -90,7 +90,9 @@ With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256
 ## MCP
 
 ### `POST /mcp`
-The same tools over the [Model Context Protocol](https://modelcontextprotocol.io/), streamable HTTP transport, for external agents such as Claude or Cursor. Externally that is `/agent/mcp`. `tools/list` returns the manifest above with `parameters` renamed to `inputSchema`; `tools/call` runs the tool and returns its string as one text content block, markers included, plus a second block when the call is bound to a live document. Bad arguments and tool exceptions come back as a result with `isError` and a ❌ text, an unknown tool as JSON-RPC `-32602`.
+The tools over the [Model Context Protocol](https://modelcontextprotocol.io/), streamable HTTP transport, for external agents such as Claude or Cursor. Externally that is `/agent/mcp`. `tools/list` returns the manifest above with `parameters` renamed to `inputSchema`; `tools/call` runs the tool and returns its string as one text content block, markers included, plus a second block when the call is bound to a live document. Bad arguments and tool exceptions come back as a result with `isError` and a ❌ text, an unknown tool as JSON-RPC `-32602`.
+
+A tool whose module sets `TOOL_RUNS_CALLER_CODE = True` is left out of both `tools/list` and `tools/call`, and answers `-32602` like any other unknown name. `sql_query` is the only one: it runs SQL the caller wrote in whichever browser receives the command, which the `/chat` path can assume is the caller's own and this one cannot.
 
 The endpoint is stateless: no session id is issued and nothing is kept between requests, so a call is only ever as authorised as the bearer it arrives with.
 

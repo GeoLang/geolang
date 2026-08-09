@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from websockets.asyncio.server import serve
 
+from src.agents.agent_manager import load_external_tools
 from src.api import mcp_server, server
 from src.api.live_document import DOCUMENT_HEADER
 from src.core import agora
@@ -84,13 +85,42 @@ def text_of(response):
 
 def test_list_tools_is_the_manifest(open_mode, client):
     tools = result_of(call(client, "tools/list", {}))["tools"]
-    manifest = server.tool_manifest()
+    offered = {func.__name__ for func, _ in mcp_server.external_tools()}
+    manifest = [t for t in server.tool_manifest() if t["name"] in offered]
 
     assert len(tools) == len(manifest)
     assert len(tools) > 30
     assert [t["name"] for t in tools] == [t["name"] for t in manifest]
     assert [t["inputSchema"] for t in tools] == [t["parameters"] for t in manifest]
     assert [t["description"] for t in tools] == [t["description"] for t in manifest]
+
+
+# ── what an external agent is not offered ────────────────────────────────
+
+
+def test_a_tool_that_runs_caller_code_is_not_listed(open_mode, client):
+    """`/chat` keeps sql_query. Here the sql's author is not whose browser runs it."""
+    tools = result_of(call(client, "tools/list", {}))["tools"]
+
+    assert "sql_query" in {t["name"] for t in server.tool_manifest()}
+    assert "sql_query" not in {t["name"] for t in tools}
+
+
+def test_a_tool_that_runs_caller_code_cannot_be_called(open_mode, client):
+    """Leaving it out of the manifest is not the gate: naming it must fail too."""
+    response = call(
+        client, "tools/call", {"name": "sql_query", "arguments": {"sql": "SELECT 1"}}
+    )
+
+    assert response.json()["error"]["code"] == -32602
+
+
+def test_the_exclusion_is_the_tool_modules_own_declaration():
+    """No name list in the endpoint: the tool declares it, so a new one is caught."""
+    loaded = {func.__name__: func for func, _ in load_external_tools()}
+
+    assert mcp_server.runs_caller_code(loaded["sql_query"])
+    assert not mcp_server.runs_caller_code(loaded["viewer_control"])
 
 
 def test_a_tool_runs_and_comes_back_as_text(open_mode, client):

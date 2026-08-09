@@ -28,7 +28,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from src.agents.agent_manager import load_external_tools
+from src.agents.agent_manager import load_external_tools, runs_caller_code
 from src.api.live_document import document_binding, publish
 from src.core.auth import platform_token_error
 from src.core.user_token import bearer_token, user_token_scope
@@ -112,6 +112,17 @@ class NoStandaloneStream:
         await self.app(scope, receive, send)
 
 
+def external_tools() -> list[tuple]:
+    """The tools this endpoint offers: everything except tools that run a
+    caller-written payload, which an external agent must never author for
+    someone else's browser."""
+    return [
+        (func, schema)
+        for func, schema in load_external_tools()
+        if not runs_caller_code(func)
+    ]
+
+
 def _caller_token(request: Request | None) -> str | None:
     """The bearer of the HTTP request this MCP message arrived on."""
     if request is None:
@@ -144,6 +155,7 @@ def create_mcp_app(
     async def list_tools(
         ctx: ServerRequestContext, params: mcp_types.PaginatedRequestParams | None
     ) -> mcp_types.ListToolsResult:
+        offered = {func.__name__ for func, _ in external_tools()}
         return mcp_types.ListToolsResult(
             tools=[
                 mcp_types.Tool(
@@ -152,6 +164,7 @@ def create_mcp_app(
                     input_schema=tool["parameters"],
                 )
                 for tool in tool_manifest()
+                if tool["name"] in offered
             ]
         )
 
@@ -166,8 +179,10 @@ def create_mcp_app(
         if detail is not None:
             raise MCPError(code=mcp_types.INVALID_REQUEST, message=detail)
 
+        # the same list the manifest is built from: a tool left out of it is
+        # unknown here too, rather than merely unadvertised
         entry = next(
-            (t for t in load_external_tools() if t[0].__name__ == params.name and t[1]),
+            (t for t in external_tools() if t[0].__name__ == params.name and t[1]),
             None,
         )
         if entry is None:

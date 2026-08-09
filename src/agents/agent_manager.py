@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import logging
 import pkgutil
 import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+CALLER_CODE_ATTRIBUTE = "TOOL_RUNS_CALLER_CODE"
 
 # Ensure the tools/ package (under src/agents/tools/) is importable by name.
 AGENTS_DIR = str(Path(__file__).parent)
@@ -266,3 +269,9 @@ def load_external_tools():
     except Exception as e:
         logger.warning(f"Could not load external tools: {e}")
     return tools
+
+
+def runs_caller_code(func) -> bool:
+    """Whether the tool hands a caller-written argument to something that
+    executes it, declared by the tool module as ``TOOL_RUNS_CALLER_CODE = True``."""
+    return bool(getattr(inspect.getmodule(func), CALLER_CODE_ATTRIBUTE, False))

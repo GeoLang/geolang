@@ -64,3 +64,6 @@ def sql_query(
 
 TOOL_FUNCTION = sql_query
 TOOL_SCHEMA = SqlQueryArgs
+# the sql is executed by whichever browser receives the command, so this is only
+# offered where the author of the sql owns that browser
+TOOL_RUNS_CALLER_CODE = True

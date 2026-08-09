@@ -164,7 +164,7 @@ call, layer fetches and download links included.
 
 ### MCP for outside agents
 
-The same tools are served over the Model Context Protocol at `POST /mcp`,
+The tools are served over the Model Context Protocol at `POST /mcp`,
 `/agent/mcp` from outside. Point Claude, Cursor or any MCP client at it:
 
 ```json
@@ -179,6 +179,9 @@ The bearer is required on every MCP request when `PLATFORM_JWT_SECRET` is set,
 and is the identity the tools act as. Set `MCP_ALLOWED_HOSTS` to the public
 hostname, otherwise the transport's DNS-rebinding check answers `421` to
 everything. See [`docs/api_reference.md`](docs/api_reference.md#mcp).
+
+`sql_query` is the one tool `/chat` has that this does not: it runs SQL the
+caller wrote in a browser, which only makes sense when they are the same person.
 
 Add one more header and the call's map effects also land in a live agora
 document, so every open viewer redraws while the outside agent works:
