@@ -10,6 +10,7 @@ The tree dirs are read once at import, so these tests point the module-level
 copies at a tmp_path rather than only setting `TOOL_EXEC_DIR`.
 """
 
+import importlib
 import pathlib
 
 import geopandas as gpd
@@ -23,7 +24,10 @@ from shapely.geometry import Point
 from src.agents.tools.download_natural_earth import DownloadNaturalEarthArgs
 from src.agents.tools.export_to_gpkg import export_to_gpkg
 from src.agents.tools.geocode_place import geocode_place
-from src.agents.tools.run_qgis_algorithm import confined_parameters
+from src.agents.tools.run_qgis_algorithm import (
+    COMMAND_LINE_PARAMETERS,
+    confined_parameters,
+)
 from src.agents.tools.spatial_join import spatial_join
 from src.core import utils
 from src.core.utils import caller_directory_scope
@@ -169,6 +173,20 @@ def test_the_refusal_reaches_a_tool_that_reports_its_own_errors(tree):
 
     assert "absolute path" in result
     assert "polygons_path" in result
+
+
+def test_a_refusal_survives_a_reload_of_the_module_that_raises_it(tree):
+    """The route tests reload utils, and a tool that held the old class 500s.
+
+    A caller catching the class it imported first has to keep catching what
+    the reloaded module raises, or a refusal stops being a 400.
+    """
+    caught_before_the_reload = utils.PathRefused
+    importlib.reload(utils)
+
+    with caller_directory_scope(BOB):
+        with pytest.raises(caught_before_the_reload):
+            utils.tool_output_path("output_filename", "../escape.gpkg")
 
 
 # ── shared reference data is still readable ──────────────────────────────
@@ -329,6 +347,37 @@ def test_every_layer_in_a_multilayer_list_is_confined(tree):
             )
 
     assert confined["INPUT"] == [str(mine)]
+
+
+def test_a_gdal_command_line_parameter_is_refused(tree):
+    """gdal pastes this in whole, so a file named in it would never be confined."""
+    with caller_directory_scope(BOB):
+        with pytest.raises(utils.PathRefused):
+            confined_parameters(
+                {"EXTRA": f"-input_file_list outputs/{ALICE}/rasters.txt"},
+                {"EXTRA": "string"},
+                COMMAND_LINE_PARAMETERS,
+            )
+
+
+def test_the_same_name_on_a_native_algorithm_stays_a_value(tree):
+    """The native raster algorithms hand CREATION_OPTIONS to the writer instead."""
+    with caller_directory_scope(BOB):
+        confined = confined_parameters(
+            {"CREATION_OPTIONS": "COMPRESS=DEFLATE"}, {"CREATION_OPTIONS": "string"}
+        )
+
+    assert confined["CREATION_OPTIONS"] == "COMPRESS=DEFLATE"
+
+
+def test_an_unused_command_line_parameter_is_not_refused(tree):
+    """An empty value is how the model says it is not using the option."""
+    with caller_directory_scope(BOB):
+        confined = confined_parameters(
+            {"EXTRA": ""}, {"EXTRA": "string"}, COMMAND_LINE_PARAMETERS
+        )
+
+    assert confined["EXTRA"] == ""
 
 
 def test_a_parameter_the_algorithm_does_not_define_is_passed_through(tree):

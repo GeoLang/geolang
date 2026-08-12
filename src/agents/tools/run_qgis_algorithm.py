@@ -3,8 +3,7 @@ import json
 import sys
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core import utils
-from src.core.utils import tool_input_path, tool_output_path
+from src.core.utils import PathRefused, tool_input_path, tool_output_path
 
 # the tool venv is isolated; the qgis bindings and the processing plugin live in
 # the system paths, so bridge them onto sys.path
@@ -44,6 +43,13 @@ UNRESOLVABLE_LAYER_TYPES = frozenset(
 # a destination named this is written to a temporary file QGIS picks
 TEMPORARY_OUTPUT = "TEMPORARY_OUTPUT"
 
+# the gdal algorithms paste these into the command line they build instead of
+# reading them as values, and a token starting with "-" is passed on unquoted,
+# so a path written into one reaches GDAL as arguments of its own. The same
+# names on a native algorithm go to the raster writer and are left alone.
+GDAL_PROVIDER = "gdal"
+COMMAND_LINE_PARAMETERS = frozenset({"CREATION_OPTIONS", "EXTRA", "OPTIONS"})
+
 
 def bridge_qgis_onto_path():
     for path in QGIS_SYSTEM_PATHS:
@@ -60,8 +66,7 @@ def confined_parameter(key, value, parameter_type):
     `"population" / "area"` looks exactly like a path.
     """
     if parameter_type in UNRESOLVABLE_LAYER_TYPES:
-        # off the module, so a reload of utils cannot leave two classes by this name
-        raise utils.PathRefused(
+        raise PathRefused(
             f"parameters.{key} names layers in a form this tool cannot confine "
             f"to your own files, so '{key}' cannot be used here."
         )
@@ -80,12 +85,26 @@ def confined_parameter(key, value, parameter_type):
     return tool_input_path(f"parameters.{key}", name) + separator + suffix
 
 
-def confined_parameters(params, parameter_types):
+def confined_parameters(params, parameter_types, command_line_names=frozenset()):
     """Every parameter the caller gave, confined by what the algorithm calls it.
 
     A name the algorithm does not define is passed through untouched: QGIS
-    ignores it, so nothing opens it.
+    ignores it, so nothing opens it. A name in `command_line_names` is refused
+    outright, because no resolving here would confine a value that is pasted
+    into a command line whole. Only the gdal provider has any, so the caller
+    passes the empty default for every other one.
     """
+    pasted = sorted(
+        key
+        for key, value in params.items()
+        if key in command_line_names and value
+    )
+    if pasted:
+        raise PathRefused(
+            f"parameters.{pasted[0]} is passed to gdal as command line options, "
+            "so a file named in it would not be confined to your own. Use the "
+            "algorithm's own parameters instead."
+        )
     return {
         key: confined_parameter(key, value, parameter_types.get(key))
         for key, value in params.items()
@@ -178,7 +197,12 @@ def run_qgis_algorithm(
             definition.name(): definition.type()
             for definition in algorithm.parameterDefinitions()
         }
-        params = confined_parameters(params, parameter_types)
+        command_line_names = (
+            COMMAND_LINE_PARAMETERS
+            if algorithm.provider().id() == GDAL_PROVIDER
+            else frozenset()
+        )
+        params = confined_parameters(params, parameter_types, command_line_names)
 
         if output_filename:
             params["OUTPUT"] = tool_output_path("output_filename", output_filename)
@@ -221,7 +245,7 @@ def run_qgis_algorithm(
             f"Outputs:\n" + "\n".join(output_lines)
         )
 
-    except utils.PathRefused as e:
+    except PathRefused as e:
         return f"❌ '{algorithm_id}' refused a parameter: {e}"
     except Exception as e:
         return f"❌ '{algorithm_id}' failed: {str(e)}\n{traceback.format_exc()}"

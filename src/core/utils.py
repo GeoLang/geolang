@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
+from src.core.errors import PathRefused
 from src.core.user_token import current_user_token
 
 logger = logging.getLogger(__name__)
@@ -249,10 +250,6 @@ def population_raster_path() -> str | None:
     return None
 
 
-class PathRefused(ValueError):
-    """A tool argument named a file the caller is not allowed to name."""
-
-
 def tool_input_path_or_none(argument: str, value: str) -> str | None:
     """The file `argument` names, or None when it names no file the caller has.
 
@@ -322,6 +319,21 @@ def caller_catalogue_file() -> Path:
     return Path(caller_user_data_dir()) / CATALOGUE_NAME
 
 
+def save_json(path, value) -> None:
+    """Write the file whole or leave the one already there.
+
+    Opening the target for writing truncates it first, so a process that dies
+    mid-write leaves a half-written file that no longer parses. The new copy is
+    written beside it and renamed over it, which cannot half-happen. It goes in
+    the same directory because a rename is only atomic within one filesystem.
+    """
+    path = Path(path)
+    partial = path.with_name(path.name + ".partial")
+    with open(partial, "w") as f:
+        json.dump(value, f, indent=2)
+    os.replace(partial, path)
+
+
 def load_catalogue() -> list:
     """What this caller has uploaded. Never anyone else's entries."""
     path = caller_catalogue_file()
@@ -332,20 +344,21 @@ def load_catalogue() -> list:
 
 
 def save_catalogue(catalogue: list) -> None:
-    with open(caller_catalogue_file(), "w") as f:
-        json.dump(catalogue, f, indent=2)
+    save_json(caller_catalogue_file(), catalogue)
 
 
 def load_shares() -> dict:
-    if os.path.exists(SHARES_FILE):
-        try:
-            with open(SHARES_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    """Every share on this instance.
+
+    A file that does not parse is left to raise rather than read as empty: an
+    empty one here is indistinguishable from no shares at all, and the next
+    save would write that back over every share the file still holds.
+    """
+    if not os.path.exists(SHARES_FILE):
+        return {}
+    with open(SHARES_FILE) as f:
+        return json.load(f)
 
 
 def save_shares(shares: dict) -> None:
-    with open(SHARES_FILE, "w") as f:
-        json.dump(shares, f, indent=2)
+    save_json(SHARES_FILE, shares)
