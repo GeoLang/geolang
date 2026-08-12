@@ -8,6 +8,7 @@ Base URL in development: `http://localhost:8080`. In the bundled platform deploy
 
 - Errors use FastAPI's default `{"detail": "..."}` shape with the HTTP status reflecting the failure mode (`503` if sibyl is unreachable, `404` for missing resources, `500` for unhandled exceptions).
 - All filesystem outputs land under `TOOL_EXEC_DIR/outputs/<caller>/`, one directory per token subject, and are served from `/outputs/{filename}` to that caller only. A file is named by its basename: the directory it lives in follows from the bearer, never from the path asked for.
+- `/geojson/{file}` and `/stats/{file}` look in the caller's own outputs directory, `user_data/` and its subdirectories, and every `natural_earth*` set on disk. Nothing else in the tree is served: a file loose at `TOOL_EXEC_DIR` itself is `404`.
 
 ## Chat
 

@@ -133,7 +133,7 @@ def layer_geojson(filename: str) -> dict | None:
     import geopandas as gpd
 
     path = resolve_under(
-        name_candidates(filename), geojson_search_dirs(), allowed_roots()
+        name_candidates(filename), layer_search_dirs(), allowed_roots()
     )
     if not path:
         return None
@@ -594,14 +594,32 @@ async def chat_agui(input: RunAgentInput, request: Request):
 # ── serving a file by name, without leaving the tree ─────────────────
 
 
+def natural_earth_dirs() -> list[str]:
+    """The reference sets on disk, whichever of them have been downloaded.
+
+    A glob rather than a list of names, so a set someone downloads next is
+    served without a code change. A set that arrives as a symlink is skipped:
+    it would resolve outside the tree and widen the boundary.
+    """
+    return [
+        str(path)
+        for path in sorted(Path(EXEC_DIR).glob("natural_earth*"))
+        if path.is_dir() and not path.is_symlink()
+    ]
+
+
 def allowed_roots() -> list[str]:
     """Directories a served file may resolve into.
 
-    user_data subdirs are deliberately not listed. Confinement to the parents
-    covers them, and a subdir that is itself a symlink must not be able to
-    widen the boundary.
+    `EXEC_DIR` is deliberately not listed. It is the whole tree, which puts
+    every other caller's outputs directory inside the boundary, so a name like
+    `outputs/<their-directory>/layer.gpkg` used to resolve and be served.
+
+    user_data subdirs are deliberately not listed either. Confinement to the
+    parents covers them, and a subdir that is itself a symlink must not be able
+    to widen the boundary.
     """
-    return [caller_outputs_dir(), str(USER_DATA_DIR), EXEC_DIR]
+    return [caller_outputs_dir(), str(USER_DATA_DIR), *natural_earth_dirs()]
 
 
 def name_candidates(filename: str) -> list[str]:
@@ -648,8 +666,12 @@ async def download_file(
     )
 
 
-def geojson_search_dirs() -> list[str]:
-    """Where a layer is looked up: outputs, user_data and the natural earth sets."""
+def layer_search_dirs() -> list[str]:
+    """Where a layer is looked up: the caller's outputs, user_data, natural earth.
+
+    `/geojson` and `/stats` read through this one list, so what one of them can
+    reach cannot drift from what the other can.
+    """
     user_data_subdirs = (
         [str(p) for p in USER_DATA_DIR.rglob("*") if p.is_dir()]
         if USER_DATA_DIR.exists()
@@ -659,11 +681,7 @@ def geojson_search_dirs() -> list[str]:
         caller_outputs_dir(),
         str(USER_DATA_DIR),
         *user_data_subdirs,
-        EXEC_DIR,
-        os.path.join(EXEC_DIR, "natural_earth"),
-        os.path.join(EXEC_DIR, "natural_earth_110m"),
-        os.path.join(EXEC_DIR, "natural_earth_50m"),
-        os.path.join(EXEC_DIR, "natural_earth_10m"),
+        *natural_earth_dirs(),
     ]
 
 
@@ -819,18 +837,8 @@ async def get_stats(
     """Return summary statistics for a vector layer."""
     import geopandas as gpd
 
-    user_data_subdirs = (
-        [str(p) for p in USER_DATA_DIR.rglob("*") if p.is_dir()]
-        if USER_DATA_DIR.exists()
-        else []
-    )
     with user_token_scope(bearer_token(authorization)):
-        search_dirs = [
-            caller_outputs_dir(),
-            str(USER_DATA_DIR),
-            *user_data_subdirs,
-            EXEC_DIR,
-        ]
+        search_dirs = layer_search_dirs()
         roots = allowed_roots()
 
     path = resolve_under(name_candidates(filename), search_dirs, roots)

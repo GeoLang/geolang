@@ -186,6 +186,41 @@ def test_the_user_data_subdirs_are_not_allowed_roots(tree):
     assert str(exec_dir / "user_data" / "nested") not in roots
 
 
+def test_the_tree_root_is_neither_a_root_nor_searched(tree):
+    server, exec_dir, _ = tree
+
+    # it contains every caller's outputs directory, so allowing it allows those
+    assert str(exec_dir) not in server.allowed_roots()
+    assert str(exec_dir) not in server.layer_search_dirs()
+
+
+def test_a_loose_file_at_the_tree_root_is_not_served(client, tree):
+    _, exec_dir, _ = tree
+    point(exec_dir / "stray.geojson")
+
+    assert client.get("/geojson/stray.geojson").status_code == 404
+    assert client.get("/stats/stray.geojson").status_code == 404
+
+
+def test_a_natural_earth_set_is_served_whatever_it_is_called(client, tree):
+    _, exec_dir, _ = tree
+    # a set the search list never spelled out by name, reached by the glob
+    directory = exec_dir / "natural_earth_110m_populated_places"
+    directory.mkdir()
+    point(directory / "ne_110m_populated_places.geojson", "london")
+
+    assert client.get("/geojson/ne_110m_populated_places.geojson").status_code == 200
+    assert client.get("/stats/ne_110m_populated_places.geojson").json()["count"] == 1
+
+
+def test_a_symlinked_natural_earth_set_cannot_widen_the_boundary(tree):
+    server, exec_dir, outside = tree
+    (exec_dir / "natural_earth_evil").symlink_to(outside)
+
+    assert str(exec_dir / "natural_earth_evil") not in server.allowed_roots()
+    assert status_of(server.get_geojson("secret.txt")) == 404
+
+
 # ── /outputs ─────────────────────────────────────────────────────────────
 
 
@@ -303,6 +338,20 @@ def test_no_subject_can_reach_the_anonymous_directory(gated, tree):
         " ",
     ):
         assert outputs_of(subject) != anonymous, subject
+
+
+def test_geojson_and_stats_refuse_another_callers_layer(client, gated, tree):
+    point(outputs_of("alice") / "sites.geojson")
+    # the path a caller would write to name a file in someone else's directory
+    named = f"outputs/{outputs_of('alice').name}/sites.geojson"
+
+    for route in ("/geojson", "/stats"):
+        assert client.get(f"{route}/{named}", headers=as_subject("alice")).status_code == 200
+        assert client.get(f"{route}/{named}", headers=as_subject("bob")).status_code == 404
+        assert (
+            client.get(f"{route}/sites.geojson", headers=as_subject("bob")).status_code
+            == 404
+        )
 
 
 def test_an_anonymous_caller_cannot_read_a_subjects_file(client, gated):
