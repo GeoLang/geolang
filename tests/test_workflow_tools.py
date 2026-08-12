@@ -13,6 +13,7 @@ import pytest
 import respx
 from pydantic import ValidationError
 
+from src.agents.tools._geodukt import operation_runs_caller_code
 from src.agents.tools.list_workflow_operations import (
     ListWorkflowOperationsArgs,
     list_workflow_operations,
@@ -72,6 +73,30 @@ name = "out"
 input = "wide"
 format = "gpkg"
 path = "outputs/two_step.gpkg"
+"""
+
+# geodukt has no sql_query operation, this package has a sql_query tool that runs
+# the model's SQL in the user's own browser
+ESCAPE_HATCH_MANIFEST = """
+[project]
+name = "ad-hoc"
+
+[[source]]
+name = "places"
+format = "geojson"
+path = "outputs/places.geojson"
+
+[[transform]]
+name = "big"
+input = "places"
+operation = "sql_query"
+sql = "SELECT * FROM places WHERE pop > 1000"
+
+[[sink]]
+name = "out"
+input = "big"
+format = "gpkg"
+path = "outputs/big_places.gpkg"
 """
 
 # an older geodukt build: a run status but no per-step one
@@ -390,6 +415,42 @@ def test_plan_still_works_without_the_validate_route(geodukt):
     assert plan["outputs"] == ["outputs/depot_catchment.gpkg"]
     # the panel needs this as a flag, not as prose in the summary
     assert plan["validated"] is False
+
+
+def test_a_step_that_runs_caller_code_is_labelled_in_the_plan(geodukt):
+    # a geodukt with /validate rejects an operation it does not have, so the
+    # label is what the panel has to go on when the build cannot check at all
+    geodukt(validate=(404, ""))
+
+    res = plan_workflow(ESCAPE_HATCH_MANIFEST)
+
+    plan = plan_of(res)
+    assert [s["runs_caller_code"] for s in plan["steps"]] == [False, True, False]
+    # and in the prose the model reads back, per step and once for the plan
+    assert "[escape hatch: runs caller-written code]" in res
+    assert "Escape hatch: big runs code you wrote" in res
+
+
+def test_an_ordinary_plan_carries_no_escape_hatch_label(geodukt):
+    geodukt(validate=(200, VALIDATED))
+
+    res = plan_workflow(MANIFEST)
+
+    assert [s["runs_caller_code"] for s in plan_of(res)["steps"]] == [
+        False,
+        False,
+        False,
+    ]
+    assert "escape hatch" not in res.lower()
+
+
+def test_the_label_follows_the_tools_own_declaration():
+    # not a list kept here: sql_query.py sets TOOL_RUNS_CALLER_CODE, spatial_join
+    # is a tool module too and does not
+    assert operation_runs_caller_code("sql_query") is True
+    assert operation_runs_caller_code("spatial_join") is False
+    assert operation_runs_caller_code("buffer") is False
+    assert operation_runs_caller_code(None) is False
 
 
 def test_run_workflow_reports_counts_and_outputs(geodukt):

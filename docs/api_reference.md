@@ -168,6 +168,8 @@ The agent joins as `agent:<caller sub>`, a short-lived identity geolang signs wi
 
 **Workflows**: `list_workflow_operations` (geodukt transform catalog), `plan_workflow` (validate a geodukt TOML manifest, emit the plan as a `__PLAN__` marker for approval), `run_workflow` (execute the approved manifest). Shared client code sits in `_geodukt.py`, which the loader skips because of the leading underscore.
 
+Every step of a `__PLAN__` payload carries `runs_caller_code`. It is true when the step's `operation` names a tool module that sets `TOOL_RUNS_CALLER_CODE = True`, so the panel can mark that step as an escape hatch before the user approves the plan, rather than the user having to trust the prose around it. The tool's own declaration is the only source, so there is no second list to drift. geodukt rejects any operation it does not have, so the flag can only be true on a build without `/validate`, where the plan is `validated: false` and nothing checked the manifest.
+
 **Export & discovery** — `export_to_gpkg`, `list_user_datasets`, `list_outputs`, `list_qgis_algorithms`, `check_qgis_status`, `run_qgis_algorithm`.
 
 **Escape hatches** — `geopandas_api` (arbitrary GeoPandas), `pyqgis_api` (arbitrary PyQGIS), `viewer_control` (raw viewer commands), `emit_ui_spec` (structured map hints).

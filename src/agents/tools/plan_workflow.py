@@ -14,6 +14,7 @@ from ._geodukt import (
     SUPPORTED_FORMATS,
     direct_tool_advice,
     error_detail,
+    escape_hatch_steps,
     geodukt_url,
     manifest_steps,
     order_steps,
@@ -120,6 +121,13 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
     ]
     if plan["outputs"]:
         lines.append(f"Writes: {', '.join(plan['outputs'])}")
+    hatches = escape_hatch_steps(plan)
+    if hatches:
+        lines.append(
+            f"Escape hatch: {', '.join(hatches)} runs code you wrote rather than "
+            "a geodukt operation. Say so in your own words before asking the user "
+            "to approve, and offer a manifest that does the same work instead."
+        )
     lines.append(
         "Nothing has run yet. Describe these steps to the user, then call "
         "run_workflow with the same manifest once they approve."

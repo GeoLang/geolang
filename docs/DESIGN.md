@@ -57,6 +57,8 @@ Two gaps the split does not close, both about tenants sharing an instance rather
 
 `/mcp` no longer offers `sql_query` at all, so what is left is the `/chat` path, where the SQL's author and the browser running it are the same person. A tool module declares itself with `TOOL_RUNS_CALLER_CODE = True` and the MCP endpoint drops it from both the manifest and the call path.
 
+The same declaration labels a workflow plan: every step of a `__PLAN__` payload carries `runs_caller_code`, so the approval panel marks a step that runs caller-written code instead of leaving it to the persona prose a model can ignore. Nothing is refused on that basis: geodukt's validator already rejects an operation it does not have, and where it cannot be consulted the label is what the user approves on.
+
 `/mcp` also takes a token of its own now, minted by `POST /mcp/token` and marked with a private `geolang_use` claim, so reaching an outside agent in is a deliberate act with an expiry rather than a paste of the token you already hold. What it is not is a reduced credential: tools call downstream with the token that arrived, so everywhere but this endpoint it is worth exactly what the minting token was worth. Narrowing that too needs per-tool scopes the platform has no notion of yet.
 
 Still open, and viewer-side rather than here: DuckDB-WASM will fetch any domain the SQL names, so a `/chat` user's own agent can be talked into reading `http://attacker.example/leak` or an address on their corporate network. An allowlist of fetchable domains belongs in the viewer.

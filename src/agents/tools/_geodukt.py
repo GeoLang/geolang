@@ -18,6 +18,10 @@ _REFUSED_OPERATION = re.compile(r"operation '([a-z0-9_]+)' which cannot run")
 # mirrors SUPPORTED_FORMATS in geodukt-io/src/formats.rs
 SUPPORTED_FORMATS = "csv, geojson, geopackage (gpkg), shapefile (shp)"
 
+# the charset geodukt allows in an operation name, so a manifest cannot name a
+# module outside this package
+_TOOL_NAME = re.compile(r"^[a-z0-9_]+$")
+
 
 def geodukt_url() -> str:
     return os.environ.get("GEODUKT_URL", DEFAULT_GEODUKT_URL).rstrip("/")
@@ -44,6 +48,28 @@ def direct_tool_advice(detail: str) -> str:
         f"for this. Call the {operation} tool directly instead, and tell the user "
         "you ran it as a single step rather than a workflow."
     )
+
+
+def operation_runs_caller_code(operation) -> bool:
+    """Whether a step's operation names a tool that runs caller-written code.
+
+    An operation name is a module name in this package, the same convention
+    direct_tool_advice relies on, so the tool's own TOOL_RUNS_CALLER_CODE
+    declaration decides and there is no second list to drift from it.
+    """
+    if not operation or not _TOOL_NAME.match(str(operation)):
+        return False
+    from pathlib import Path
+
+    if not (Path(__file__).parent / f"{operation}.py").exists():
+        return False
+
+    import importlib
+
+    from src.agents.agent_manager import runs_caller_code
+
+    module = importlib.import_module(f".{operation}", __package__)
+    return runs_caller_code(getattr(module, "TOOL_FUNCTION", None))
 
 
 def parse_manifest(manifest_toml: str):
@@ -158,14 +184,24 @@ def plan_payload(
     """Structured plan for the viewer, carrying the manifest run_workflow needs.
 
     `validated` is False when geodukt has no /validate route, so the panel can
-    say the plan was only parsed rather than checked.
+    say the plan was only parsed rather than checked. A step's
+    `runs_caller_code` says the same about that step: approving it hands
+    something the model wrote to whatever executes it, so the panel marks it
+    rather than leaving the user to trust the prose around the plan.
     """
     project = (manifest.get("project") or {}).get("name", "")
     return {
         "title": title or project or "workflow",
         "project": project,
         "validated": validated,
-        "steps": [dict(step, index=i + 1) for i, step in enumerate(steps)],
+        "steps": [
+            dict(
+                step,
+                index=i + 1,
+                runs_caller_code=operation_runs_caller_code(step["operation"]),
+            )
+            for i, step in enumerate(steps)
+        ],
         "datasets": [s["path"] for s in steps if s["kind"] == "source" and s["path"]],
         "outputs": [s["path"] for s in steps if s["kind"] == "sink" and s["path"]],
         "formats": sorted({s["format"] for s in steps if s.get("format")}),
@@ -240,5 +276,12 @@ def plan_summary(plan: dict) -> str:
                 text += f" ({params})"
         else:
             text = f"write {step['input']} to {step['path']} ({step['format']})"
+        if step.get("runs_caller_code"):
+            text += " [escape hatch: runs caller-written code]"
         lines.append(f"  {step['index']}. {text}")
     return "\n".join(lines)
+
+
+def escape_hatch_steps(plan: dict) -> list:
+    """Names of the plan's steps that run caller-written code."""
+    return [step["name"] for step in plan["steps"] if step.get("runs_caller_code")]
