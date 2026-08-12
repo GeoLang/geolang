@@ -134,7 +134,7 @@ written = []
 @pytest.fixture(autouse=True)
 def stubs(monkeypatch, tmp_path):
     """Cut the gated handlers down to nothing: no browser, no sibyl, no writes."""
-    monkeypatch.setattr(server, "USER_DATA_DIR", tmp_path / "user_data")
+    monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
 
     async def no_notify(text):

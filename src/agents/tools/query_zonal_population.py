@@ -24,7 +24,8 @@ class QueryZonalPopulationArgs(BaseModel):
         None,
         description=(
             "Path to a local GHSL GHS-POP GeoTIFF raster. "
-            "If omitted the tool looks for 'ghsl_pop.tif' in the exec dir or outputs/. "
+            "If omitted the tool looks for 'ghsl_pop.tif' in your own files or at the "
+            "project root. "
             "Download from: https://ghsl.jrc.ec.europa.eu/ghs_pop2023.php "
             "(R2023A epoch 2020, resolution 1km, Mollweide projection)."
         ),

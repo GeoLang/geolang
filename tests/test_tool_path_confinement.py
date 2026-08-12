@@ -36,8 +36,7 @@ def tree(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
-    monkeypatch.setattr(utils, "USER_DATA_DIR", tmp_path / "user_data")
-    (tmp_path / "user_data").mkdir()
+    monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "secret.gpkg").write_bytes(b"do not read me")

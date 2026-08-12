@@ -8,7 +8,7 @@ Base URL in development: `http://localhost:8080`. In the bundled platform deploy
 
 - Errors use FastAPI's default `{"detail": "..."}` shape with the HTTP status reflecting the failure mode (`503` if sibyl is unreachable, `404` for missing resources, `500` for unhandled exceptions).
 - All filesystem outputs land under `TOOL_EXEC_DIR/outputs/<caller>/`, one directory per token subject, and are served from `/outputs/{filename}` to that caller only. A file is named by its basename: the directory it lives in follows from the bearer, never from the path asked for.
-- `/geojson/{file}` and `/stats/{file}` look in the caller's own outputs directory, `user_data/` and its subdirectories, and every `natural_earth*` set on disk. Nothing else in the tree is served: a file loose at `TOOL_EXEC_DIR` itself is `404`.
+- `/geojson/{file}` and `/stats/{file}` look in the caller's own outputs directory, their own `user_data/<caller>/` and its subdirectories, and every `natural_earth*` set on disk. The natural earth sets are shared reference data, the other two are not. Nothing else in the tree is served: a file loose at `TOOL_EXEC_DIR`, or in the `outputs/` or `user_data/` root, is `404`.
 
 ## Chat
 
@@ -33,12 +33,12 @@ Sessions live in sibyl. These routes are proxies and keep no state of their own.
 
 ## Datasets
 
-User-uploaded files for the agent to operate on.
+User-uploaded files for the agent to operate on. Uploads are one directory per caller, `user_data/<caller>/`, named for the token subject exactly as the outputs directory is, so one caller is one name in both trees. A caller sees only their own uploads.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/datasets` | List catalogued datasets from `user_data/catalogue.json`. |
-| `POST` | `/upload` | Multipart upload; appends to the catalogue. |
+| `GET` | `/datasets` | List the caller's own catalogued datasets, from `user_data/<caller>/catalogue.json`. |
+| `POST` | `/upload` | Multipart upload into the caller's own directory; appends to their catalogue. |
 | `GET` | `/stats/{filename:path}` | Summary statistics for a vector dataset. |
 | `GET` | `/geojson/{filename:path}` | Serve a dataset as GeoJSON (with reprojection). |
 
@@ -188,7 +188,7 @@ Adding a tool is a single file: drop a module into `src/agents/tools/` exporting
 | `MCP_ALLOWED_HOSTS` | localhost only | Comma-separated `Host` values `/mcp` answers on, read at startup. A `host:*` entry matches any port. |
 | `AGORA_URL` | `http://agora:3000` | agora live document service. The websocket follows it, so `https` there means `wss`. |
 | `GEOLANG_PUBLIC_URL` | `/agent` | Where a browser reaches this service, used to build the `/live-data/{token}` URLs published into a document. |
-| `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O, outputs, catalogue. |
+| `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O. Holds the `outputs/` and `user_data/` roots, each one directory per caller. |
 | `APP_BASE_URL` | `http://localhost:8080` | URL Playwright loads for `/export-pdf` and `/export-png`. |
 | `PTOLEMY_URL` | `http://ptolemy:3000` | Ptolemy geodatabase endpoint (`ptolemy_query`). |
 | `PTOLEMY_API_TOKEN` | — | Optional bearer token when Ptolemy auth is enabled. |

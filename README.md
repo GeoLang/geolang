@@ -155,7 +155,7 @@ the standalone stack. Never set it where the port is reachable.
 `pyqgis_api`, `run_qgis_algorithm` and `sql_query` take expressions and
 algorithm parameters the caller chooses, so anyone holding a live token can
 compute arbitrary things and read and write everything under their own
-directory in `outputs/` and under `user_data/`. That is by design for a
+directories in `outputs/` and `user_data/`. That is by design for a
 geoprocessing agent. Scope the token
 short, never commit it, and rotate it like a key.
 
@@ -224,9 +224,16 @@ the token they presented. The executor is told which directory that is, since
 naming it needs the signing secret the executor does not have, and it refuses a
 name that is not a single directory of the expected shape.
 
+Uploads are split the same way. A caller uploads into `user_data/<caller>/`,
+under the same directory name as their outputs, with their own
+`catalogue.json` inside it. `/datasets`, `/upload`, `/draw` and
+`list_user_datasets` all see that caller's files and no one else's. Files left
+in the flat `user_data/` directory from before the split stay on disk and are
+no longer listed or served.
+
 A tool argument that names a file is a filename, not a path. It is looked up in
-the caller's own outputs directory, in `user_data/`, and in the natural earth
-reference sets, the same three places `/geojson` serves from. An absolute path
+the caller's own outputs directory, their own `user_data/` directory, and in the
+natural earth reference sets, the same three places `/geojson` serves from. An absolute path
 is refused with an error rather than opened, and an output filename carrying a
 directory part is refused rather than trimmed, so no two callers can be steered
 onto one file.

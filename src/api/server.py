@@ -71,13 +71,15 @@ from src.core.utils import (
     EXEC_DIR,
     LIVE_DATA_DIR,
     SIBYL_URL,
-    USER_DATA_DIR,
+    PathRefused,
     allowed_roots,
     caller_outputs_dir,
+    caller_user_data_dir,
     layer_search_dirs,
     load_catalogue,
     load_shares,
     name_candidates,
+    path_inside_directory,
     preload_geo_stack,
     resolve_under,
     save_catalogue,
@@ -674,106 +676,115 @@ async def get_live_data(token: str):
 
 
 @app.get("/datasets", dependencies=[Depends(platform_auth)])
-async def get_datasets():
-    return load_catalogue()
+async def get_datasets(authorization: Annotated[str | None, Header()] = None):
+    with user_token_scope(bearer_token(authorization)):
+        return load_catalogue()
 
 
 @app.post("/upload", dependencies=[Depends(platform_auth)])
-async def upload_dataset(file: UploadFile = File(...)):
-    import geopandas as gpd
-    import pandas as pd
+async def upload_dataset(
+    file: UploadFile = File(...),
+    authorization: Annotated[str | None, Header()] = None,
+):
+    # every path here is the caller's own: the directory, the catalogue
+    with user_token_scope(bearer_token(authorization)):
+        import geopandas as gpd
+        import pandas as pd
 
-    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        user_data = caller_user_data_dir()
+        # the multipart filename is the caller's to choose, directory part included
+        try:
+            raw_path = Path(path_inside_directory("filename", user_data, file.filename))
+        except PathRefused as e:
+            raise HTTPException(400, str(e))
 
-    suffix = Path(file.filename).suffix.lower()
-    stem = Path(file.filename).stem
-    content = await file.read()
+        suffix = raw_path.suffix.lower()
+        stem = raw_path.stem
+        content = await file.read()
+        with open(raw_path, "wb") as f:
+            f.write(content)
 
-    raw_path = USER_DATA_DIR / file.filename
-    with open(raw_path, "wb") as f:
-        f.write(content)
+        data_path = raw_path
 
-    data_path = raw_path
+        # Unzip shapefile bundles or GPKG zips
+        if suffix == ".zip":
+            extract_dir = Path(user_data) / stem
+            extract_dir.mkdir(exist_ok=True)
+            with zipfile.ZipFile(raw_path) as z:
+                z.extractall(extract_dir)
+            raw_path.unlink()
+            shp_files = list(extract_dir.rglob("*.shp"))
+            gpkg_files = list(extract_dir.rglob("*.gpkg"))
+            if shp_files:
+                data_path = shp_files[0]
+                stem = data_path.stem
+            elif gpkg_files:
+                data_path = gpkg_files[0]
+                stem = data_path.stem
+            else:
+                raise HTTPException(400, "No supported file found in zip")
 
-    # Unzip shapefile bundles or GPKG zips
-    if suffix == ".zip":
-        extract_dir = USER_DATA_DIR / stem
-        extract_dir.mkdir(exist_ok=True)
-        with zipfile.ZipFile(raw_path) as z:
-            z.extractall(extract_dir)
-        raw_path.unlink()
-        shp_files = list(extract_dir.rglob("*.shp"))
-        gpkg_files = list(extract_dir.rglob("*.gpkg"))
-        if shp_files:
-            data_path = shp_files[0]
-            stem = data_path.stem
-        elif gpkg_files:
-            data_path = gpkg_files[0]
-            stem = data_path.stem
-        else:
-            raise HTTPException(400, "No supported file found in zip")
-
-    # Convert CSV with lat/lon columns to GPKG
-    if suffix == ".csv":
-        df = pd.read_csv(data_path)
-        lat_col = next(
-            (c for c in df.columns if c.lower() in ("lat", "latitude", "y")), None
-        )
-        lon_col = next(
-            (c for c in df.columns if c.lower() in ("lon", "lng", "longitude", "x")),
-            None,
-        )
-        if not lat_col or not lon_col:
-            data_path.unlink()
-            raise HTTPException(
-                400, f"CSV needs lat/lon columns. Found: {list(df.columns)}"
+        # Convert CSV with lat/lon columns to GPKG
+        if suffix == ".csv":
+            df = pd.read_csv(data_path)
+            lat_col = next(
+                (c for c in df.columns if c.lower() in ("lat", "latitude", "y")), None
             )
-        gdf = gpd.GeoDataFrame(
-            df, geometry=gpd.points_from_xy(df[lon_col], df[lat_col]), crs="EPSG:4326"
-        )
-        gpkg_path = USER_DATA_DIR / f"{stem}.gpkg"
-        gdf.to_file(gpkg_path, driver="GPKG")
-        data_path.unlink()
-        data_path = gpkg_path
-
-    # Read metadata
-    try:
-        gdf = gpd.read_file(data_path)
-        if gdf.crs and gdf.crs.to_epsg() != 4326:
-            gdf = gdf.to_crs("EPSG:4326")
-            gdf.to_file(data_path, driver="GPKG")
-        geom_types = gdf.geometry.geom_type.dropna().value_counts()
-        cols = [c for c in gdf.columns if c != "geometry"]
-        metadata = {
-            "name": stem,
-            "filename": data_path.name,
-            "relative_path": str(data_path.relative_to(Path(EXEC_DIR))),
-            "geometry_type": geom_types.index[0] if len(geom_types) else "Unknown",
-            "crs": "EPSG:4326",
-            "columns": cols,
-            "bbox": list(map(float, gdf.total_bounds)),
-            "row_count": int(len(gdf)),
-            "uploaded_at": datetime.now().isoformat(),
-        }
-    except Exception as e:
-        if data_path.exists():
+            lon_col = next(
+                (c for c in df.columns if c.lower() in ("lon", "lng", "longitude", "x")),
+                None,
+            )
+            if not lat_col or not lon_col:
+                data_path.unlink()
+                raise HTTPException(
+                    400, f"CSV needs lat/lon columns. Found: {list(df.columns)}"
+                )
+            gdf = gpd.GeoDataFrame(
+                df, geometry=gpd.points_from_xy(df[lon_col], df[lat_col]), crs="EPSG:4326"
+            )
+            gpkg_path = Path(user_data) / f"{stem}.gpkg"
+            gdf.to_file(gpkg_path, driver="GPKG")
             data_path.unlink()
-        raise HTTPException(500, f"Could not read file: {e}")
+            data_path = gpkg_path
 
-    catalogue = load_catalogue()
-    catalogue = [d for d in catalogue if d["name"] != stem]
-    catalogue.append(metadata)
-    save_catalogue(catalogue)
+        # Read metadata
+        try:
+            gdf = gpd.read_file(data_path)
+            if gdf.crs and gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs("EPSG:4326")
+                gdf.to_file(data_path, driver="GPKG")
+            geom_types = gdf.geometry.geom_type.dropna().value_counts()
+            cols = [c for c in gdf.columns if c != "geometry"]
+            metadata = {
+                "name": stem,
+                "filename": data_path.name,
+                "relative_path": str(data_path.relative_to(Path(EXEC_DIR))),
+                "geometry_type": geom_types.index[0] if len(geom_types) else "Unknown",
+                "crs": "EPSG:4326",
+                "columns": cols,
+                "bbox": list(map(float, gdf.total_bounds)),
+                "row_count": int(len(gdf)),
+                "uploaded_at": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            if data_path.exists():
+                data_path.unlink()
+            raise HTTPException(500, f"Could not read file: {e}")
 
-    # Notify the agent about the new dataset
-    col_preview = ", ".join(cols[:10]) + ("..." if len(cols) > 10 else "")
-    await notify_agent(
-        f"[Dataset uploaded] '{stem}': {metadata['geometry_type']}, "
-        f"{metadata['row_count']} features, CRS: EPSG:4326, columns: {col_preview}. "
-        f"File path for tools: {metadata['relative_path']}"
-    )
+        catalogue = load_catalogue()
+        catalogue = [d for d in catalogue if d["name"] != stem]
+        catalogue.append(metadata)
+        save_catalogue(catalogue)
 
-    return metadata
+        # Notify the agent about the new dataset
+        col_preview = ", ".join(cols[:10]) + ("..." if len(cols) > 10 else "")
+        await notify_agent(
+            f"[Dataset uploaded] '{stem}': {metadata['geometry_type']}, "
+            f"{metadata['row_count']} features, CRS: EPSG:4326, columns: {col_preview}. "
+            f"Filename for tools: {metadata['filename']}"
+        )
+
+        return metadata
 
 
 @app.get("/stats/{filename:path}", dependencies=[Depends(platform_auth)])
@@ -913,61 +924,65 @@ class DrawRequest(BaseModel):
 
 
 @app.post("/draw", dependencies=[Depends(platform_auth)])
-async def save_drawn_area(request: DrawRequest):
-    """Save a GeoJSON feature drawn by the user on the map to a GPKG in user_data/."""
-    import geopandas as gpd
-    import re
+async def save_drawn_area(
+    request: DrawRequest, authorization: Annotated[str | None, Header()] = None
+):
+    """Save a GeoJSON feature drawn on the map to a GPKG in the caller's user_data."""
+    # every path here is the caller's own: the directory, the catalogue
+    with user_token_scope(bearer_token(authorization)):
+        import geopandas as gpd
+        import re
 
-    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        user_data = Path(caller_user_data_dir())
 
-    safe_name = re.sub(r"[^\w]", "_", request.name.strip())[:30] or "drawn_area"
-    gpkg_path = USER_DATA_DIR / f"{safe_name}.gpkg"
+        safe_name = re.sub(r"[^\w]", "_", request.name.strip())[:30] or "drawn_area"
+        gpkg_path = user_data / f"{safe_name}.gpkg"
 
-    try:
-        gdf = gpd.GeoDataFrame.from_features(
-            (
-                request.geojson.get("features", [request.geojson])
-                if request.geojson.get("type") == "FeatureCollection"
-                else [request.geojson]
-            ),
-            crs="EPSG:4326",
+        try:
+            gdf = gpd.GeoDataFrame.from_features(
+                (
+                    request.geojson.get("features", [request.geojson])
+                    if request.geojson.get("type") == "FeatureCollection"
+                    else [request.geojson]
+                ),
+                crs="EPSG:4326",
+            )
+            if gdf.empty:
+                raise ValueError("No features in drawn GeoJSON")
+            gdf.to_file(gpkg_path, driver="GPKG")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not save drawn area: {e}")
+
+        relative_path = str(gpkg_path.relative_to(Path(EXEC_DIR)))
+        geom_types = gdf.geometry.geom_type.dropna().value_counts()
+        metadata = {
+            "name": safe_name,
+            "filename": gpkg_path.name,
+            "relative_path": relative_path,
+            "geometry_type": geom_types.index[0] if len(geom_types) else "Unknown",
+            "crs": "EPSG:4326",
+            "columns": [],
+            "bbox": list(map(float, gdf.total_bounds)),
+            "row_count": int(len(gdf)),
+            "uploaded_at": datetime.now().isoformat(),
+        }
+
+        catalogue = load_catalogue()
+        catalogue = [d for d in catalogue if d["name"] != safe_name]
+        catalogue.append(metadata)
+        save_catalogue(catalogue)
+
+        # Notify the agent about the drawn area
+        bounds = gdf.total_bounds
+        center_lon = round(float((bounds[0] + bounds[2]) / 2), 4)
+        center_lat = round(float((bounds[1] + bounds[3]) / 2), 4)
+        await notify_agent(
+            f"[User drew a shape on the map] '{safe_name}': {metadata['geometry_type']}, "
+            f"center lon={center_lon}, lat={center_lat}. "
+            f"Filename for tools: {gpkg_path.name}"
         )
-        if gdf.empty:
-            raise ValueError("No features in drawn GeoJSON")
-        gdf.to_file(gpkg_path, driver="GPKG")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not save drawn area: {e}")
 
-    relative_path = str(gpkg_path.relative_to(Path(EXEC_DIR)))
-    geom_types = gdf.geometry.geom_type.dropna().value_counts()
-    metadata = {
-        "name": safe_name,
-        "filename": gpkg_path.name,
-        "relative_path": relative_path,
-        "geometry_type": geom_types.index[0] if len(geom_types) else "Unknown",
-        "crs": "EPSG:4326",
-        "columns": [],
-        "bbox": list(map(float, gdf.total_bounds)),
-        "row_count": int(len(gdf)),
-        "uploaded_at": datetime.now().isoformat(),
-    }
-
-    catalogue = load_catalogue()
-    catalogue = [d for d in catalogue if d["name"] != safe_name]
-    catalogue.append(metadata)
-    save_catalogue(catalogue)
-
-    # Notify the agent about the drawn area
-    bounds = gdf.total_bounds
-    center_lon = round(float((bounds[0] + bounds[2]) / 2), 4)
-    center_lat = round(float((bounds[1] + bounds[3]) / 2), 4)
-    await notify_agent(
-        f"[User drew a shape on the map] '{safe_name}': {metadata['geometry_type']}, "
-        f"center lon={center_lon}, lat={center_lat}. "
-        f"File path for tools: {relative_path}"
-    )
-
-    return metadata
+        return metadata
 
 
 class ExportPDFRequest(BaseModel):

@@ -25,8 +25,9 @@ SHARES_FILE = os.path.join(EXEC_DIR, ".shares.json")
 # layer data published to a live document, readable without a platform token by
 # whoever holds the file's token
 LIVE_DATA_DIR = Path(EXEC_DIR) / "live_data"
-USER_DATA_DIR = Path(EXEC_DIR) / "user_data"
-CATALOGUE_FILE = USER_DATA_DIR / "catalogue.json"
+# one directory per caller, never written to directly, same as OUTPUTS_ROOT
+USER_DATA_ROOT = Path(EXEC_DIR) / "user_data"
+CATALOGUE_NAME = "catalogue.json"
 
 
 ANONYMOUS_OUTPUTS_DIRECTORY = "anonymous"
@@ -103,6 +104,17 @@ def caller_outputs_dir() -> str:
     return directory
 
 
+def caller_user_data_dir() -> str:
+    """Where the caller of this call uploads and reads datasets, created if absent.
+
+    The same directory name as their outputs, from the same subject, so one
+    caller is one name in both trees.
+    """
+    directory = os.path.join(str(USER_DATA_ROOT), current_caller_directory())
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
 def _warn_about_shared_outputs() -> None:
     """Say once that this process cannot tell its callers apart."""
     from src.core.auth import SECRET_ENV, authentication_disabled
@@ -171,32 +183,29 @@ def natural_earth_dirs() -> list[str]:
 def allowed_roots() -> list[str]:
     """Directories a named file may resolve into, for a route or a tool argument.
 
-    `EXEC_DIR` is deliberately not listed. It is the whole tree, which puts
-    every other caller's outputs directory inside the boundary, so a name like
-    `outputs/<their-directory>/layer.gpkg` used to resolve.
+    `EXEC_DIR` is deliberately not listed, and neither are the two roots that
+    hold one directory per caller. Each is a parent of everybody's files, so a
+    name like `outputs/<their-directory>/layer.gpkg` would resolve.
 
     user_data subdirs are deliberately not listed either. Confinement to the
-    parents covers them, and a subdir that is itself a symlink must not be able
-    to widen the boundary.
+    caller's own directory covers them, and a subdir that is itself a symlink
+    must not be able to widen the boundary.
     """
-    return [caller_outputs_dir(), str(USER_DATA_DIR), *natural_earth_dirs()]
+    return [caller_outputs_dir(), caller_user_data_dir(), *natural_earth_dirs()]
 
 
 def layer_search_dirs() -> list[str]:
-    """Where a layer is looked up: the caller's outputs, user_data, natural earth.
+    """Where a layer is looked up: the caller's own two directories, then the sets.
 
     The routes and the tools read through this one list, so what one of them can
-    reach cannot drift from what the other can.
+    reach cannot drift from what the other can. The subdirs are searched because
+    an uploaded zip extracts into one.
     """
-    user_data_subdirs = (
-        [str(p) for p in USER_DATA_DIR.rglob("*") if p.is_dir()]
-        if USER_DATA_DIR.exists()
-        else []
-    )
+    user_data = Path(caller_user_data_dir())
     return [
         caller_outputs_dir(),
-        str(USER_DATA_DIR),
-        *user_data_subdirs,
+        str(user_data),
+        *[str(p) for p in user_data.rglob("*") if p.is_dir()],
         *natural_earth_dirs(),
     ]
 
@@ -223,13 +232,16 @@ POPULATION_RASTER_NAMES = (
 
 
 def population_raster_path() -> str | None:
-    """The shared GHS-POP raster, or None when nobody has put one on disk.
+    """The caller's own GHS-POP raster, else the shared one, else None.
 
-    Reference data rather than anyone's file, and the names are fixed here
-    rather than taken from a caller. That is why the exec dir root is searched
-    at all: nothing a caller writes may name a file there.
+    The tree root is searched because that is where a deployment drops the
+    shared copy, and the names are fixed here rather than taken from a caller,
+    so nothing a caller writes chooses what is opened there. The `user_data`
+    root is not searched: since it became one directory per caller it is a
+    parent of everybody's uploads rather than a place a deployment puts
+    reference data.
     """
-    for directory in (caller_outputs_dir(), str(USER_DATA_DIR), EXEC_DIR):
+    for directory in (caller_outputs_dir(), caller_user_data_dir(), EXEC_DIR):
         for name in POPULATION_RASTER_NAMES:
             candidate = os.path.join(directory, name)
             if os.path.exists(candidate):
@@ -276,40 +288,51 @@ def tool_input_path(argument: str, value: str) -> str:
     return path
 
 
-def tool_output_path(argument: str, filename: str) -> str:
-    """Where a tool writes `filename`, always inside the caller's own directory.
+def path_inside_directory(argument: str, directory: str, filename: str) -> str:
+    """Where `filename` goes inside `directory`, or a refusal if it could land elsewhere.
 
     A name carrying a directory part is refused rather than cut down to its
     basename: two callers asking for two different paths would otherwise land
     on one file. The resolved path is checked too, so a name that is already a
-    symlink to somewhere else is written through rather than followed.
+    symlink to somewhere else is refused rather than written through.
     """
     single_component = filename and filename == os.path.basename(filename)
     if not single_component or filename in (".", ".."):
         raise PathRefused(
-            f"{argument} names a file inside your own outputs directory, so it "
-            f"must be one filename with no directory part: '{filename}'"
+            f"{argument} names a file inside your own directory, so it must be "
+            f"one filename with no directory part: '{filename}'"
         )
-    directory = Path(caller_outputs_dir())
-    path = directory / filename
-    if not path.resolve().is_relative_to(directory.resolve()):
+    base = Path(directory)
+    path = base / filename
+    if not path.resolve().is_relative_to(base.resolve()):
         raise PathRefused(
             f"{argument} names '{filename}', which already points out of your "
-            "outputs directory. Pick another name."
+            "own directory. Pick another name."
         )
     return str(path)
 
 
+def tool_output_path(argument: str, filename: str) -> str:
+    """Where a tool writes `filename`, always inside the caller's outputs directory."""
+    return path_inside_directory(argument, caller_outputs_dir(), filename)
+
+
+def caller_catalogue_file() -> Path:
+    """The catalogue of the caller's own uploads, one per user_data directory."""
+    return Path(caller_user_data_dir()) / CATALOGUE_NAME
+
+
 def load_catalogue() -> list:
-    if not CATALOGUE_FILE.exists():
+    """What this caller has uploaded. Never anyone else's entries."""
+    path = caller_catalogue_file()
+    if not path.exists():
         return []
-    with open(CATALOGUE_FILE) as f:
+    with open(path) as f:
         return json.load(f)
 
 
 def save_catalogue(catalogue: list) -> None:
-    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CATALOGUE_FILE, "w") as f:
+    with open(caller_catalogue_file(), "w") as f:
         json.dump(catalogue, f, indent=2)
 
 

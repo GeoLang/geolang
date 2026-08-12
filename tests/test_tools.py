@@ -114,7 +114,7 @@ def stub_services(monkeypatch, tmp_path):
     # the tree dirs are read once at import, so the env var alone misses them
     monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
-    monkeypatch.setattr(utils, "USER_DATA_DIR", tmp_path / "user_data")
+    monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
     monkeypatch.setitem(sys.modules, "osmnx", _FakeOsmnx())
     return tmp_path
 

@@ -35,7 +35,7 @@ def tree(monkeypatch, tmp_path):
     """A throwaway exec dir, plus a secret next door that must stay unreachable."""
     exec_dir = tmp_path / "exec"
     (exec_dir / "outputs").mkdir(parents=True)
-    (exec_dir / "user_data" / "nested").mkdir(parents=True)
+    (exec_dir / "user_data").mkdir(parents=True)
 
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -67,6 +67,13 @@ def outputs_of(subject=None):
     token = token_for(subject) if subject else None
     with user_token_scope(token):
         return Path(utils.caller_outputs_dir())
+
+
+def user_data_of(subject=None):
+    """The user_data directory of `subject`, or of an anonymous caller."""
+    token = token_for(subject) if subject else None
+    with user_token_scope(token):
+        return Path(utils.caller_user_data_dir())
 
 
 def token_for(subject):
@@ -180,10 +187,20 @@ def test_resolve_under_keeps_the_gpkg_fallback(tree):
 
 def test_the_user_data_subdirs_are_not_allowed_roots(tree):
     server, exec_dir, _ = tree
-    roots = server.allowed_roots()
+    nested = user_data_of() / "nested"
+    nested.mkdir()
 
-    # confinement is to the parents, so a symlinked subdir cannot widen it
-    assert str(exec_dir / "user_data" / "nested") not in roots
+    # confinement is to the caller's own directory, so a symlinked subdir of it
+    # cannot widen the boundary
+    assert str(nested) not in server.allowed_roots()
+
+
+def test_the_user_data_root_is_neither_a_root_nor_searched(tree):
+    server, exec_dir, _ = tree
+
+    # it holds every caller's uploads, the same as the outputs root
+    assert str(exec_dir / "user_data") not in server.allowed_roots()
+    assert str(exec_dir / "user_data") not in server.layer_search_dirs()
 
 
 def test_the_tree_root_is_neither_a_root_nor_searched(tree):
@@ -354,12 +371,159 @@ def test_geojson_and_stats_refuse_another_callers_layer(client, gated, tree):
         )
 
 
+def test_geojson_and_stats_refuse_another_callers_upload(client, gated, tree):
+    point(user_data_of("alice") / "parcels.geojson")
+    named = f"user_data/{user_data_of('alice').name}/parcels.geojson"
+
+    for route in ("/geojson", "/stats"):
+        assert client.get(f"{route}/{named}", headers=as_subject("alice")).status_code == 200
+        assert client.get(f"{route}/{named}", headers=as_subject("bob")).status_code == 404
+        assert (
+            client.get(f"{route}/parcels.geojson", headers=as_subject("bob")).status_code
+            == 404
+        )
+
+
+def test_a_caller_gets_the_same_directory_name_in_both_trees(gated, tree):
+    """One subject is one name, so nothing has to map between the two trees."""
+    assert user_data_of("alice").name == outputs_of("alice").name
+    assert user_data_of("alice").name != user_data_of("bob").name
+
+
+def test_an_upload_left_in_the_flat_directory_is_not_served(client, gated, tree):
+    """Files from before the split stay on disk, unlisted and unserved."""
+    _, exec_dir, _ = tree
+    point(exec_dir / "user_data" / "legacy.geojson", "legacy")
+
+    for route in ("/geojson", "/stats"):
+        assert client.get(f"{route}/legacy.geojson", headers=as_subject("alice")).status_code == 404
+        assert (
+            client.get(
+                f"{route}/user_data/legacy.geojson", headers=as_subject("alice")
+            ).status_code
+            == 404
+        )
+
+
 def test_an_anonymous_caller_cannot_read_a_subjects_file(client, gated):
     (outputs_of("alice") / "alice.txt").write_text("alice's")
 
     # the gate answers first, but the directory would not have matched either
     assert client.get("/outputs/alice.txt").status_code == 401
     assert outputs_of() != outputs_of("alice")
+
+
+# ── uploads ──────────────────────────────────────────────────────────────
+#
+# user_data is one directory per caller too, so an upload and the catalogue that
+# lists it both belong to whoever presented the bearer
+
+
+@pytest.fixture
+def quiet_agent(monkeypatch):
+    """The upload route tells the agent about the file, and there is none here."""
+
+    async def no_notify(text):
+        return None
+
+    monkeypatch.setattr(importlib.import_module("src.api.server"), "notify_agent", no_notify)
+
+
+def upload(client, subject, name):
+    body = (
+        '{"type":"FeatureCollection","features":[{"type":"Feature",'
+        '"properties":{"name":"%s"},'
+        '"geometry":{"type":"Point","coordinates":[1.0,2.0]}}]}' % name
+    )
+    return client.post(
+        "/upload",
+        files={"file": (f"{name}.geojson", body.encode(), "application/geo+json")},
+        headers=as_subject(subject),
+    )
+
+
+def test_an_upload_lands_in_the_callers_own_directory(client, gated, tree, quiet_agent):
+    _, exec_dir, _ = tree
+
+    assert upload(client, "alice", "parcels").status_code == 200
+
+    assert (user_data_of("alice") / "parcels.geojson").exists()
+    assert not (exec_dir / "user_data" / "parcels.geojson").exists()
+
+
+def test_an_upload_filename_cannot_climb_out_of_the_directory(client, gated, tree, quiet_agent):
+    """The multipart filename is the caller's to choose, directory part included."""
+    _, exec_dir, _ = tree
+    body = b'{"type":"FeatureCollection","features":[]}'
+
+    for name in ("../../outside/planted.geojson", "sub/planted.geojson"):
+        response = client.post(
+            "/upload",
+            files={"file": (name, body, "application/geo+json")},
+            headers=as_subject("alice"),
+        )
+        assert response.status_code == 400, name
+
+    assert not (exec_dir.parent / "outside" / "planted.geojson").exists()
+    assert list(user_data_of("alice").iterdir()) == []
+
+
+def test_a_catalogue_holds_only_its_own_callers_entries(client, gated, tree, quiet_agent):
+    upload(client, "alice", "alices_parcels")
+    upload(client, "bob", "bobs_parcels")
+
+    alice = client.get("/datasets", headers=as_subject("alice")).json()
+    bob = client.get("/datasets", headers=as_subject("bob")).json()
+
+    assert [d["name"] for d in alice] == ["alices_parcels"]
+    assert [d["name"] for d in bob] == ["bobs_parcels"]
+
+
+def test_an_upload_is_not_readable_by_another_caller(client, gated, tree, quiet_agent):
+    upload(client, "alice", "alices_parcels")
+
+    for route in ("/geojson", "/stats"):
+        assert (
+            client.get(f"{route}/alices_parcels.geojson", headers=as_subject("alice")).status_code
+            == 200
+        )
+        assert (
+            client.get(f"{route}/alices_parcels.geojson", headers=as_subject("bob")).status_code
+            == 404
+        )
+
+
+def test_the_tool_lists_only_the_callers_own_datasets(client, gated, tree, quiet_agent):
+    from src.agents.tools.list_user_datasets import list_user_datasets
+
+    upload(client, "alice", "alices_parcels")
+    upload(client, "bob", "bobs_parcels")
+
+    with user_token_scope(token_for("bob")):
+        listed = list_user_datasets()
+
+    assert "bobs_parcels" in listed
+    assert "alices_parcels" not in listed
+
+
+def test_a_drawn_shape_lands_in_the_callers_own_directory(client, gated, tree, quiet_agent):
+    _, exec_dir, _ = tree
+    drawn = {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {"type": "Point", "coordinates": [1.0, 2.0]},
+    }
+
+    response = client.post(
+        "/draw",
+        json={"geojson": drawn, "name": "plot"},
+        headers=as_subject("alice"),
+    )
+
+    assert response.status_code == 200
+    assert (user_data_of("alice") / "plot.gpkg").exists()
+    assert not (exec_dir / "user_data" / "plot.gpkg").exists()
+    assert client.get("/geojson/plot.gpkg", headers=as_subject("bob")).status_code == 404
 
 
 # ── /geojson ─────────────────────────────────────────────────────────────
@@ -376,10 +540,12 @@ def test_geojson_serves_a_file_from_outputs(client, tree):
 
 
 def test_geojson_serves_a_file_from_a_user_data_subdir(client, tree):
+    """An uploaded zip extracts into a subdir, so the search has to reach one."""
     _, exec_dir, _ = tree
-    point(exec_dir / "user_data" / "nested" / "parcels.geojson", "parcel")
+    nested = user_data_of() / "nested"
+    nested.mkdir()
+    point(nested / "parcels.geojson", "parcel")
 
-    # the rglob search still reaches it, confinement to user_data allows it
     response = client.get("/geojson/parcels.geojson")
 
     assert response.status_code == 200

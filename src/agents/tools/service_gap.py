@@ -52,7 +52,8 @@ class ServiceGapArgs(BaseModel):
         False,
         description=(
             "If True, weight gap cells by population density using a population raster "
-            "in user_data/ (ghsl_pop.tif). Requires that file to exist."
+            "(ghsl_pop.tif) in your user_data/ or at the project root. Requires "
+            "that file to exist."
         ),
     )
     output_filename: Optional[str] = Field(

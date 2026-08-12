@@ -17,7 +17,7 @@ def outputs(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
-    monkeypatch.setattr(utils, "USER_DATA_DIR", tmp_path / "user_data")
+    monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
     # the caller's own directory, which is where a layer of theirs is looked up
     out = pathlib.Path(utils.caller_outputs_dir())
     (out / "buffer.gpkg").write_bytes(b"stub")
