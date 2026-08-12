@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.utils import caller_outputs_dir
 
 
 class BufferClipDissolveArgs(BaseModel):
@@ -36,11 +37,10 @@ def buffer_clip_dissolve(
     import geopandas as gpd
     from shapely.geometry import Point
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
     # Ensure .gpkg extension
     if not output_filename.lower().endswith(".gpkg"):
         output_filename = output_filename + ".gpkg"
-    output_path = os.path.join(exec_dir, "outputs", output_filename)
+    output_path = os.path.join(caller_outputs_dir(), output_filename)
 
     try:
         # Build buffer polygon in metric CRS (EPSG:3857)

@@ -216,9 +216,10 @@ process, which is fine for a single tenant and is what the standalone stack, the
 test suite and the eval harness do. With the gate on and no executor configured
 the API logs a warning naming what that costs, and keeps running.
 
-Two remaining gaps once the executor is in place: a tool still holds the
-caller's own bearer while it runs, and `outputs/` is one directory shared by
-every user of the instance.
+One remaining gap once the executor is in place: a tool still holds the
+caller's own bearer while it runs. Outputs are no longer shared, each caller
+reads and writes their own directory under `outputs/`, keyed on the subject of
+the token they presented.
 
 ### MCP for outside agents
 

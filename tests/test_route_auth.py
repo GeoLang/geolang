@@ -22,6 +22,7 @@ import respx
 from fastapi.testclient import TestClient
 
 from src.api import server
+from src.core import utils
 from src.core.auth import SECRET_ENV, platform_auth
 
 client = TestClient(server.app)
@@ -134,8 +135,7 @@ written = []
 def stubs(monkeypatch, tmp_path):
     """Cut the gated handlers down to nothing: no browser, no sibyl, no writes."""
     monkeypatch.setattr(server, "USER_DATA_DIR", tmp_path / "user_data")
-    monkeypatch.setattr(server, "OUTPUTS_DIR", str(tmp_path / "outputs"))
-    (tmp_path / "outputs").mkdir()
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
 
     async def no_notify(text):
         return None

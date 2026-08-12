@@ -57,7 +57,7 @@ Because the reload happens per request, **editing a file in `src/agents/tools/` 
 - **Conversation history and sessions** — owned by sibyl. GeoLang's `/sessions/*` routes are proxies, they store nothing.
 - **Persona** — `PERSONA` in [`agent_manager.py`](../src/agents/agent_manager.py), sent as `system_prompt` on every run, so prompt edits take effect on the next message.
 - **User datasets** — `user_data/catalogue.json` lists uploaded files; the actual files live in `user_data/`.
-- **Outputs** — tool results (GeoJSON, GPKG, rendered images) land in `outputs/` and are served at `/outputs/{filename}`.
+- **Outputs** — tool results (GeoJSON, GPKG, rendered images) land in the caller's own directory under `outputs/` and are served to that caller at `/outputs/{filename}`.
 
 ## Surface boundaries
 

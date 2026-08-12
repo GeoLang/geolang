@@ -6,7 +6,10 @@ directories. Every lookup goes through `resolve_under`, which resolves both
 sides and drops anything landing outside the allowed roots, so `..`, an absolute
 name and a symlink out of the tree all read as "not found".
 
-The routes read `OUTPUTS_DIR` and friends at call time, so these tests point
+Outputs are one directory per caller, so a name is looked up in the directory of
+whoever presented the bearer, and never in the parent that holds all of them.
+
+The routes read `OUTPUTS_ROOT` and friends at call time, so these tests point
 `TOOL_EXEC_DIR` at a tmp_path and reload the modules that cached them.
 """
 
@@ -14,12 +17,17 @@ import asyncio
 import importlib
 import os
 import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+import jwt
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.core import utils
+from src.core.auth import SECRET_ENV
+from src.core.user_token import user_token_scope
 
 
 @pytest.fixture
@@ -49,6 +57,29 @@ def tree(monkeypatch, tmp_path):
 def client(tree):
     server, _, _ = tree
     return TestClient(server.app)
+
+
+SECRET = "test-platform-secret-0123456789ab"
+
+
+def outputs_of(subject=None):
+    """The outputs directory of `subject`, or of an anonymous caller."""
+    token = token_for(subject) if subject else None
+    with user_token_scope(token):
+        return Path(utils.caller_outputs_dir())
+
+
+def token_for(subject):
+    """A live platform token for `subject`, signed the way ptolemy signs one."""
+    return jwt.encode(
+        {"sub": subject, "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        SECRET,
+        algorithm="HS256",
+    )
+
+
+def as_subject(subject):
+    return {"Authorization": f"Bearer {token_for(subject)}"}
 
 
 def status_of(coro):
@@ -160,7 +191,7 @@ def test_the_user_data_subdirs_are_not_allowed_roots(tree):
 
 def test_outputs_serves_a_file(client, tree):
     _, exec_dir, _ = tree
-    (exec_dir / "outputs" / "report.txt").write_text("hello")
+    (outputs_of() / "report.txt").write_text("hello")
 
     response = client.get("/outputs/report.txt")
 
@@ -183,7 +214,7 @@ def test_outputs_refuses_an_absolute_path(tree):
 
 def test_outputs_refuses_a_symlink_out_of_the_tree(tree):
     server, exec_dir, outside = tree
-    (exec_dir / "outputs" / "escape.txt").symlink_to(outside / "secret.txt")
+    (outputs_of() / "escape.txt").symlink_to(outside / "secret.txt")
 
     assert status_of(server.get_output("escape.txt")) == 404
 
@@ -201,12 +232,93 @@ def test_outputs_refuses_encoded_separators_end_to_end(client):
         assert "do not serve me" not in response.text
 
 
+# ── one directory per caller ─────────────────────────────────────────────
+#
+# the gate is on for these: a subject only exists when the token verifies
+
+
+@pytest.fixture
+def gated(monkeypatch):
+    monkeypatch.setenv(SECRET_ENV, SECRET)
+
+
+def test_outputs_serves_only_the_callers_own_file(client, gated):
+    (outputs_of("alice") / "alice.txt").write_text("alice's")
+    (outputs_of("bob") / "bob.txt").write_text("bob's")
+
+    assert client.get("/outputs/alice.txt", headers=as_subject("alice")).text == "alice's"
+    assert client.get("/outputs/alice.txt", headers=as_subject("bob")).status_code == 404
+    assert client.get("/outputs/bob.txt", headers=as_subject("alice")).status_code == 404
+
+
+def test_download_serves_only_the_callers_own_file(client, gated):
+    (outputs_of("alice") / "alice.gpkg").write_text("alice's")
+
+    assert client.get("/download/alice.gpkg", headers=as_subject("alice")).text == "alice's"
+    assert client.get("/download/alice.gpkg", headers=as_subject("bob")).status_code == 404
+    # the bare name the viewer links to must not find it either
+    assert client.get("/download/alice", headers=as_subject("bob")).status_code == 404
+
+
+def test_a_caller_cannot_climb_into_another_directory(gated, tree):
+    # the routes are called directly: httpx normalizes `..` out of a url, so a
+    # traversal sent through the client would never reach the check
+    server, _, _ = tree
+    (outputs_of("alice") / "alice.txt").write_text("alice's")
+    alice_directory = outputs_of("alice").name
+    bob = f"Bearer {token_for('bob')}"
+
+    for attempt in (
+        f"../{alice_directory}/alice.txt",
+        f"../../outputs/{alice_directory}/alice.txt",
+        str(outputs_of("alice") / "alice.txt"),
+    ):
+        assert status_of(server.get_output(attempt, bob)) == 404, attempt
+        assert status_of(server.download_file(attempt, bob)) == 404, attempt
+
+
+def test_a_subject_that_names_a_path_stays_in_the_outputs_root(gated, tree):
+    _, exec_dir, _ = tree
+    outputs_root = exec_dir / "outputs"
+
+    for subject in ("../../escape", "..", "a/b/c", "/etc/passwd"):
+        directory = outputs_of(subject)
+        assert directory.parent == outputs_root, subject
+        assert directory.exists()
+
+
+def test_subjects_that_sanitize_alike_get_different_directories(gated, tree):
+    # both sides sanitize to the same string, so only the digest keeps them apart
+    assert outputs_of("a/b") != outputs_of("a:b")
+    assert outputs_of("../x") != outputs_of("__/x")
+
+
+def test_no_subject_can_reach_the_anonymous_directory(gated, tree):
+    anonymous = outputs_of()
+
+    for subject in (
+        utils.ANONYMOUS_OUTPUTS_DIRECTORY,
+        f"{utils.ANONYMOUS_OUTPUTS_DIRECTORY}/",
+        f"/{utils.ANONYMOUS_OUTPUTS_DIRECTORY}",
+        " ",
+    ):
+        assert outputs_of(subject) != anonymous, subject
+
+
+def test_an_anonymous_caller_cannot_read_a_subjects_file(client, gated):
+    (outputs_of("alice") / "alice.txt").write_text("alice's")
+
+    # the gate answers first, but the directory would not have matched either
+    assert client.get("/outputs/alice.txt").status_code == 401
+    assert outputs_of() != outputs_of("alice")
+
+
 # ── /geojson ─────────────────────────────────────────────────────────────
 
 
 def test_geojson_serves_a_file_from_outputs(client, tree):
     _, exec_dir, _ = tree
-    point(exec_dir / "outputs" / "depots.geojson", "depot")
+    point(outputs_of() / "depots.geojson", "depot")
 
     response = client.get("/geojson/depots.geojson")
 
@@ -241,14 +353,14 @@ def test_geojson_refuses_an_absolute_path(tree):
 
 def test_geojson_refuses_a_symlink_out_of_the_tree(tree):
     server, exec_dir, outside = tree
-    (exec_dir / "outputs" / "escape.geojson").symlink_to(outside / "secret.txt")
+    (outputs_of() / "escape.geojson").symlink_to(outside / "secret.txt")
 
     assert status_of(server.get_geojson("escape.geojson")) == 404
 
 
 def test_geojson_does_not_echo_the_reader_error(client, tree):
     _, exec_dir, _ = tree
-    junk = exec_dir / "outputs" / "junk.geojson"
+    junk = outputs_of() / "junk.geojson"
     junk.write_text("SUPERSECRETCONTENT")
 
     response = client.get("/geojson/junk.geojson")
@@ -263,7 +375,7 @@ def test_geojson_does_not_echo_the_parse_position(client, tree):
     _, exec_dir, _ = tree
     # on a parse failure the reader names the offending character and its
     # offset, which is one byte of file content per request
-    (exec_dir / "outputs" / "bad.geojson").write_text(
+    (outputs_of() / "bad.geojson").write_text(
         '{"type":"FeatureCollection","features":[ZLEAK]}'
     )
 
@@ -302,9 +414,7 @@ def test_live_data_serves_a_published_layer(client, tree):
 
 def test_live_data_needs_no_token_of_the_callers_own(client, tree, monkeypatch):
     """A share link guest in a live document never signs in."""
-    from src.core.auth import SECRET_ENV
-
-    monkeypatch.setenv(SECRET_ENV, "test-platform-secret-0123456789ab")
+    monkeypatch.setenv(SECRET_ENV, SECRET)
     _, exec_dir, _ = tree
     published(exec_dir, TOKEN)
 
@@ -357,7 +467,7 @@ def test_live_data_refuses_a_symlink_out_of_the_tree(tree):
 
 def test_stats_reads_a_file_from_outputs(client, tree):
     _, exec_dir, _ = tree
-    point(exec_dir / "outputs" / "sites.geojson")
+    point(outputs_of() / "sites.geojson")
 
     response = client.get("/stats/sites.geojson")
 
@@ -380,7 +490,7 @@ def test_stats_refuses_an_absolute_path(tree):
 
 def test_stats_does_not_echo_the_reader_error(client, tree):
     _, exec_dir, _ = tree
-    junk = exec_dir / "outputs" / "junk.geojson"
+    junk = outputs_of() / "junk.geojson"
     junk.write_text("SUPERSECRETCONTENT")
 
     response = client.get("/stats/junk.geojson")

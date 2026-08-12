@@ -2,6 +2,7 @@ import os
 import json
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.utils import caller_outputs_dir
 
 
 class RunQGISAlgorithmArgs(BaseModel):
@@ -56,9 +57,7 @@ def run_qgis_algorithm(
     except Exception as e:
         return f"ERROR: Invalid JSON parameters: {str(e)}"
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    out_dir = os.path.join(exec_dir, "outputs")
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = caller_outputs_dir()
 
     if "OUTPUT" not in params:
         safe_name = algorithm_id.replace(":", "_").replace("/", "_")

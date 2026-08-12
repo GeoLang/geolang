@@ -41,7 +41,9 @@ Arguments are validated on both sides. The API's copy fails fast and keeps an un
 
 Unset, tools run in the API process, which is the standalone stack, the test suite, the eval harness and any single-tenant self-host. Nothing in the process can tell one deployment from the other, so this is not refused: the API logs a warning naming the cost when the gate is on and no executor is configured.
 
-Two gaps the split does not close, both about tenants sharing an instance rather than about the signing secret: a tool holds the caller's own bearer while it runs, and `outputs/` is one directory every user reads and writes.
+One gap the split does not close, about tenants sharing an instance rather than about the signing secret: a tool holds the caller's own bearer while it runs.
+
+`outputs/` is one directory per caller, named for the `sub` of the token that arrived and created on first use. The routes that serve a file by name resolve it inside that directory, so one user's filenames and files are not another's to list or fetch. A caller with no verified subject, which is every caller when the gate is off, writes to a fixed `anonymous` directory that no subject can name. Files written before the split stay in the parent and are no longer listed or served.
 
 ## 🔴 Rotate the API keys that were once committed to `docker-compose.yml`
 

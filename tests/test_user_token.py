@@ -8,13 +8,19 @@ ends: what geolang sends sibyl, and what a tool's outbound request carries.
 import asyncio
 import json
 import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
+import jwt
 import pytest
 import respx
 from fastapi.testclient import TestClient
 
 from src.api import server
+from src.core import utils
+from src.core.auth import SECRET_ENV
+from src.core.utils import caller_outputs_dir
 from src.core.user_token import (
     bearer_token,
     current_user_token,
@@ -255,8 +261,9 @@ class _FakePtolemy:
 
 @pytest.fixture
 def ptolemy(monkeypatch, tmp_path):
-    # the tool makes an outputs dir under TOOL_EXEC_DIR before it calls anything
+    # the tool makes its caller's outputs dir before it calls anything
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
 
     def install(payload):
         fake = _FakePtolemy(payload)
@@ -301,3 +308,48 @@ def test_a_headless_ptolemy_query_without_a_service_account_is_anonymous(
     ptolemy_query("list_datasets")
 
     assert fake.headers == [{}]
+
+
+# ── the directory a call's files land in ─────────────────────────────────
+#
+# the subject is re-verified from the token in scope, so a caller cannot pick
+# the directory they write to
+
+SECRET = "test-platform-secret-0123456789ab"
+
+
+def platform_token(subject, secret=SECRET):
+    return jwt.encode(
+        {"sub": subject, "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        secret,
+        algorithm="HS256",
+    )
+
+
+@pytest.fixture
+def outputs_root(monkeypatch, tmp_path):
+    monkeypatch.setenv(SECRET_ENV, SECRET)
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
+    return tmp_path / "outputs"
+
+
+def test_the_outputs_directory_follows_the_token_in_scope(outputs_root):
+    with user_token_scope(platform_token("alice")):
+        alice = caller_outputs_dir()
+    with user_token_scope(platform_token("bob")):
+        bob = caller_outputs_dir()
+
+    assert alice != bob
+    assert Path(alice).parent == Path(bob).parent == outputs_root
+
+
+def test_a_token_that_does_not_verify_gets_the_anonymous_directory(outputs_root):
+    forged = platform_token("alice", secret="a-different-secret-0123456789abcd")
+
+    with user_token_scope(forged):
+        assert Path(caller_outputs_dir()).name == utils.ANONYMOUS_OUTPUTS_DIRECTORY
+    with user_token_scope(None):
+        assert Path(caller_outputs_dir()).name == utils.ANONYMOUS_OUTPUTS_DIRECTORY
+    # so forging alice's subject reaches nothing of alice's
+    with user_token_scope(platform_token("alice")):
+        assert Path(caller_outputs_dir()).name != utils.ANONYMOUS_OUTPUTS_DIRECTORY

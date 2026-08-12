@@ -7,7 +7,7 @@ Base URL in development: `http://localhost:8080`. In the bundled platform deploy
 ## Conventions
 
 - Errors use FastAPI's default `{"detail": "..."}` shape with the HTTP status reflecting the failure mode (`503` if sibyl is unreachable, `404` for missing resources, `500` for unhandled exceptions).
-- All filesystem outputs land under `TOOL_EXEC_DIR/outputs/` and are served from `/outputs/{filename}`.
+- All filesystem outputs land under `TOOL_EXEC_DIR/outputs/<caller>/`, one directory per token subject, and are served from `/outputs/{filename}` to that caller only. A file is named by its basename: the directory it lives in follows from the bearer, never from the path asked for.
 
 ## Chat
 

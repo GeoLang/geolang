@@ -5,7 +5,7 @@ import json
 import os
 import re
 
-from src.core.utils import OUTPUTS_DIR
+from src.core.utils import caller_outputs_dir
 
 
 TOOL_PROGRESS = {
@@ -92,7 +92,7 @@ def infer_ui_spec_from_text(text: str):
         fname_base = m.group(1)
         fname = fname_base + ".gpkg"
         if fname not in seen:
-            candidate = os.path.join(OUTPUTS_DIR, fname)
+            candidate = os.path.join(caller_outputs_dir(), fname)
             if os.path.exists(candidate):
                 seen[fname] = {
                     "name": fname_base.replace("_", " "),

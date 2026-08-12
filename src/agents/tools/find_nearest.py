@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.utils import caller_outputs_dir
 
 
 class FindNearestArgs(BaseModel):
@@ -60,9 +61,8 @@ def find_nearest(
     import traceback
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = os.path.join(exec_dir, "outputs")
+    outputs_dir = caller_outputs_dir()
     user_data_dir = os.path.join(exec_dir, "user_data")
-    os.makedirs(outputs_dir, exist_ok=True)
 
     def _res(p):
         return (

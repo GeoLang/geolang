@@ -7,11 +7,13 @@ import json
 import pytest
 
 from src.agents.tools.a2ui import emit_ui_spec
+from src.core import utils
 
 
 @pytest.fixture
 def outputs(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
     out = tmp_path / "outputs"
     out.mkdir()
     (out / "buffer.gpkg").write_bytes(b"stub")

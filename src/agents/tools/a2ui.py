@@ -4,6 +4,8 @@ import re
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from src.core.utils import caller_outputs_dir
+
 # a shade-by part has to be one column name, or the viewer has nothing to look
 # up in the file's properties
 SHADE_FIELD_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
@@ -131,12 +133,18 @@ def emit_ui_spec(
                     "files first; to only move the camera use viewer_control instead."
                 )
             exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
+            outputs_dir = caller_outputs_dir()
             missing = [
                 layer["file"]
                 for layer in layer_list
                 if not (
                     os.path.exists(layer["file"])
                     or os.path.exists(os.path.join(exec_dir, layer["file"]))
+                    # a layer is named "outputs/x.gpkg" but lives in the
+                    # caller's own directory under that name
+                    or os.path.exists(
+                        os.path.join(outputs_dir, os.path.basename(layer["file"]))
+                    )
                 )
             ]
             if missing:

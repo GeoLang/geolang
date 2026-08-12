@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.utils import caller_outputs_dir
 
 
 class DownloadNaturalEarthArgs(BaseModel):
@@ -104,7 +105,7 @@ def download_natural_earth_dataset(
             )
 
         out_name = output_filename or f"{dataset}_filtered.gpkg"
-        out_path = os.path.join(tool_dir, "outputs", out_name)
+        out_path = os.path.join(caller_outputs_dir(), out_name)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         filtered.to_file(out_path, driver="GPKG")
         return (

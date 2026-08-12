@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from src.core.utils import caller_outputs_dir
 
 
 class GeopandasArgs(BaseModel):
@@ -101,9 +102,11 @@ def geopandas_api(
             log.append(f"After filter '{filter_query}': {len(filtered)} rows")
 
             if output_path is None:
-                output_path = os.path.join(tool_dir, "outputs", "filtered.gpkg")
+                output_path = os.path.join(caller_outputs_dir(), "filtered.gpkg")
             elif not os.path.isabs(output_path):
-                output_path = os.path.join(tool_dir, output_path)
+                output_path = os.path.join(
+                    caller_outputs_dir(), os.path.basename(output_path)
+                )
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             filtered.to_file(output_path, driver="GPKG")
             log.append(f"Saved to {output_path}")

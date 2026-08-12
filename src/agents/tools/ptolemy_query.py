@@ -7,6 +7,7 @@ so downstream tools and emit_ui_spec can use them.
 """
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.utils import caller_outputs_dir
 
 
 class PtolemyQueryArgs(BaseModel):
@@ -55,9 +56,7 @@ def ptolemy_query(
 
     base_url = os.environ.get("PTOLEMY_URL", "http://ptolemy:3000").rstrip("/")
     api = f"{base_url}/api/v1"
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = os.path.join(exec_dir, "outputs")
-    os.makedirs(outputs_dir, exist_ok=True)
+    outputs_dir = caller_outputs_dir()
 
     from src.core.user_token import service_headers
 

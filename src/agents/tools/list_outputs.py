@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from src.core.utils import caller_outputs_dir
 
 
 class ListOutputsArgs(BaseModel):
@@ -13,8 +14,7 @@ def list_outputs() -> str:
     """
     import os
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = os.path.join(exec_dir, "outputs")
+    outputs_dir = caller_outputs_dir()
 
     if not os.path.exists(outputs_dir):
         return "No outputs directory found. No files have been created yet."

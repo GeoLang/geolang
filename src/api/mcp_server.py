@@ -32,7 +32,7 @@ from src.agents.agent_manager import load_external_tools, runs_caller_code
 from src.api.live_document import document_binding, publish
 from src.core.auth import mcp_token_error
 from src.core.tool_executor import execute_tool
-from src.core.user_token import bearer_token
+from src.core.user_token import bearer_token, user_token_scope
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +217,9 @@ def create_mcp_app(
 
         # the tool ran, so its result reaches the caller whatever the document
         # did: the write is reported beside it, never in place of it
-        note = await publish(binding, token, text, read_geojson)
+        # read_geojson looks up the layer in the caller's own outputs directory
+        with user_token_scope(token):
+            note = await publish(binding, token, text, read_geojson)
         if note is None:
             return _text_result(text)
         return mcp_types.CallToolResult(

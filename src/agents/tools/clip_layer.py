@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from src.core.utils import caller_outputs_dir
 
 
 class ClipLayerArgs(BaseModel):
@@ -26,8 +27,7 @@ def clip_layer(input_path: str, clip_path: str, output_filename: str) -> str:
     import traceback
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = os.path.join(exec_dir, "outputs")
-    os.makedirs(outputs_dir, exist_ok=True)
+    outputs_dir = caller_outputs_dir()
 
     try:
         import geopandas as gpd

@@ -2,6 +2,7 @@
 """Area tools must render the analysed AREA, not a summary point over it."""
 
 import json
+import pathlib
 import sys
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ from src.agents.tools.assess_environmental_risk import (
     flood_score_from,
 )
 from src.agents.tools.download_population_grid import download_population_grid
+from src.core import utils
 
 LAT, LON = 52.6369, -1.1398  # Leicester
 
@@ -109,12 +111,14 @@ def _no_http():
 def stub_services(monkeypatch, tmp_path):
     """Stub the HTTP boundaries and point tool output at tmp_path."""
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
+    # the outputs root is read once at import, so the env var alone misses it
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
     monkeypatch.setitem(sys.modules, "osmnx", _FakeOsmnx())
     return tmp_path
 
 
-def _read_output(tmp_path, name):
-    path = tmp_path / "outputs" / f"{name}.gpkg"
+def _read_output(name):
+    path = pathlib.Path(utils.caller_outputs_dir()) / f"{name}.gpkg"
     assert path.exists(), f"{path} not written"
     return gpd.read_file(path)
 
@@ -228,7 +232,7 @@ def test_env_risk_renders_the_buffer_polygon(monkeypatch, stub_services):
     out = assess_environmental_risk("Leicester", radius_km=2.0, output_filename="risk")
     assert "OVERALL:" in out, out
 
-    gdf = _read_output(stub_services, "risk")
+    gdf = _read_output("risk")
     assert len(gdf) == 1
     assert gdf.geometry.iloc[0].geom_type == "Polygon"
 
@@ -251,15 +255,14 @@ def test_env_risk_renders_the_buffer_polygon(monkeypatch, stub_services):
 def test_env_risk_uses_a_supplied_polygon_as_the_area(monkeypatch, stub_services):
     monkeypatch.setitem(sys.modules, "requests", _fake_requests({"status": "OK"}))
 
-    iso_path = stub_services / "outputs" / "iso.gpkg"
-    iso_path.parent.mkdir(parents=True, exist_ok=True)
+    iso_path = pathlib.Path(utils.caller_outputs_dir()) / "iso.gpkg"
     _circle(5000).to_file(iso_path, driver="GPKG")
 
     assess_environmental_risk(
         "Leicester", radius_km=2.0, polygon_path="iso.gpkg", output_filename="risk_iso"
     )
 
-    gdf = _read_output(stub_services, "risk_iso")
+    gdf = _read_output("risk_iso")
     assert gdf.geometry.iloc[0].geom_type == "Polygon"
     # the isochrone won, not the 2km buffer
     assert gdf["area_km2"].iloc[0] == pytest.approx(78.5, rel=0.02)
@@ -272,7 +275,7 @@ def test_env_risk_is_deterministic_across_geocoder_ordering(monkeypatch, stub_se
         "Leicester", radius_km=2.0, output_filename="risk_det"
     )
     assert "OVERALL:" in first, first
-    row = _read_output(stub_services, "risk_det").iloc[0]
+    row = _read_output("risk_det").iloc[0]
     assert row["elev_mean_m"] is not None
     # the tie between equally-ranked hits goes to the lower OSM id, not to hit order
     assert row["center_lat"] == pytest.approx(LAT, abs=1e-4)
@@ -292,7 +295,7 @@ def test_population_grid_renders_the_queried_bbox(monkeypatch, stub_services):
     out = download_population_grid("Leicester", radius_km=10.0, output_filename="pop")
     assert f"{PYRAMID_TOTAL:,}" in out, out
 
-    gdf = _read_output(stub_services, "pop")
+    gdf = _read_output("pop")
     row = gdf.iloc[0]
     assert gdf.geometry.iloc[0].geom_type == "Polygon"
     assert row["population"] == PYRAMID_TOTAL
@@ -309,8 +312,7 @@ def test_population_grid_renders_the_queried_bbox(monkeypatch, stub_services):
 def test_population_grid_renders_the_clip_polygon(monkeypatch, stub_services):
     monkeypatch.setitem(sys.modules, "requests", _fake_worldpop())
 
-    clip_path = stub_services / "outputs" / "clip.gpkg"
-    clip_path.parent.mkdir(parents=True, exist_ok=True)
+    clip_path = pathlib.Path(utils.caller_outputs_dir()) / "clip.gpkg"
     _circle(1000).to_file(clip_path, driver="GPKG")
 
     download_population_grid(
@@ -320,7 +322,7 @@ def test_population_grid_renders_the_clip_polygon(monkeypatch, stub_services):
         output_filename="pop_clip",
     )
 
-    gdf = _read_output(stub_services, "pop_clip")
+    gdf = _read_output("pop_clip")
     row = gdf.iloc[0]
     assert gdf.geometry.iloc[0].geom_type == "Polygon"
     assert row["area_source"] == "clip_polygon"
@@ -332,8 +334,7 @@ def test_population_grid_zonal_sums_the_local_raster(monkeypatch, stub_services)
     monkeypatch.setitem(sys.modules, "requests", _no_http())
 
     clip = _circle(5000)
-    clip_path = stub_services / "outputs" / "clip5k.gpkg"
-    clip_path.parent.mkdir(parents=True, exist_ok=True)
+    clip_path = pathlib.Path(utils.caller_outputs_dir()) / "clip5k.gpkg"
     clip.to_file(clip_path, driver="GPKG")
     transform = _write_pop_raster(stub_services / "ghsl_pop.tif")
 
@@ -354,8 +355,8 @@ def test_population_grid_zonal_sums_the_local_raster(monkeypatch, stub_services)
     expected_clip = _cells_inside(transform, clip.geometry.iloc[0])
     assert 0 < expected_clip < expected_bbox
 
-    row_u = _read_output(stub_services, "pop_unclipped").iloc[0]
-    row_c = _read_output(stub_services, "pop_clipped").iloc[0]
+    row_u = _read_output("pop_unclipped").iloc[0]
+    row_c = _read_output("pop_clipped").iloc[0]
     assert row_u["population"] == pytest.approx(expected_bbox, rel=0.01)
     assert row_c["population"] == pytest.approx(expected_clip, rel=0.01)
     assert "GHS-POP" in row_u["source"]
@@ -373,7 +374,7 @@ def test_population_grid_sums_the_worldpop_pyramid(monkeypatch, stub_services):
     out = download_population_grid("Leicester", radius_km=2.0, output_filename="pop_wp")
     assert f"{PYRAMID_TOTAL:,}" in out, out
 
-    row = _read_output(stub_services, "pop_wp").iloc[0]
+    row = _read_output("pop_wp").iloc[0]
     assert row["population"] == PYRAMID_TOTAL
     assert "WorldPop" in row["source"]
 

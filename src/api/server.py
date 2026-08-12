@@ -66,13 +66,13 @@ from src.core.auth import (
 )
 from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
 from src.core.tool_executor import execute_tool, report_configuration
-from src.core.user_token import bearer_token
+from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
     EXEC_DIR,
     LIVE_DATA_DIR,
-    OUTPUTS_DIR,
     SIBYL_URL,
     USER_DATA_DIR,
+    caller_outputs_dir,
     load_catalogue,
     load_shares,
     preload_geo_stack,
@@ -457,7 +457,8 @@ async def agent_event_stream(message: str, user_token: str | None = None):
         import re as _re
 
         # Primary: infer from full content, filter to files the agent mentioned
-        ui_spec = infer_ui_spec_from_text(" ".join(all_content))
+        with user_token_scope(user_token):
+            ui_spec = infer_ui_spec_from_text(" ".join(all_content))
         if ui_spec and ui_spec.get("layers") and assistant_texts:
             agent_text = " ".join(assistant_texts)
             filtered = [
@@ -481,7 +482,8 @@ async def agent_event_stream(message: str, user_token: str | None = None):
                         "name": fname.replace("_", " ").replace(".gpkg", ""),
                         "file": f"outputs/{fname}",
                     }
-                coord_spec = infer_ui_spec_from_text(" ".join(assistant_texts))
+                with user_token_scope(user_token):
+                    coord_spec = infer_ui_spec_from_text(" ".join(assistant_texts))
                 center = coord_spec.get("center") if coord_spec else None
                 ui_spec = {"type": "map", "layers": list(seen.values())}
                 if center:
@@ -599,39 +601,51 @@ def allowed_roots() -> list[str]:
     covers them, and a subdir that is itself a symlink must not be able to
     widen the boundary.
     """
-    return [OUTPUTS_DIR, str(USER_DATA_DIR), EXEC_DIR]
+    return [caller_outputs_dir(), str(USER_DATA_DIR), EXEC_DIR]
 
 
 def name_candidates(filename: str) -> list[str]:
-    """The name as given, plus the extension-swapped form the viewer links to."""
-    stem, ext = os.path.splitext(filename)
-    return [filename, stem if ext else filename + ".gpkg"]
+    """The name as given and its basename, each with the viewer's extension swap.
+
+    A tool result names a layer `outputs/roads.gpkg`, which is no longer a path
+    anyone can read: the file is in the caller's own directory under that name.
+    """
+    names = []
+    for name in dict.fromkeys([filename, os.path.basename(filename)]):
+        stem, ext = os.path.splitext(name)
+        names += [name, stem if ext else name + ".gpkg"]
+    return names
 
 
 @app.get("/outputs/{filename}", dependencies=[Depends(platform_auth)])
-async def get_output(filename: str):
-    path = resolve_under([filename], [OUTPUTS_DIR], [OUTPUTS_DIR])
+async def get_output(
+    filename: str, authorization: Annotated[str | None, Header()] = None
+):
+    with user_token_scope(bearer_token(authorization)):
+        outputs = caller_outputs_dir()
+    path = resolve_under([filename], [outputs], [outputs])
     if not path:
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path)
 
 
 @app.get("/download/{filename}", dependencies=[Depends(platform_auth)])
-async def download_file(filename: str):
+async def download_file(
+    filename: str, authorization: Annotated[str | None, Header()] = None
+):
     """Download an output file as an attachment."""
-    safe = os.path.basename(filename)
-    path = os.path.join(OUTPUTS_DIR, safe)
-    if not os.path.exists(path):
-        # Try without/with .gpkg extension
-        stem, ext = os.path.splitext(safe)
-        alt = stem if ext else safe + ".gpkg"
-        alt_path = os.path.join(OUTPUTS_DIR, alt)
-        if os.path.exists(alt_path):
-            path = alt_path
-            safe = alt
-        else:
-            raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, filename=safe, media_type="application/octet-stream")
+    with user_token_scope(bearer_token(authorization)):
+        outputs = caller_outputs_dir()
+    path = resolve_under(
+        name_candidates(os.path.basename(filename)), [outputs], [outputs]
+    )
+    if not path:
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path,
+        filename=os.path.basename(path),
+        media_type="application/octet-stream",
+    )
 
 
 def geojson_search_dirs() -> list[str]:
@@ -642,7 +656,7 @@ def geojson_search_dirs() -> list[str]:
         else []
     )
     return [
-        OUTPUTS_DIR,
+        caller_outputs_dir(),
         str(USER_DATA_DIR),
         *user_data_subdirs,
         EXEC_DIR,
@@ -654,10 +668,13 @@ def geojson_search_dirs() -> list[str]:
 
 
 @app.get("/geojson/{filename:path}", dependencies=[Depends(platform_auth)])
-async def get_geojson(filename: str):
+async def get_geojson(
+    filename: str, authorization: Annotated[str | None, Header()] = None
+):
     """Convert a vector file (GPKG, SHP, GeoJSON) to GeoJSON for Leaflet."""
     try:
-        content = layer_geojson(filename)
+        with user_token_scope(bearer_token(authorization)):
+            content = layer_geojson(filename)
     except Exception:
         # the reader quotes the absolute path and the byte it choked on, so the
         # reason is logged rather than returned
@@ -796,7 +813,9 @@ async def upload_dataset(file: UploadFile = File(...)):
 
 
 @app.get("/stats/{filename:path}", dependencies=[Depends(platform_auth)])
-async def get_stats(filename: str):
+async def get_stats(
+    filename: str, authorization: Annotated[str | None, Header()] = None
+):
     """Return summary statistics for a vector layer."""
     import geopandas as gpd
 
@@ -805,9 +824,16 @@ async def get_stats(filename: str):
         if USER_DATA_DIR.exists()
         else []
     )
-    search_dirs = [OUTPUTS_DIR, str(USER_DATA_DIR), *user_data_subdirs, EXEC_DIR]
+    with user_token_scope(bearer_token(authorization)):
+        search_dirs = [
+            caller_outputs_dir(),
+            str(USER_DATA_DIR),
+            *user_data_subdirs,
+            EXEC_DIR,
+        ]
+        roots = allowed_roots()
 
-    path = resolve_under(name_candidates(filename), search_dirs, allowed_roots())
+    path = resolve_under(name_candidates(filename), search_dirs, roots)
 
     if not path:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
@@ -1002,14 +1028,17 @@ class ExportPDFRequest(BaseModel):
 
 
 @app.post("/export-pdf", dependencies=[Depends(platform_auth)])
-async def export_pdf(request: ExportPDFRequest):
+async def export_pdf(
+    request: ExportPDFRequest, authorization: Annotated[str | None, Header()] = None
+):
     """Generate a PDF report using a Playwright headless screenshot (captures real tile imagery)."""
     from playwright.async_api import async_playwright
     from urllib.parse import quote
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     pdf_filename = f"report_{timestamp}.pdf"
-    pdf_path = os.path.join(OUTPUTS_DIR, pdf_filename)
+    with user_token_scope(bearer_token(authorization)):
+        pdf_path = os.path.join(caller_outputs_dir(), pdf_filename)
 
     base_url = os.environ.get("APP_BASE_URL", "http://localhost:8080")
     layer_param = ",".join(os.path.basename(f) for f in request.layers)
@@ -1056,12 +1085,15 @@ class ExportPNGRequest(BaseModel):
 
 
 @app.post("/export-png", dependencies=[Depends(platform_auth)])
-async def export_png(request: ExportPNGRequest):
+async def export_png(
+    request: ExportPNGRequest, authorization: Annotated[str | None, Header()] = None
+):
     from playwright.async_api import async_playwright
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     png_filename = f"map_{timestamp}.png"
-    png_path = os.path.join(OUTPUTS_DIR, png_filename)
+    with user_token_scope(bearer_token(authorization)):
+        png_path = os.path.join(caller_outputs_dir(), png_filename)
 
     base_url = os.environ.get("APP_BASE_URL", "http://localhost:8080")
     layer_param = ",".join(os.path.basename(f) for f in request.layers)

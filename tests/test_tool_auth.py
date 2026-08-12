@@ -7,6 +7,7 @@ monkeypatch, so the rest of the suite still runs in dev mode.
 """
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import jwt
 import pytest
@@ -14,7 +15,9 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from src.api import server
+from src.core import utils
 from src.core.auth import SECRET_ENV, platform_secret
+from src.core.user_token import user_token_scope
 
 client = TestClient(server.app)
 
@@ -169,6 +172,60 @@ def test_the_validated_token_is_forwarded_unchanged(gated, monkeypatch):
 def test_the_manifest_stays_open(gated):
     # sibyl fetches it at startup, before anyone has signed in
     assert client.get("/tools").status_code == 200
+
+
+# ── one directory per caller ─────────────────────────────────────────────
+
+
+@pytest.fixture
+def outputs_root(monkeypatch, tmp_path):
+    """Files a tool writes land under tmp_path instead of the real tree."""
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
+    return tmp_path / "outputs"
+
+
+def wrote(subject, filename):
+    """A file in `subject`'s own outputs directory, put there the way a tool does."""
+    with user_token_scope(mint(sub=subject)):
+        (Path(utils.caller_outputs_dir()) / filename).write_text("x")
+
+
+def listing_for(subject):
+    response = client.post(
+        "/tools/list_outputs",
+        json={"args": {}},
+        headers={"Authorization": f"Bearer {mint(sub=subject)}"},
+    )
+    assert response.status_code == 200
+    return response.json()["result"]
+
+
+def test_list_outputs_shows_only_the_callers_own_files(gated, outputs_root):
+    wrote("alice", "alice_sites.gpkg")
+    wrote("bob", "bob_sites.gpkg")
+
+    assert "alice_sites.gpkg" in listing_for("alice")
+    assert "bob_sites.gpkg" not in listing_for("alice")
+    assert "alice_sites.gpkg" not in listing_for("bob")
+
+
+def test_a_tool_writes_into_the_callers_own_directory(gated, outputs_root, monkeypatch):
+    seen = []
+
+    class ProbeArgs(BaseModel):
+        pass
+
+    def probe():
+        """Report the directory this tool call would write to."""
+        seen.append(utils.caller_outputs_dir())
+        return "ok"
+
+    monkeypatch.setattr(server, "load_external_tools", lambda: [(probe, ProbeArgs)])
+    assert call(mint(sub="alice")).status_code == 200
+    assert call(mint(sub="bob")).status_code == 200
+
+    assert len(set(seen)) == 2
+    assert all(Path(directory).parent == outputs_root for directory in seen)
 
 
 # ── gate off ─────────────────────────────────────────────────────────────

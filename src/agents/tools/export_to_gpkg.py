@@ -1,5 +1,6 @@
 import os
 from pydantic import BaseModel, Field
+from src.core.utils import caller_outputs_dir
 
 
 class ExportToGPKGArgs(BaseModel):
@@ -22,14 +23,14 @@ def export_to_gpkg(
     # Ensure .gpkg extension
     if not output_filename.lower().endswith(".gpkg"):
         output_filename = output_filename + ".gpkg"
-    output_path = os.path.join(exec_dir, "outputs", output_filename)
+    output_path = os.path.join(caller_outputs_dir(), output_filename)
 
     # Resolve dataset_path — check given path, then search known directories
     resolved = dataset_path
     if not os.path.exists(resolved):
         basename = os.path.basename(dataset_path)
         search_dirs = [
-            os.path.join(exec_dir, "outputs"),
+            caller_outputs_dir(),
             os.path.join(exec_dir, "user_data"),
             os.path.join(exec_dir, "natural_earth_110m"),
             os.path.join(exec_dir, "natural_earth_50m"),
