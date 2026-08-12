@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class FindNearestArgs(BaseModel):
@@ -9,7 +9,7 @@ class FindNearestArgs(BaseModel):
         description=(
             "Path to the layer whose features you want to find neighbours FOR — "
             "e.g. your sites, hospitals, or user-uploaded points. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     targets_path: str = Field(
@@ -17,7 +17,7 @@ class FindNearestArgs(BaseModel):
         description=(
             "Path to the layer to search for nearest features IN — "
             "e.g. bus stops, schools, restaurants. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     k: int = Field(
@@ -60,42 +60,11 @@ def find_nearest(
     import os
     import traceback
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
-
     try:
         import geopandas as gpd
 
-        orig_full = _res(origins_path)
-        if not orig_full:
-            return f"Origins file not found: '{origins_path}'."
-
-        targ_full = _res(targets_path)
-        if not targ_full:
-            return f"Targets file not found: '{targets_path}'."
+        orig_full = tool_input_path("origins_path", origins_path)
+        targ_full = tool_input_path("targets_path", targets_path)
 
         gdf_orig = gpd.read_file(orig_full)
         gdf_targ = gpd.read_file(targ_full)
@@ -175,7 +144,9 @@ def find_nearest(
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
 
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         joined.to_file(output_path, driver="GPKG")
 
         # Summary stats

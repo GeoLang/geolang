@@ -72,9 +72,12 @@ from src.core.utils import (
     LIVE_DATA_DIR,
     SIBYL_URL,
     USER_DATA_DIR,
+    allowed_roots,
     caller_outputs_dir,
+    layer_search_dirs,
     load_catalogue,
     load_shares,
+    name_candidates,
     preload_geo_stack,
     resolve_under,
     save_catalogue,
@@ -592,47 +595,9 @@ async def chat_agui(input: RunAgentInput, request: Request):
 
 
 # ── serving a file by name, without leaving the tree ─────────────────
-
-
-def natural_earth_dirs() -> list[str]:
-    """The reference sets on disk, whichever of them have been downloaded.
-
-    A glob rather than a list of names, so a set someone downloads next is
-    served without a code change. A set that arrives as a symlink is skipped:
-    it would resolve outside the tree and widen the boundary.
-    """
-    return [
-        str(path)
-        for path in sorted(Path(EXEC_DIR).glob("natural_earth*"))
-        if path.is_dir() and not path.is_symlink()
-    ]
-
-
-def allowed_roots() -> list[str]:
-    """Directories a served file may resolve into.
-
-    `EXEC_DIR` is deliberately not listed. It is the whole tree, which puts
-    every other caller's outputs directory inside the boundary, so a name like
-    `outputs/<their-directory>/layer.gpkg` used to resolve and be served.
-
-    user_data subdirs are deliberately not listed either. Confinement to the
-    parents covers them, and a subdir that is itself a symlink must not be able
-    to widen the boundary.
-    """
-    return [caller_outputs_dir(), str(USER_DATA_DIR), *natural_earth_dirs()]
-
-
-def name_candidates(filename: str) -> list[str]:
-    """The name as given and its basename, each with the viewer's extension swap.
-
-    A tool result names a layer `outputs/roads.gpkg`, which is no longer a path
-    anyone can read: the file is in the caller's own directory under that name.
-    """
-    names = []
-    for name in dict.fromkeys([filename, os.path.basename(filename)]):
-        stem, ext = os.path.splitext(name)
-        names += [name, stem if ext else name + ".gpkg"]
-    return names
+#
+# the search dirs, the roots and the name variants all live in src.core.utils,
+# so a tool argument is confined to exactly what a route may serve
 
 
 @app.get("/outputs/{filename}", dependencies=[Depends(platform_auth)])
@@ -664,25 +629,6 @@ async def download_file(
         filename=os.path.basename(path),
         media_type="application/octet-stream",
     )
-
-
-def layer_search_dirs() -> list[str]:
-    """Where a layer is looked up: the caller's outputs, user_data, natural earth.
-
-    `/geojson` and `/stats` read through this one list, so what one of them can
-    reach cannot drift from what the other can.
-    """
-    user_data_subdirs = (
-        [str(p) for p in USER_DATA_DIR.rglob("*") if p.is_dir()]
-        if USER_DATA_DIR.exists()
-        else []
-    )
-    return [
-        caller_outputs_dir(),
-        str(USER_DATA_DIR),
-        *user_data_subdirs,
-        *natural_earth_dirs(),
-    ]
 
 
 @app.get("/geojson/{filename:path}", dependencies=[Depends(platform_auth)])

@@ -154,8 +154,9 @@ the standalone stack. Never set it where the port is reachable.
 **Treat a platform token like an SSH key to this host.** `geopandas_api`,
 `pyqgis_api`, `run_qgis_algorithm` and `sql_query` take expressions and
 algorithm parameters the caller chooses, so anyone holding a live token can
-compute arbitrary things and read and write everything under `outputs/` and
-`user_data/`. That is by design for a geoprocessing agent. Scope the token
+compute arbitrary things and read and write everything under their own
+directory in `outputs/` and under `user_data/`. That is by design for a
+geoprocessing agent. Scope the token
 short, never commit it, and rotate it like a key.
 
 What that reaches is bounded by where the tool runs, which is the next section.
@@ -222,6 +223,13 @@ reads and writes their own directory under `outputs/`, keyed on the subject of
 the token they presented. The executor is told which directory that is, since
 naming it needs the signing secret the executor does not have, and it refuses a
 name that is not a single directory of the expected shape.
+
+A tool argument that names a file is a filename, not a path. It is looked up in
+the caller's own outputs directory, in `user_data/`, and in the natural earth
+reference sets, the same three places `/geojson` serves from. An absolute path
+is refused with an error rather than opened, and an output filename carrying a
+directory part is refused rather than trimmed, so no two callers can be steered
+onto one file.
 
 ### MCP for outside agents
 

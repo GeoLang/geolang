@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class ScoreSitesArgs(BaseModel):
@@ -63,10 +63,8 @@ def score_sites(
     Use this when the user wants to compare locations, rank sites,
     or find the best location based on multiple factors.
     """
-    import os
     import traceback
 
-    outputs_dir = caller_outputs_dir()
 
     try:
         import requests
@@ -346,7 +344,7 @@ def score_sites(
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
         gdf.to_file(output_path, driver="GPKG")
 
         # Build readable response

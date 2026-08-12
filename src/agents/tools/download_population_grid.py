@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import (
+    caller_outputs_dir,
+    population_raster_path,
+    tool_input_path_or_none,
+    tool_output_path,
+)
 
 
 class DownloadPopulationGridArgs(BaseModel):
@@ -19,7 +24,7 @@ class DownloadPopulationGridArgs(BaseModel):
         None,
         description=(
             "Optional path to a polygon GPKG to clip population to (e.g. an isochrone). "
-            "Relative to outputs/ or absolute. If provided, returns total population inside the polygon."
+            "A filename in outputs/, not a path. If provided, returns total population inside the polygon."
         ),
     )
     output_filename: Optional[str] = Field(
@@ -115,38 +120,9 @@ def download_population_grid(
                 pass
             return None
 
-        def _res(p):
-            """Resolve a file name against outputs_dir and exec_dir; None if absent."""
-            if not p:
-                return None
-            if os.path.isabs(p) and os.path.exists(p):
-                return p
-            names = [p] if p.lower().endswith(".gpkg") else [p, p + ".gpkg"]
-            for base in (outputs_dir, exec_dir):
-                for name in names:
-                    candidate = os.path.join(base, name)
-                    if os.path.exists(candidate):
-                        return candidate
-            return None
-
         def _ghsl_sum(poly):
             """Sum GHS-POP cells inside the polygon, or None with no local raster."""
-            raster_path = next(
-                (
-                    r
-                    for r in (
-                        _res(c)
-                        for c in (
-                            "ghsl_pop.tif",
-                            "GHS_POP.tif",
-                            "ghs_pop_2020.tif",
-                            "ghsl_pop_2020.tif",
-                        )
-                    )
-                    if r
-                ),
-                None,
-            )
+            raster_path = population_raster_path()
             if not raster_path:
                 return None
             import numpy as np
@@ -168,7 +144,7 @@ def download_population_grid(
         clip_gdf = None
         clip_missing = False
         if clip_layer_path:
-            clip_path = _res(clip_layer_path)
+            clip_path = tool_input_path_or_none("clip_layer_path", clip_layer_path)
             if clip_path:
                 clip_gdf = gpd.read_file(clip_path)
                 if clip_gdf.crs and clip_gdf.crs.to_epsg() != 4326:
@@ -269,7 +245,9 @@ def download_population_grid(
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         gdf.to_file(output_path, driver="GPKG")
 
         if pop_total is not None:

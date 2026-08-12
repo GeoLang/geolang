@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class CalculateIsochronesArgs(BaseModel):
@@ -63,10 +63,8 @@ def calculate_isochrones(
       'motorway' — motorway/trunk only (long drives >60 min, inter-city)
       'auto'     — tool decides based on mode and time (default)
     """
-    import os
     import traceback
 
-    outputs_dir = caller_outputs_dir()
 
     try:
         import osmnx as ox
@@ -99,7 +97,7 @@ def calculate_isochrones(
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
 
         # --- DRIVING: use Valhalla public API (fast, server-side, no timeout risk) ---
         if network_type == "drive":

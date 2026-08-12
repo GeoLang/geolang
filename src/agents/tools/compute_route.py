@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class ComputeRouteArgs(BaseModel):
@@ -46,7 +46,6 @@ def compute_route(
     import os
     import traceback
 
-    outputs_dir = caller_outputs_dir()
 
     try:
         import requests
@@ -111,7 +110,9 @@ def compute_route(
                             output_filename = f"route_{safe_o}_to_{safe_d}"
                         if output_filename.lower().endswith(".gpkg"):
                             output_filename = output_filename[:-5]
-                        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+                        output_path = tool_output_path(
+                            "output_filename", f"{output_filename}.gpkg"
+                        )
                         gdf.to_file(output_path, driver="GPKG")
 
                         steps = data.get("steps", [])
@@ -276,7 +277,9 @@ def compute_route(
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         gdf.to_file(output_path, driver="GPKG")
 
         # Build manoeuvre summary for primary route

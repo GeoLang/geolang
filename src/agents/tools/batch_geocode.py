@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class BatchGeocodeArgs(BaseModel):
@@ -16,7 +16,7 @@ class BatchGeocodeArgs(BaseModel):
         None,
         description=(
             "Path to a CSV file with an address/name column to geocode. "
-            "Relative to user_data/ or outputs/ or absolute. "
+            "A filename in user_data/ or outputs/, not a path. "
             "The tool auto-detects columns named: address, location, place, name, site."
         ),
     )
@@ -55,35 +55,8 @@ def batch_geocode(
     Uses Nominatim (OpenStreetMap geocoder) — free, no API key needed.
     Rate-limited to 1 request/second per OSM fair-use policy.
     """
-    import os
     import time
     import traceback
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (user_data_dir, outputs_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
 
     try:
         import requests
@@ -100,9 +73,7 @@ def batch_geocode(
                     records.append({"label": addr, "address": addr})
 
         elif input_csv_path:
-            csv_full = _res(input_csv_path)
-            if not csv_full:
-                return f"CSV file not found: '{input_csv_path}'."
+            csv_full = tool_input_path("input_csv_path", input_csv_path)
             df = pd.read_csv(csv_full)
             # Auto-detect address column
             addr_col = address_column
@@ -204,7 +175,9 @@ def batch_geocode(
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
 
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         gdf.to_file(output_path, driver="GPKG")
 
         fail_note = (

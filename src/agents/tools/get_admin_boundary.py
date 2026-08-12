@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class GetAdminBoundaryArgs(BaseModel):
@@ -43,10 +43,8 @@ def get_admin_boundary(
 
     Falls back to a geocoded point + convex-hull approach if OSM boundary is unavailable.
     """
-    import os
     import traceback
 
-    outputs_dir = caller_outputs_dir()
 
     try:
         import osmnx as ox
@@ -64,7 +62,7 @@ def get_admin_boundary(
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
 
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
 
         # Strategy 1: osmnx geocode_to_gdf — returns the OSM boundary polygon directly
         gdf = None

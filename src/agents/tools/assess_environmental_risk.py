@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 LOW_BAND_M = 5.0  # same bands query_elevation uses: below 5m high, below 10m moderate
@@ -64,7 +64,7 @@ class AssessEnvironmentalRiskArgs(BaseModel):
         None,
         description=(
             "Optional path to an existing polygon GPKG (e.g. an isochrone) to use "
-            "instead of a circular buffer. Relative to outputs/ or absolute."
+            "instead of a circular buffer. A filename in outputs/, not a path."
         ),
     )
     output_filename: Optional[str] = Field(
@@ -94,12 +94,8 @@ def assess_environmental_risk(
     Use this when the user asks about flood risk, environmental suitability,
     pollution, or green space for a location.
     """
-    import os
     import time
     import traceback
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
 
     try:
         import requests
@@ -153,18 +149,7 @@ def assess_environmental_risk(
 
         # Build analysis area
         if polygon_path:
-            # Resolve polygon path
-            poly_file = None
-            if os.path.isabs(polygon_path) and os.path.exists(polygon_path):
-                poly_file = polygon_path
-            else:
-                for base in (outputs_dir, exec_dir):
-                    candidate = os.path.join(base, polygon_path)
-                    if os.path.exists(candidate):
-                        poly_file = candidate
-                        break
-            if not poly_file:
-                return f"Polygon file not found: '{polygon_path}'."
+            poly_file = tool_input_path("polygon_path", polygon_path)
             area_gdf = gpd.read_file(poly_file)
             if area_gdf.crs and area_gdf.crs.to_epsg() != 4326:
                 area_gdf = area_gdf.to_crs("EPSG:4326")
@@ -435,7 +420,9 @@ def assess_environmental_risk(
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         summary_gdf.to_file(output_path, driver="GPKG")
 
         # Build response

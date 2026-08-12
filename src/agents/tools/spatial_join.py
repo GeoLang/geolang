@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class SpatialJoinArgs(BaseModel):
@@ -8,7 +8,7 @@ class SpatialJoinArgs(BaseModel):
         ...,
         description=(
             "Path to the layer whose features you want to tag/filter — typically points "
-            "but can be any geometry. Relative to outputs/ or absolute. "
+            "but can be any geometry. A filename in outputs/, not a path. "
             "E.g. 'restaurants.gpkg', 'outputs/schools.gpkg'."
         ),
     )
@@ -16,7 +16,7 @@ class SpatialJoinArgs(BaseModel):
         ...,
         description=(
             "Path to the polygon layer to join against — e.g. an isochrone, "
-            "flood zone, or admin boundary. Relative to outputs/ or absolute."
+            "flood zone, or admin boundary. A filename in outputs/, not a path."
         ),
     )
     how: str = Field(
@@ -53,42 +53,11 @@ def spatial_join(
     import os
     import traceback
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
-
     try:
         import geopandas as gpd
 
-        pts_full = _res(points_path)
-        if not pts_full:
-            return f"Points/features file not found: '{points_path}'. Check the filename in outputs/ or user_data/."
-
-        poly_full = _res(polygons_path)
-        if not poly_full:
-            return f"Polygons file not found: '{polygons_path}'. Check the filename in outputs/."
+        pts_full = tool_input_path("points_path", points_path)
+        poly_full = tool_input_path("polygons_path", polygons_path)
 
         gdf_pts = gpd.read_file(pts_full)
         gdf_poly = gpd.read_file(poly_full)
@@ -141,7 +110,9 @@ def spatial_join(
             for c in joined.columns
         ]
 
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         joined.to_file(output_path, driver="GPKG")
 
         n_in = len(joined)

@@ -3,6 +3,7 @@ models retry-loop on silent no-ops (observed with grok), so bad layer input
 and missing files have to come back as actionable errors."""
 
 import json
+import pathlib
 
 import pytest
 
@@ -12,10 +13,13 @@ from src.core import utils
 
 @pytest.fixture
 def outputs(tmp_path, monkeypatch):
+    # the tree dirs are read once at import, so the env var alone misses them
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
+    monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
-    out = tmp_path / "outputs"
-    out.mkdir()
+    monkeypatch.setattr(utils, "USER_DATA_DIR", tmp_path / "user_data")
+    # the caller's own directory, which is where a layer of theirs is looked up
+    out = pathlib.Path(utils.caller_outputs_dir())
     (out / "buffer.gpkg").write_bytes(b"stub")
     return out
 

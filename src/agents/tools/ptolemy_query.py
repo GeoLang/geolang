@@ -7,7 +7,7 @@ so downstream tools and emit_ui_spec can use them.
 """
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class PtolemyQueryArgs(BaseModel):
@@ -56,7 +56,6 @@ def ptolemy_query(
 
     base_url = os.environ.get("PTOLEMY_URL", "http://ptolemy:3000").rstrip("/")
     api = f"{base_url}/api/v1"
-    outputs_dir = caller_outputs_dir()
 
     from src.core.user_token import service_headers
 
@@ -118,7 +117,7 @@ def ptolemy_query(
             name = output_filename or f"ptolemy_{branch_id[:8]}"
             if name.lower().endswith(".gpkg"):
                 name = name[:-5]
-            out_path = os.path.join(outputs_dir, f"{name}.gpkg")
+            out_path = tool_output_path("output_filename", f"{name}.gpkg")
             gdf.to_file(out_path, driver="GPKG")
             bounds = gdf.total_bounds
             return (
@@ -162,7 +161,7 @@ def ptolemy_query(
             name = output_filename or f"ptolemy_bbox_{branch_id[:8]}"
             if name.lower().endswith(".gpkg"):
                 name = name[:-5]
-            out_path = os.path.join(outputs_dir, f"{name}.gpkg")
+            out_path = tool_output_path("output_filename", f"{name}.gpkg")
             gdf.to_file(out_path, driver="GPKG")
             return (
                 f"Fetched {len(gdf)} features from Ptolemy branch {branch_id} "

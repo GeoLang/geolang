@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import (
+    population_raster_path,
+    tool_input_path,
+    tool_input_path_or_none,
+    tool_output_path,
+)
 
 
 class ServiceGapArgs(BaseModel):
@@ -16,7 +21,7 @@ class ServiceGapArgs(BaseModel):
         description=(
             "Path to the service facility layer (points or polygons) — "
             "e.g. hospitals, GP surgeries, schools. "
-            "Relative to outputs/ or user_data/ or absolute. "
+            "A filename in outputs/ or user_data/, not a path. "
             "Can also be an OSM type keyword like 'hospitals', 'schools', 'pharmacies' "
             "to download automatically."
         ),
@@ -32,7 +37,7 @@ class ServiceGapArgs(BaseModel):
         None,
         description=(
             "Optional boundary polygon (GPKG) to clip the analysis to. "
-            "Relative to outputs/ or absolute. If omitted, a bounding box around "
+            "A filename in outputs/, not a path. If omitted, a bounding box around "
             "place_name is used."
         ),
     )
@@ -84,34 +89,7 @@ def service_gap(
     Returns a polygon GPKG with service gap classification per cell.
     Call emit_ui_spec after with ui_type='map'.
     """
-    import os
     import traceback
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
 
     try:
         import geopandas as gpd
@@ -122,9 +100,7 @@ def service_gap(
 
         # ── Study area ──────────────────────────────────────────────────────────
         if boundary_path:
-            bnd_full = _res(boundary_path)
-            if not bnd_full:
-                return f"Boundary file not found: '{boundary_path}'."
+            bnd_full = tool_input_path("boundary_path", boundary_path)
             bnd_gdf = gpd.read_file(bnd_full).to_crs("EPSG:4326")
             study_poly = bnd_gdf.union_all()
             centroid = study_poly.centroid
@@ -173,7 +149,7 @@ def service_gap(
             "clinics": {"amenity": ["clinic", "doctors", "dentist"]},
         }
 
-        svc_full = _res(service_path)
+        svc_full = tool_input_path_or_none("service_path", service_path)
         if svc_full:
             gdf_svc = gpd.read_file(svc_full)
         else:
@@ -271,10 +247,8 @@ def service_gap(
         # ── Optional population weighting ───────────────────────────────────────
         pop_vals = None
         if population_weight:
-            pop_tif = os.path.join(user_data_dir, "ghsl_pop.tif")
-            if not os.path.exists(pop_tif):
-                pop_tif = os.path.join(exec_dir, "ghsl_pop.tif")
-            if os.path.exists(pop_tif):
+            pop_tif = population_raster_path()
+            if pop_tif:
                 try:
                     import rasterio
                     from rasterio.transform import rowcol
@@ -349,7 +323,9 @@ def service_gap(
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
 
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         out_gdf.to_file(output_path, driver="GPKG")
 
         # ── Summary ─────────────────────────────────────────────────────────────

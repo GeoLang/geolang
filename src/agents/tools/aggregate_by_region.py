@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class AggregateByRegionArgs(BaseModel):
@@ -9,7 +9,7 @@ class AggregateByRegionArgs(BaseModel):
         description=(
             "Path to the polygon layer defining the regions to aggregate by — "
             "e.g. districts, boroughs, counties, isochrone zones. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     features_path: str = Field(
@@ -17,7 +17,7 @@ class AggregateByRegionArgs(BaseModel):
         description=(
             "Path to the layer whose values you want to aggregate — "
             "e.g. population points, schools, shops, crime incidents. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     agg_columns: Optional[str] = Field(
@@ -73,43 +73,13 @@ def aggregate_by_region(
     import os
     import traceback
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
-
     try:
         import geopandas as gpd
         import pandas as pd
         import re
 
-        reg_full = _res(regions_path)
-        if not reg_full:
-            return f"Regions file not found: '{regions_path}'."
-        feat_full = _res(features_path)
-        if not feat_full:
-            return f"Features file not found: '{features_path}'."
+        reg_full = tool_input_path("regions_path", regions_path)
+        feat_full = tool_input_path("features_path", features_path)
 
         gdf_reg = gpd.read_file(reg_full)
         gdf_feat = gpd.read_file(feat_full)
@@ -243,7 +213,9 @@ def aggregate_by_region(
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
 
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         out_gdf.to_file(output_path, driver="GPKG")
 
         # Summary for response

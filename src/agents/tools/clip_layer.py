@@ -1,15 +1,15 @@
 from pydantic import BaseModel, Field
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class ClipLayerArgs(BaseModel):
     input_path: str = Field(
         ...,
-        description="Path to the layer to clip. Can be relative to TOOL_EXEC_DIR (e.g. 'outputs/restaurants.gpkg') or absolute.",
+        description="Filename of the layer to clip, e.g. 'restaurants.gpkg'. Not a path.",
     )
     clip_path: str = Field(
         ...,
-        description="Path to the polygon layer to clip by (e.g. an isochrone or boundary). Relative or absolute.",
+        description="Filename of the polygon layer to clip by (e.g. an isochrone or boundary).",
     )
     output_filename: str = Field(
         ...,
@@ -23,37 +23,13 @@ def clip_layer(input_path: str, clip_path: str, output_filename: str) -> str:
     that fall within a boundary — e.g. restaurants within an isochrone, buildings
     within a catchment area, or points within an administrative boundary.
     """
-    import os
     import traceback
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
 
     try:
         import geopandas as gpd
 
-        # Resolve relative paths — check exec_dir and outputs_dir
-        def _res(p):
-            return (
-                p
-                if (os.path.isabs(p) and os.path.exists(p))
-                else next(
-                    (
-                        os.path.join(_b, p)
-                        for _b in (exec_dir, outputs_dir)
-                        if os.path.exists(os.path.join(_b, p))
-                    ),
-                    os.path.join(exec_dir, p),
-                )
-            )
-
-        input_full = _res(input_path)
-        clip_full = _res(clip_path)
-
-        if not os.path.exists(input_full):
-            return f"Input file not found: {input_path}"
-        if not os.path.exists(clip_full):
-            return f"Clip file not found: {clip_path}"
+        input_full = tool_input_path("input_path", input_path)
+        clip_full = tool_input_path("clip_path", clip_path)
 
         gdf = gpd.read_file(input_full)
         clip_gdf = gpd.read_file(clip_full)
@@ -76,7 +52,7 @@ def clip_layer(input_path: str, clip_path: str, output_filename: str) -> str:
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
         clipped.to_file(output_path, driver="GPKG")
 
         return (

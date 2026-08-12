@@ -1,10 +1,9 @@
 import json
-import os
 import re
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path_or_none
 
 # a shade-by part has to be one column name, or the viewer has nothing to look
 # up in the file's properties
@@ -132,20 +131,12 @@ def emit_ui_spec(
                     "(e.g. 'Buffer|outputs/buffer.gpkg|#ff6b35'). Generate the layer "
                     "files first; to only move the camera use viewer_control instead."
                 )
-            exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-            outputs_dir = caller_outputs_dir()
+            # the viewer fetches these by name, so a layer it could not read is
+            # reported here rather than rendering as a blank map
             missing = [
                 layer["file"]
                 for layer in layer_list
-                if not (
-                    os.path.exists(layer["file"])
-                    or os.path.exists(os.path.join(exec_dir, layer["file"]))
-                    # a layer is named "outputs/x.gpkg" but lives in the
-                    # caller's own directory under that name
-                    or os.path.exists(
-                        os.path.join(outputs_dir, os.path.basename(layer["file"]))
-                    )
-                )
+                if not tool_input_path_or_none("layers", layer["file"])
             ]
             if missing:
                 return (

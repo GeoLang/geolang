@@ -2,7 +2,44 @@ import os
 import json
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import PathRefused, tool_input_path, tool_output_path
+
+# what a parameter value has to end in to be read as a layer to open
+LAYER_EXTENSIONS = (
+    ".gpkg",
+    ".shp",
+    ".geojson",
+    ".json",
+    ".tif",
+    ".tiff",
+    ".csv",
+    ".gml",
+    ".kml",
+)
+
+
+def confined_parameter(key, value):
+    """One algorithm parameter, with any layer it names resolved to a real file.
+
+    Every other parameter shape QGIS takes is a value rather than a path, so a
+    value that still looks like a path is refused: this tool cannot tell which
+    of an algorithm's parameters it would open, and a wrong guess here opens
+    another caller's file.
+    """
+    if isinstance(value, list):
+        return [confined_parameter(key, item) for item in value]
+    if not isinstance(value, str):
+        return value
+    # a layer can carry a suffix that is not part of the name: "roads.gpkg|layername=x"
+    name, separator, suffix = value.partition("|")
+    if name.lower().endswith(LAYER_EXTENSIONS):
+        return tool_input_path(f"parameters.{key}", name) + separator + suffix
+    if any(mark in value for mark in ("/", "\\", "..")):
+        raise PathRefused(
+            f"parameters.{key} looks like a path. Name a layer of your own by "
+            f"its filename alone, e.g. 'roads.gpkg': '{value}'"
+        )
+    return value
 
 
 class RunQGISAlgorithmArgs(BaseModel):
@@ -17,14 +54,15 @@ class RunQGISAlgorithmArgs(BaseModel):
         ...,
         description=(
             "JSON string of algorithm input parameters. Common keys: "
-            "INPUT (path to input layer), OUTPUT (output path), DISTANCE (for buffer), "
-            "OVERLAY (for clip/intersection). Example: "
-            '{"INPUT": "/app/geolang/natural_earth/ne_110m_populated_places.shp", "DISTANCE": 1000}'
+            "INPUT (the layer to read), OUTPUT (the file to write), DISTANCE "
+            "(for buffer), OVERLAY (for clip/intersection). A layer is named by "
+            "its filename alone, never by a path. Example: "
+            '{"INPUT": "ne_110m_populated_places.shp", "DISTANCE": 1000}'
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename (e.g. 'result.gpkg'). Saved to outputs directory. Auto-generated if omitted.",
+        description="Output filename (e.g. 'result.gpkg'), with no directory part. Saved to your outputs directory. Auto-generated if omitted.",
     )
 
 
@@ -57,14 +95,21 @@ def run_qgis_algorithm(
     except Exception as e:
         return f"ERROR: Invalid JSON parameters: {str(e)}"
 
-    out_dir = caller_outputs_dir()
+    if not isinstance(params, dict):
+        return "ERROR: parameters must be a JSON object of parameter names to values"
 
-    if "OUTPUT" not in params:
+    given_output = params.pop("OUTPUT", None)
+    params = {key: confined_parameter(key, value) for key, value in params.items()}
+
+    if output_filename:
+        params["OUTPUT"] = tool_output_path("output_filename", output_filename)
+    elif given_output:
+        params["OUTPUT"] = tool_output_path("parameters.OUTPUT", str(given_output))
+    else:
         safe_name = algorithm_id.replace(":", "_").replace("/", "_")
-        fname = output_filename or f"{safe_name}_output.gpkg"
-        params["OUTPUT"] = os.path.join(out_dir, fname)
-    elif output_filename:
-        params["OUTPUT"] = os.path.join(out_dir, output_filename)
+        params["OUTPUT"] = tool_output_path(
+            "output_filename", f"{safe_name}_output.gpkg"
+        )
 
     try:
         from qgis.core import QgsApplication

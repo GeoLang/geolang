@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class GenerateHeatmapArgs(BaseModel):
@@ -8,7 +8,7 @@ class GenerateHeatmapArgs(BaseModel):
         ...,
         description=(
             "Path to a point GPKG layer to generate a density heatmap from. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     place_name: str = Field(
@@ -55,34 +55,7 @@ def generate_heatmap(
 
     Returns a PNG image path. Call emit_ui_spec with ui_type='image' afterwards.
     """
-    import os
     import traceback
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
 
     try:
         import numpy as np
@@ -93,11 +66,7 @@ def generate_heatmap(
         import matplotlib.pyplot as plt
         from scipy.stats import gaussian_kde
 
-        input_full = _res(input_path)
-        if not input_full:
-            return (
-                f"Input file not found: '{input_path}'. Check outputs/ or user_data/."
-            )
+        input_full = tool_input_path("input_path", input_path)
 
         gdf = gpd.read_file(input_full)
         if gdf.empty:
@@ -201,7 +170,9 @@ def generate_heatmap(
         if output_filename.lower().endswith(".png"):
             output_filename = output_filename[:-4]
 
-        output_path = os.path.join(outputs_dir, f"{output_filename}.png")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.png"
+        )
         fig.savefig(
             output_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor()
         )

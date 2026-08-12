@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class QueryElevationArgs(BaseModel):
@@ -25,10 +25,8 @@ def query_elevation(place_name: str, output_filename: str = None) -> str:
     flood risk; below 5m are high risk. Saves a point GPKG with elevation
     attribute for use in further spatial analysis.
     """
-    import os
     import traceback
 
-    outputs_dir = caller_outputs_dir()
 
     try:
         import requests
@@ -93,7 +91,7 @@ def query_elevation(place_name: str, output_filename: str = None) -> str:
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
         gdf.to_file(output_path, driver="GPKG")
 
         return (

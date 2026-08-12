@@ -47,6 +47,10 @@ One gap the split does not close, about tenants sharing an instance rather than 
 
 `outputs/` is one directory per caller, named for the `sub` of the token that arrived and created on first use. The routes that serve a file by name resolve it inside that directory, so one user's filenames and files are not another's to list or fetch. A caller with no verified subject, which is every caller when the gate is off, writes to a fixed `anonymous` directory that no subject can name. Files written before the split stay in the parent and are no longer listed or served.
 
+A tool argument naming a file is confined the same way, through `tool_input_path` and `tool_output_path` in [`src/core/utils.py`](../src/core/utils.py). Both layers call the one `layer_search_dirs()` and `allowed_roots()` there, so what a tool may open cannot drift from what a route may serve: the caller's own outputs, `user_data/` and the natural earth sets, and nothing else. An absolute path is refused rather than resolved, which is a deliberate break with what the tool schemas used to advertise: taking the basename instead would quietly open a different file than the one named. An output filename is one path component or it is refused, because trimming it to the basename would put two callers' different requests on one file.
+
+The shared reference data those tools legitimately read is not an exemption. `geocode_place` and `population_raster_path` name their datasets in code rather than from an argument, which is why the tree root can be read for them at all: nothing a caller writes chooses the name. `run_qgis_algorithm` is the one place the rule is a guess, since QGIS parameters are free-form: a value ending in a layer extension is resolved, and any other value that still looks like a path is refused rather than passed on.
+
 ## 🔴 Rotate the API keys that were once committed to `docker-compose.yml`
 
 `XAI_API_KEY` and `OPENAI_API_KEY` were committed as literals and are still in the git history. Treat them as leaked and rotate them at the provider console. Compose reads them from `.env` now. A `gitleaks` pre-commit hook would stop the next one.
@@ -69,7 +73,7 @@ Still open, and viewer-side rather than here: DuckDB-WASM will fetch any domain 
 
 ## A platform token is equivalent to code execution here
 
-Not a defect to fix, a boundary to state. Tools run in the API process with its privileges and no sandbox, and the escape hatches are what makes the agent useful: `geopandas_api` takes a pandas `query` expression, `pyqgis_api` and `run_qgis_algorithm` take algorithm parameters, and every tool reads and writes under `outputs/` and `user_data/`. Hardening `filter_query`'s grammar was considered and rejected: it would narrow one expression parser while leaving the surface it sits on unchanged, and buy the illusion that a token holder is contained.
+Not a defect to fix, a boundary to state. Tools run in the API process with its privileges and no sandbox, and the escape hatches are what makes the agent useful: `geopandas_api` takes a pandas `query` expression, `pyqgis_api` and `run_qgis_algorithm` take algorithm parameters, and every tool reads and writes under the caller's own directory in `outputs/` and under `user_data/`. Hardening `filter_query`'s grammar was considered and rejected: it would narrow one expression parser while leaving the surface it sits on unchanged, and buy the illusion that a token holder is contained.
 
 So the token is the security boundary and the only one. It should be scoped short, never committed, and rotated like an SSH key. Anything that hands one out, or accepts one from further away, is worth the same scrutiny as handing out shell access. A real sandbox is the precondition for a hosted deployment where callers are not already trusted.
 

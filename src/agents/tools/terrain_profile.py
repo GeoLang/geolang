@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class TerrainProfileArgs(BaseModel):
@@ -50,11 +50,9 @@ def terrain_profile(
 
     Returns a PNG chart image. Call emit_ui_spec after with ui_type='image'.
     """
-    import os
     import traceback
     import re
 
-    outputs_dir = caller_outputs_dir()
 
     try:
         import requests
@@ -216,7 +214,7 @@ def terrain_profile(
         if output_filename.lower().endswith(".png"):
             output_filename = output_filename[:-4]
 
-        out_path = os.path.join(outputs_dir, f"{output_filename}.png")
+        out_path = tool_output_path("output_filename", f"{output_filename}.png")
         fig.savefig(
             out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor()
         )

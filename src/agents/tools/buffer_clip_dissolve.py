@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class BufferClipDissolveArgs(BaseModel):
     input_path: str = Field(
         ...,
-        description="Path to the input vector layer (shapefile or GPKG) to clip.",
+        description="Filename of the input vector layer (shapefile or GPKG) to clip.",
     )
     center_lon: float = Field(..., description="Longitude of the buffer center point.")
     center_lat: float = Field(..., description="Latitude of the buffer center point.")
@@ -32,7 +32,6 @@ def buffer_clip_dissolve(
     Buffer a point, clip a vector layer to that buffer, optionally dissolve by a field,
     and save the result as a GeoPackage. All in one step using GeoPandas.
     """
-    import os
     import traceback
     import geopandas as gpd
     from shapely.geometry import Point
@@ -40,7 +39,8 @@ def buffer_clip_dissolve(
     # Ensure .gpkg extension
     if not output_filename.lower().endswith(".gpkg"):
         output_filename = output_filename + ".gpkg"
-    output_path = os.path.join(caller_outputs_dir(), output_filename)
+    output_path = tool_output_path("output_filename", output_filename)
+    input_full = tool_input_path("input_path", input_path)
 
     try:
         # Build buffer polygon in metric CRS (EPSG:3857)
@@ -51,7 +51,7 @@ def buffer_clip_dissolve(
         buffer_gdf = gpd.GeoDataFrame(geometry=[buffer_geom], crs="EPSG:3857")
 
         # Load and reproject input layer
-        gdf = gpd.read_file(input_path)
+        gdf = gpd.read_file(input_full)
         if gdf.crs is None:
             gdf = gdf.set_crs("EPSG:4326")
         gdf = gdf.to_crs("EPSG:3857")

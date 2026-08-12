@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class CompareLayersArgs(BaseModel):
@@ -8,14 +8,14 @@ class CompareLayersArgs(BaseModel):
         ...,
         description=(
             "Path to the first polygon layer (e.g. old isochrone, flood zone, district boundary). "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     layer_b_path: str = Field(
         ...,
         description=(
             "Path to the second polygon layer to compare against. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     layer_a_label: str = Field(
@@ -59,46 +59,15 @@ def compare_layers(
 
     Call emit_ui_spec after with all three output layers.
     """
-    import os
     import traceback
     import re
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
 
     try:
         import geopandas as gpd
         from shapely.ops import unary_union
 
-        a_full = _res(layer_a_path)
-        if not a_full:
-            return f"Layer A not found: '{layer_a_path}'."
-        b_full = _res(layer_b_path)
-        if not b_full:
-            return f"Layer B not found: '{layer_b_path}'."
+        a_full = tool_input_path("layer_a_path", layer_a_path)
+        b_full = tool_input_path("layer_b_path", layer_b_path)
 
         gdf_a = gpd.read_file(a_full)
         gdf_b = gpd.read_file(b_full)
@@ -181,7 +150,8 @@ def compare_layers(
             )
             _fname_inter = f"{output_filename}_intersection"
             _gdf_inter.to_file(
-                os.path.join(outputs_dir, f"{_fname_inter}.gpkg"), driver="GPKG"
+                tool_output_path("output_filename", f"{_fname_inter}.gpkg"),
+                driver="GPKG",
             )
             saved.append(f"outputs/{_fname_inter}.gpkg")
 
@@ -198,7 +168,8 @@ def compare_layers(
             )
             _fname_only_a = f"{output_filename}_only_a"
             _gdf_only_a.to_file(
-                os.path.join(outputs_dir, f"{_fname_only_a}.gpkg"), driver="GPKG"
+                tool_output_path("output_filename", f"{_fname_only_a}.gpkg"),
+                driver="GPKG",
             )
             saved.append(f"outputs/{_fname_only_a}.gpkg")
 
@@ -215,7 +186,8 @@ def compare_layers(
             )
             _fname_only_b = f"{output_filename}_only_b"
             _gdf_only_b.to_file(
-                os.path.join(outputs_dir, f"{_fname_only_b}.gpkg"), driver="GPKG"
+                tool_output_path("output_filename", f"{_fname_only_b}.gpkg"),
+                driver="GPKG",
             )
             saved.append(f"outputs/{_fname_only_b}.gpkg")
 

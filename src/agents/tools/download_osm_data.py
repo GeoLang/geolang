@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class DownloadOSMDataArgs(BaseModel):
@@ -36,10 +36,8 @@ def download_osm_data(
     Returns the output path and feature count. Use this whenever the user asks
     for real-world data like buildings, roads, amenities, parks, or shops.
     """
-    import os
     import traceback
 
-    outputs_dir = caller_outputs_dir()
 
     try:
         import osmnx as ox
@@ -115,7 +113,7 @@ def download_osm_data(
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
 
         # Download — try place boundary first, fall back to point+radius for addresses
         if not _coord_download:

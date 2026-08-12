@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class ClusterPointsArgs(BaseModel):
@@ -8,7 +8,7 @@ class ClusterPointsArgs(BaseModel):
         ...,
         description=(
             "Path to the point layer to cluster. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     method: str = Field(
@@ -72,40 +72,12 @@ def cluster_points(
     import traceback
     import re
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
-
     try:
         import geopandas as gpd
         import numpy as np
         from shapely.geometry import MultiPoint
 
-        full_path = _res(input_path)
-        if not full_path:
-            return f"Input file not found: '{input_path}'."
+        full_path = tool_input_path("input_path", input_path)
 
         gdf = gpd.read_file(full_path)
         if gdf.empty:
@@ -190,12 +162,12 @@ def cluster_points(
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
 
-        pts_out = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        pts_out = tool_output_path("output_filename", f"{output_filename}.gpkg")
         gdf.to_file(pts_out, driver="GPKG")
 
         # Save hull layer
         hull_filename = f"{output_filename}_hulls"
-        hull_out = os.path.join(outputs_dir, f"{hull_filename}.gpkg")
+        hull_out = tool_output_path("output_filename", f"{hull_filename}.gpkg")
         if hull_rows:
             hull_gdf = gpd.GeoDataFrame(hull_rows, crs="EPSG:4326")
             hull_gdf.to_file(hull_out, driver="GPKG")

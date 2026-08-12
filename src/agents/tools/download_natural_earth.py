@@ -1,13 +1,19 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_output_path
 
 
 class DownloadNaturalEarthArgs(BaseModel):
     scale: str = Field(
         "110m", description="Resolution level. Must be one of: '10m', '50m', '110m'."
     )
-    dataset: str = Field("populated_places", description="Type of dataset to download.")
+    # the name goes into the download url and into the file it is saved as, so a
+    # separator in it would write the download outside the reference directory
+    dataset: str = Field(
+        "populated_places",
+        pattern=r"^[a-z0-9_]+$",
+        description="Type of dataset to download, e.g. 'admin_0_countries'.",
+    )
     filter_query: Optional[str] = Field(
         None,
         description=(
@@ -105,8 +111,7 @@ def download_natural_earth_dataset(
             )
 
         out_name = output_filename or f"{dataset}_filtered.gpkg"
-        out_path = os.path.join(caller_outputs_dir(), out_name)
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        out_path = tool_output_path("output_filename", out_name)
         filtered.to_file(out_path, driver="GPKG")
         return (
             f"✅ Downloaded {scale} {dataset} and filtered to {len(filtered)} features "

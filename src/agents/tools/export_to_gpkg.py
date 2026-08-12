@@ -1,10 +1,11 @@
-import os
 from pydantic import BaseModel, Field
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class ExportToGPKGArgs(BaseModel):
-    dataset_path: str = Field(..., description="Path to input shapefile or layer")
+    dataset_path: str = Field(
+        ..., description="Filename of the input shapefile or layer"
+    )
     output_filename: str = Field(
         ..., description="Name of output file (e.g. 'output.gpkg')"
     )
@@ -19,29 +20,11 @@ def export_to_gpkg(
     """Reliable GPKG export using GeoPandas."""
     import geopandas as gpd
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
     # Ensure .gpkg extension
     if not output_filename.lower().endswith(".gpkg"):
         output_filename = output_filename + ".gpkg"
-    output_path = os.path.join(caller_outputs_dir(), output_filename)
-
-    # Resolve dataset_path — check given path, then search known directories
-    resolved = dataset_path
-    if not os.path.exists(resolved):
-        basename = os.path.basename(dataset_path)
-        search_dirs = [
-            caller_outputs_dir(),
-            os.path.join(exec_dir, "user_data"),
-            os.path.join(exec_dir, "natural_earth_110m"),
-            os.path.join(exec_dir, "natural_earth_50m"),
-            os.path.join(exec_dir, "natural_earth_10m"),
-            os.path.join(exec_dir, "natural_earth"),
-        ]
-        for d in search_dirs:
-            candidate = os.path.join(d, basename)
-            if os.path.exists(candidate):
-                resolved = candidate
-                break
+    output_path = tool_output_path("output_filename", output_filename)
+    resolved = tool_input_path("dataset_path", dataset_path)
 
     try:
         gdf = gpd.read_file(resolved)

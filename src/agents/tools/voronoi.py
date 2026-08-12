@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class VoronoiArgs(BaseModel):
@@ -9,7 +9,7 @@ class VoronoiArgs(BaseModel):
         description=(
             "Path to the point layer to generate Voronoi polygons from — "
             "e.g. hospital locations, depot sites, store locations. "
-            "Relative to outputs/ or user_data/ or absolute."
+            "A filename in outputs/ or user_data/, not a path."
         ),
     )
     boundary_path: Optional[str] = Field(
@@ -17,7 +17,7 @@ class VoronoiArgs(BaseModel):
         description=(
             "Optional polygon layer to clip the Voronoi diagram to — "
             "e.g. a city boundary, region, or isochrone. "
-            "Relative to outputs/ or absolute. "
+            "A filename in outputs/, not a path. "
             "If omitted, a convex hull of the input points is used."
         ),
     )
@@ -59,40 +59,12 @@ def voronoi(
     import traceback
     import re
 
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-    user_data_dir = os.path.join(exec_dir, "user_data")
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, user_data_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
-
     try:
         import geopandas as gpd
         import numpy as np
         from shapely.geometry import box
 
-        full_path = _res(input_path)
-        if not full_path:
-            return f"Input file not found: '{input_path}'."
+        full_path = tool_input_path("input_path", input_path)
 
         gdf = gpd.read_file(full_path)
         if gdf.empty:
@@ -129,9 +101,7 @@ def voronoi(
 
         # Load or build clip boundary
         if boundary_path:
-            bnd_full = _res(boundary_path)
-            if not bnd_full:
-                return f"Boundary file not found: '{boundary_path}'."
+            bnd_full = tool_input_path("boundary_path", boundary_path)
             bnd_gdf = gpd.read_file(bnd_full).to_crs(metric_crs)
             clip_poly = bnd_gdf.union_all()
         else:
@@ -213,7 +183,7 @@ def voronoi(
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
 
-        out_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        out_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
         out_gdf.to_file(out_path, driver="GPKG")
 
         bnd_note = (

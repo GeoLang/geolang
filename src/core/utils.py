@@ -154,6 +154,152 @@ def resolve_under(names, search_dirs, roots) -> str | None:
     return None
 
 
+def natural_earth_dirs() -> list[str]:
+    """The reference sets on disk, whichever of them have been downloaded.
+
+    A glob rather than a list of names, so a set someone downloads next is
+    reachable without a code change. A set that arrives as a symlink is skipped:
+    it would resolve outside the tree and widen the boundary.
+    """
+    return [
+        str(path)
+        for path in sorted(Path(EXEC_DIR).glob("natural_earth*"))
+        if path.is_dir() and not path.is_symlink()
+    ]
+
+
+def allowed_roots() -> list[str]:
+    """Directories a named file may resolve into, for a route or a tool argument.
+
+    `EXEC_DIR` is deliberately not listed. It is the whole tree, which puts
+    every other caller's outputs directory inside the boundary, so a name like
+    `outputs/<their-directory>/layer.gpkg` used to resolve.
+
+    user_data subdirs are deliberately not listed either. Confinement to the
+    parents covers them, and a subdir that is itself a symlink must not be able
+    to widen the boundary.
+    """
+    return [caller_outputs_dir(), str(USER_DATA_DIR), *natural_earth_dirs()]
+
+
+def layer_search_dirs() -> list[str]:
+    """Where a layer is looked up: the caller's outputs, user_data, natural earth.
+
+    The routes and the tools read through this one list, so what one of them can
+    reach cannot drift from what the other can.
+    """
+    user_data_subdirs = (
+        [str(p) for p in USER_DATA_DIR.rglob("*") if p.is_dir()]
+        if USER_DATA_DIR.exists()
+        else []
+    )
+    return [
+        caller_outputs_dir(),
+        str(USER_DATA_DIR),
+        *user_data_subdirs,
+        *natural_earth_dirs(),
+    ]
+
+
+def name_candidates(filename: str) -> list[str]:
+    """The name as given and its basename, each with the viewer's extension swap.
+
+    A tool result names a layer `outputs/roads.gpkg`, which is no longer a path
+    anyone can read: the file is in the caller's own directory under that name.
+    """
+    names = []
+    for name in dict.fromkeys([filename, os.path.basename(filename)]):
+        stem, ext = os.path.splitext(name)
+        names += [name, stem if ext else name + ".gpkg"]
+    return names
+
+
+POPULATION_RASTER_NAMES = (
+    "ghsl_pop.tif",
+    "GHS_POP.tif",
+    "ghs_pop_2020.tif",
+    "ghsl_pop_2020.tif",
+)
+
+
+def population_raster_path() -> str | None:
+    """The shared GHS-POP raster, or None when nobody has put one on disk.
+
+    Reference data rather than anyone's file, and the names are fixed here
+    rather than taken from a caller. That is why the exec dir root is searched
+    at all: nothing a caller writes may name a file there.
+    """
+    for directory in (caller_outputs_dir(), str(USER_DATA_DIR), EXEC_DIR):
+        for name in POPULATION_RASTER_NAMES:
+            candidate = os.path.join(directory, name)
+            if os.path.exists(candidate):
+                return candidate
+    return None
+
+
+class PathRefused(ValueError):
+    """A tool argument named a file the caller is not allowed to name."""
+
+
+def tool_input_path_or_none(argument: str, value: str) -> str | None:
+    """The file `argument` names, or None when it names no file the caller has.
+
+    For an argument that is a filename only some of the time: `service_path` is
+    either a layer of the caller's own or an OSM category name. An absolute path
+    is refused rather than falling through to the other meaning, so nothing is
+    reachable by naming someone else's file.
+    """
+    if not value:
+        return None
+    if os.path.isabs(value):
+        raise PathRefused(
+            f"{argument} must be a filename in your own outputs, in user_data, "
+            f"or in a natural earth set, not an absolute path: '{value}'"
+        )
+    return resolve_under(name_candidates(value), layer_search_dirs(), allowed_roots())
+
+
+def tool_input_path(argument: str, value: str) -> str:
+    """The file `argument` names, or a refusal saying what was wanted instead.
+
+    An absolute path is refused rather than looked up under its basename. It
+    names another caller's file often enough to be the reason this exists, and
+    quietly opening a same-named file of the caller's own would answer a
+    different question than the one asked.
+    """
+    path = tool_input_path_or_none(argument, value)
+    if not path:
+        raise PathRefused(
+            f"{argument}: no file named '{value}' in your outputs, in user_data, "
+            "or in the natural earth sets. Call list_outputs to see what exists."
+        )
+    return path
+
+
+def tool_output_path(argument: str, filename: str) -> str:
+    """Where a tool writes `filename`, always inside the caller's own directory.
+
+    A name carrying a directory part is refused rather than cut down to its
+    basename: two callers asking for two different paths would otherwise land
+    on one file. The resolved path is checked too, so a name that is already a
+    symlink to somewhere else is written through rather than followed.
+    """
+    single_component = filename and filename == os.path.basename(filename)
+    if not single_component or filename in (".", ".."):
+        raise PathRefused(
+            f"{argument} names a file inside your own outputs directory, so it "
+            f"must be one filename with no directory part: '{filename}'"
+        )
+    directory = Path(caller_outputs_dir())
+    path = directory / filename
+    if not path.resolve().is_relative_to(directory.resolve()):
+        raise PathRefused(
+            f"{argument} names '{filename}', which already points out of your "
+            "outputs directory. Pick another name."
+        )
+    return str(path)
+
+
 def load_catalogue() -> list:
     if not CATALOGUE_FILE.exists():
         return []

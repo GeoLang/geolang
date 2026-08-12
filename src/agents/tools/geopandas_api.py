@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from src.core.utils import caller_outputs_dir
+from src.core.utils import tool_input_path, tool_output_path
 
 
 class GeopandasArgs(BaseModel):
@@ -14,7 +14,7 @@ class GeopandasArgs(BaseModel):
     )
     dataset_path: Optional[str] = Field(
         None,
-        description="Path to file (e.g., 'natural_earth/ne_110m_populated_places.shp')",
+        description="Filename of a layer in outputs/, user_data/ or a natural earth set (e.g. 'ne_110m_populated_places.shp')",
     )
     point_coords: Optional[List[float]] = Field(
         None, description="[lon, lat] for proximity_analysis"
@@ -73,12 +73,17 @@ def geopandas_api(
             return "\n".join(log) + "\n\nRESULT: Error: Unsupported function"
 
         if func_name in {"read_file", "proximity_analysis"} and not dataset_path:
-            dataset_path = os.path.join(
-                os.environ.get("TOOL_EXEC_DIR", "/app/geolang"),
-                "natural_earth",
-                "ne_110m_populated_places.shp",
-            )
+            dataset_path = "ne_110m_populated_places.shp"
             log.append(f"Default dataset_path: {dataset_path}")
+
+        if dataset_path:
+            # to_file writes under this name, so it is checked as an output
+            dataset_path = (
+                tool_output_path("dataset_path", dataset_path)
+                if func_name == "to_file"
+                else tool_input_path("dataset_path", dataset_path)
+            )
+            kwargs["dataset_path"] = dataset_path
 
         # ─── filter: read → .query() → write ─────────────────────────────
         if func_name == "filter":
@@ -89,25 +94,12 @@ def geopandas_api(
                 log.append("Error: Missing filter_query for filter")
                 return "\n".join(log) + "\n\nRESULT: Error: Missing filter_query"
 
-            tool_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-            if not os.path.isabs(dataset_path):
-                dataset_path = os.path.join(tool_dir, dataset_path)
-            if not os.path.exists(dataset_path):
-                log.append(f"Error: File not found: {dataset_path}")
-                return "\n".join(log) + "\n\nRESULT: Error: Dataset not found"
-
             gdf = gpd.read_file(dataset_path)
             log.append(f"Loaded {len(gdf)} rows, columns: {list(gdf.columns)}")
             filtered = gdf.query(filter_query)
             log.append(f"After filter '{filter_query}': {len(filtered)} rows")
 
-            if output_path is None:
-                output_path = os.path.join(caller_outputs_dir(), "filtered.gpkg")
-            elif not os.path.isabs(output_path):
-                output_path = os.path.join(
-                    caller_outputs_dir(), os.path.basename(output_path)
-                )
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            output_path = tool_output_path("output_path", output_path or "filtered.gpkg")
             filtered.to_file(output_path, driver="GPKG")
             log.append(f"Saved to {output_path}")
             log.append("\n=== SUCCESS ===")
@@ -122,11 +114,6 @@ def geopandas_api(
                 log.append("Error: Missing dataset_path")
                 log.append("\n=== FAILURE ===")
                 return "\n".join(log) + "\n\nRESULT: Error: Missing dataset_path"
-
-            if not os.path.exists(dataset_path):
-                log.append(f"Error: File not found: {dataset_path}")
-                log.append("\n=== FAILURE ===")
-                return "\n".join(log) + "\n\nRESULT: Error: Dataset not found"
 
             point = Point(point_coords[0], point_coords[1])
             gdf_point = gpd.GeoDataFrame(geometry=[point], crs="EPSG:4326")
@@ -169,11 +156,6 @@ def geopandas_api(
             log.append("Error: Missing dataset_path")
             log.append("\n=== FAILURE ===")
             return "\n".join(log) + "\n\nRESULT: Error: Missing dataset_path"
-
-        if func_name == "read_file" and not os.path.exists(dataset_path):
-            log.append(f"Error: File not found: {dataset_path}")
-            log.append("\n=== FAILURE ===")
-            return "\n".join(log) + "\n\nRESULT: Error: Dataset not found"
 
         # Map dataset_path → correct parameter name for each function
         call_kwargs = dict(kwargs)

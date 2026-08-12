@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import caller_outputs_dir
+from src.core.utils import (
+    population_raster_path,
+    tool_input_path,
+    tool_input_path_or_none,
+    tool_output_path,
+)
 
 
 class QueryZonalPopulationArgs(BaseModel):
@@ -8,7 +13,7 @@ class QueryZonalPopulationArgs(BaseModel):
         ...,
         description=(
             "Path to a polygon GPKG to sum population within — typically an isochrone. "
-            "Relative to outputs/ or absolute. E.g. 'leicester_driv_isochrones.gpkg'."
+            "A filename in outputs/, not a path. E.g. 'leicester_driv_isochrones.gpkg'."
         ),
     )
     place_name: str = Field(
@@ -45,64 +50,21 @@ def query_zonal_population(
     Use this when the user asks how many people live within a drive/walk time,
     or wants accurate population catchment for a service area or depot.
     """
-    import os
     import traceback
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    outputs_dir = caller_outputs_dir()
-
-    def _res(p):
-        return (
-            None
-            if not p
-            else (
-                p
-                if os.path.isabs(p) and os.path.exists(p)
-                else next(
-                    (
-                        c
-                        for _b in (outputs_dir, exec_dir)
-                        for _n in (
-                            [p] + ([] if p.lower().endswith(".gpkg") else [p + ".gpkg"])
-                        )
-                        for c in [os.path.join(_b, _n)]
-                        if os.path.exists(c)
-                    ),
-                    None,
-                )
-            )
-        )
 
     try:
         import geopandas as gpd
         import numpy as np
 
-        # Resolve polygon
-        poly_path = _res(polygon_path)
-        if not poly_path:
-            return (
-                f"Polygon file not found: '{polygon_path}'. "
-                f"Check the filename in outputs/ or provide an absolute path."
-            )
+        poly_path = tool_input_path("polygon_path", polygon_path)
 
         gdf = gpd.read_file(poly_path)
         if gdf.crs and gdf.crs.to_epsg() != 4326:
             gdf = gdf.to_crs("EPSG:4326")
 
-        # Resolve GHSL raster
-        raster_candidates = [ghsl_raster_path] if ghsl_raster_path else []
-        raster_candidates += [
-            "ghsl_pop.tif",
-            "GHS_POP.tif",
-            "ghs_pop_2020.tif",
-            "ghsl_pop_2020.tif",
-        ]
-        raster_path = None
-        for candidate in raster_candidates:
-            if candidate:
-                raster_path = _res(candidate)
-                if raster_path:
-                    break
+        raster_path = tool_input_path_or_none(
+            "ghsl_raster_path", ghsl_raster_path
+        ) or population_raster_path()
 
         if not raster_path:
             # Fallback: WorldPop bounding-box API
@@ -200,7 +162,9 @@ def query_zonal_population(
             # Strip .gpkg if already present to avoid double extension
             if output_filename.lower().endswith(".gpkg"):
                 output_filename = output_filename[:-5]
-            output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+            output_path = tool_output_path(
+                "output_filename", f"{output_filename}.gpkg"
+            )
             out_gdf.to_file(output_path, driver="GPKG")
 
             time_str = ", ".join(
@@ -245,7 +209,9 @@ def query_zonal_population(
         # Strip .gpkg if already present to avoid double extension
         if output_filename.lower().endswith(".gpkg"):
             output_filename = output_filename[:-5]
-        output_path = os.path.join(outputs_dir, f"{output_filename}.gpkg")
+        output_path = tool_output_path(
+            "output_filename", f"{output_filename}.gpkg"
+        )
         out_gdf.to_file(output_path, driver="GPKG")
 
         time_str = ", ".join(f"{r['minutes']}min={r['population']:,}" for r in results)
