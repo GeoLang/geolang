@@ -49,6 +49,35 @@ def test_no_layers_is_an_error(outputs):
     assert "viewer_control" in res
 
 
+def test_shade_by_rides_on_a_fourth_part(outputs):
+    res = emit_ui_spec("map", layers="Gaps|outputs/buffer.gpkg|#ff6b35|gap_score")
+    layer = spec_of(res)["layers"][0]
+    assert layer["shade_by"] == "gap_score"
+    assert layer["color"] == "#ff6b35"
+
+
+def test_shade_by_survives_an_empty_color(outputs):
+    res = emit_ui_spec("map", layers="Gaps|outputs/buffer.gpkg||gap_score")
+    layer = spec_of(res)["layers"][0]
+    assert layer["shade_by"] == "gap_score"
+    assert layer["color"] == "#3388ff"
+
+
+def test_shade_by_accepted_in_json_array(outputs):
+    res = emit_ui_spec(
+        "map",
+        layers='[{"name": "Gaps", "file": "outputs/buffer.gpkg", "shade_by": "gap_score"}]',
+    )
+    assert spec_of(res)["layers"][0]["shade_by"] == "gap_score"
+
+
+def test_prose_instead_of_a_column_is_an_error(outputs):
+    res = emit_ui_spec("map", layers="Gaps|outputs/buffer.gpkg|#ff6b35|the gap score column")
+    assert res.startswith("ERROR")
+    assert "the gap score column" in res
+    assert "gap_score" in res
+
+
 def test_missing_file_is_an_error(outputs):
     res = emit_ui_spec("map", layers="Ghost|outputs/nope.gpkg")
     assert res.startswith("ERROR")

@@ -374,7 +374,9 @@ def service_gap(
             f"Underserved: {n_under} ({pct_under}%), "
             f"Gap: {n_gap} ({pct_gap}%).{pop_note} "
             f"Saved to outputs/{output_filename}.gpkg. "
-            f"Each cell carries 'gap_score' and 'gap_class' (0=served, 1=underserved, 2=gap)."
+            f"Each cell carries 'gap_score' and 'gap_class' (0=served, 1=underserved, 2=gap). "
+            f"Shade it by passing 'gap_score' as the fourth part of the emit_ui_spec layer "
+            f"entry: 'Service gaps|outputs/{output_filename}.gpkg|#ff6b35|gap_score'."
         )
 
     except Exception as e:

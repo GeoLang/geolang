@@ -78,6 +78,11 @@ PERSONA = (
     "After any GPKG output, call emit_ui_spec with ui_type='map', set center_lon and center_lat, "
     "and list layers as semicolons separated: 'Name|outputs/file.gpkg|#color;Name2|outputs/file2.gpkg|#color2'. "
     "For multi-layer results, include all layers in a single emit_ui_spec call. "
+    "A layer entry takes an optional fourth part: the name of one column in that file "
+    "worth colouring by, e.g. 'Gaps|outputs/gaps.gpkg|#ff6b35|gap_score'. Add it when the "
+    "tool that wrote the file named a score or class column, and the viewer shades the "
+    "layer by it, so the user does not have to pick the column. Only ever name a column "
+    "the tool said the file carries, and leave the part off otherwise. "
     # Always re-render on request — the viewer's state is not yours to assume
     "IMPORTANT: When the user asks to show, display, render, or zoom to something, ALWAYS emit the "
     "ui_spec or viewer_control call again, even if you believe it is already on the map. "
@@ -146,8 +151,8 @@ PERSONA = (
     "'show service gaps for hospitals/schools/parks', or 'which parts of the city lack Y', "
     "use service_gap. Pass a place name and either a file path or an OSM keyword (e.g. 'hospitals', 'schools') "
     "as service_path. Set service_radius_km to the user's catchment distance. "
-    "After service_gap, always call emit_ui_spec with ui_type='map' and say which "
-    "cells are gaps, citing 'gap_score'. "
+    "After service_gap, always call emit_ui_spec with ui_type='map', shade the cell layer "
+    "by 'gap_score' (the fourth part of its layer entry) and say which cells are gaps. "
     # Clustering
     "IMPORTANT: When the user asks to 'cluster', 'find groups', 'identify hotspots', or 'segment' a point layer, "
     "use cluster_points. Use method='dbscan' for irregular clusters or noise detection, "

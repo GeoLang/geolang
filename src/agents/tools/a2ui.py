@@ -1,7 +1,12 @@
 import json
 import os
+import re
 from pydantic import BaseModel, Field
 from typing import Optional
+
+# a shade-by part has to be one column name, or the viewer has nothing to look
+# up in the file's properties
+SHADE_FIELD_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
 class EmitUISpecArgs(BaseModel):
@@ -25,9 +30,12 @@ class EmitUISpecArgs(BaseModel):
         None,
         description=(
             "Semicolon-separated list of layer specs for type 'map'. "
-            "Each layer: 'name|file_path|color'. "
+            "Each layer: 'name|file_path|color|shade_by'. "
             "Example: 'Isochrones|outputs/london_isochrones.gpkg|#3388ff;Cafes|outputs/cafes.gpkg|#ff0000'. "
-            "Color is optional (default #3388ff)."
+            "Color is optional (default #3388ff). "
+            "shade_by is optional: one column name in that file worth colouring by "
+            "(e.g. 'Gaps|outputs/gaps.gpkg|#ff6b35|gap_score'), which shades the layer "
+            "by that column instead of drawing it in one colour."
         ),
     )
     image_path: Optional[str] = Field(
@@ -81,6 +89,7 @@ def emit_ui_spec(
                                     str(item.get("name", "")),
                                     str(item.get("file") or item.get("file_path") or item.get("path") or ""),
                                     str(item.get("color") or "#3388ff"),
+                                    str(item.get("shade_by") or "").strip(),
                                 ))
                     except json.JSONDecodeError:
                         pass
@@ -88,15 +97,30 @@ def emit_ui_spec(
                     for layer_str in s.split(";"):
                         parts = [p.strip() for p in layer_str.split("|")]
                         if len(parts) >= 2:
-                            parts += ["#3388ff"] * (3 - len(parts))
-                            entries.append((parts[0], parts[1], parts[2] or "#3388ff"))
+                            parts += [""] * (4 - len(parts))
+                            entries.append((parts[0], parts[1], parts[2] or "#3388ff", parts[3]))
+            unusable = [
+                shade_by
+                for _, _, _, shade_by in entries
+                if shade_by and not SHADE_FIELD_PATTERN.match(shade_by)
+            ]
+            if unusable:
+                return (
+                    f"ERROR: cannot shade by {', '.join(unusable)}. The fourth part of a "
+                    "layer entry is one column name in that file, e.g. "
+                    "'Gaps|outputs/gaps.gpkg|#ff6b35|gap_score' — not a description, a "
+                    "value or a list. Leave it off if no column is worth colouring by."
+                )
             layer_list = []
             seen_files = set()
-            for name, file, color in entries:
+            for name, file, color, shade_by in entries:
                 if not file or file in seen_files:
                     continue
                 seen_files.add(file)
-                layer_list.append({"name": name, "file": file, "color": color})
+                layer = {"name": name, "file": file, "color": color}
+                if shade_by:
+                    layer["shade_by"] = shade_by
+                layer_list.append(layer)
             # an empty-layer "success" lets the model declare victory over a
             # blank map (grok looped on exactly that), so fail with instructions
             if not layer_list:
