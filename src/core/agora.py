@@ -287,8 +287,8 @@ async def _request(method: str, path: str, token: str | None, **kwargs) -> dict:
 async def grant_edit_role(document_id: str, user_id: str, caller_token: str) -> None:
     """Give `user_id` edit rights on the document, acting as the caller.
 
-    The caller's own token is what keeps the agent out of documents its caller
-    could not edit: agora refuses a grant the caller may not make.
+    The scoped token keeps the caller's subject. Agora refuses a grant that
+    subject may not make on this document.
     """
     await _request(
         "PUT",

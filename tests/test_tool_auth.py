@@ -8,6 +8,7 @@ monkeypatch, so the rest of the suite still runs in dev mode.
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import time
 
 import jwt
 import pytest
@@ -16,7 +17,14 @@ from pydantic import BaseModel
 
 from src.api import server
 from src.core import utils
-from src.core.auth import SECRET_ENV, platform_secret
+from src.core.auth import (
+    SECRET_ENV,
+    TOOL_SCOPE_CLAIM,
+    TOOL_TOKEN_LIFETIME_SECONDS,
+    TOOL_TOKEN_USE,
+    TOOL_TOKEN_USE_CLAIM,
+    platform_secret,
+)
 from src.core.user_token import user_token_scope
 
 client = TestClient(server.app)
@@ -149,7 +157,7 @@ def test_the_role_is_not_checked_here(gated, probe):
     assert probe == [True]
 
 
-def test_the_validated_token_is_forwarded_unchanged(gated, monkeypatch):
+def test_the_tool_receives_a_short_role_free_token(gated, monkeypatch):
     from src.core.user_token import current_user_token
 
     seen = []
@@ -164,9 +172,30 @@ def test_the_validated_token_is_forwarded_unchanged(gated, monkeypatch):
 
     monkeypatch.setattr(server, "load_external_tools", lambda: [(probe, ProbeArgs)])
 
-    token = mint()
-    assert call(token).status_code == 200
-    assert seen == [token]
+    source = mint(role="admin")
+    source_claims = jwt.decode(source, SECRET, algorithms=["HS256"])
+    assert call(source).status_code == 200
+
+    assert len(seen) == 1
+    claims = jwt.decode(seen[0], SECRET, algorithms=["HS256"])
+    assert claims["sub"] == source_claims["sub"]
+    assert claims[TOOL_TOKEN_USE_CLAIM] == TOOL_TOKEN_USE
+    assert claims[TOOL_SCOPE_CLAIM] == []
+    assert "role" not in claims
+    assert claims["exp"] <= source_claims["exp"]
+    assert claims["exp"] - int(time.time()) <= TOOL_TOKEN_LIFETIME_SECONDS
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {TOOL_TOKEN_USE_CLAIM: TOOL_TOKEN_USE, TOOL_SCOPE_CLAIM: []},
+        {TOOL_TOKEN_USE_CLAIM: "other", TOOL_SCOPE_CLAIM: []},
+    ],
+)
+def test_a_downstream_tool_token_cannot_open_the_tool_route(gated, probe, claims):
+    assert call(mint(**claims)).status_code == 401
+    assert probe == []
 
 
 def test_the_manifest_stays_open(gated):

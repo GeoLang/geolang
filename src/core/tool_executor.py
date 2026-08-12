@@ -4,9 +4,9 @@ A tool hands caller-written arguments to geopandas, QGIS and DuckDB, so a
 process that runs one can be made to run other things. This process holds the
 platform signing secret, which is worth every user's identity on every service
 in the platform. With `GEOLANG_EXECUTOR_URL` set the call is forwarded to a
-process that holds no signing secret, no service account and no model key: the
-only credential it ever sees is the caller's own bearer, for the length of the
-call.
+process that holds no signing secret, no service account and no model key. The
+only credential it sees is a five-minute token limited to that tool's exact
+downstream operation scopes.
 
 Unset, tools run here. That is the standalone stack, the test suite and a
 single-tenant self-host, where there is no second tenant for an escape to reach.
@@ -25,6 +25,7 @@ import os
 
 import httpx
 
+from src.core.auth import exchange_tool_token, platform_secret, source_token_role
 from src.core.user_token import user_token_scope
 from src.core.utils import current_caller_directory
 
@@ -37,6 +38,30 @@ EXECUTOR_SECRET_HEADER = "X-Geolang-Executor"
 # a tool call routinely blocks for minutes: QGIS sessions, OSM extracts
 EXECUTOR_TIMEOUT_SECONDS = 900.0
 
+PTOLEMY_READ_SCOPE = "ptolemy:read"
+TILETOPIA_READ_SCOPE = "tiletopia:read"
+GEODUKT_RUN_SCOPE = "geodukt:run"
+AGORA_WRITE_SCOPE = "agora:write"
+
+ADMIN_ROLE = "admin"
+EDITOR_ROLE = "editor"
+VIEWER_ROLE = "viewer"
+ALL_PLATFORM_ROLES = frozenset({ADMIN_ROLE, EDITOR_ROLE, VIEWER_ROLE})
+WRITE_PLATFORM_ROLES = frozenset({ADMIN_ROLE, EDITOR_ROLE})
+
+SCOPE_SOURCE_ROLES = {
+    PTOLEMY_READ_SCOPE: ALL_PLATFORM_ROLES,
+    TILETOPIA_READ_SCOPE: ALL_PLATFORM_ROLES,
+    GEODUKT_RUN_SCOPE: WRITE_PLATFORM_ROLES,
+    AGORA_WRITE_SCOPE: ALL_PLATFORM_ROLES,
+}
+
+TOOL_SCOPES = {
+    "ptolemy_query": (PTOLEMY_READ_SCOPE,),
+    "list_tilesets": (TILETOPIA_READ_SCOPE,),
+    "run_workflow": (GEODUKT_RUN_SCOPE,),
+}
+
 
 def executor_url() -> str | None:
     """Where the isolated executor answers, or None when tools run here."""
@@ -48,12 +73,52 @@ def executor_secret() -> str | None:
     return (os.environ.get(EXECUTOR_SECRET_ENV) or "").strip() or None
 
 
-def execute_tool(name: str, func, args: dict, token: str | None) -> str:
+def required_tool_scopes(name: str) -> tuple[str, ...]:
+    """The downstream operations one named tool execution may perform."""
+    return TOOL_SCOPES.get(name, ())
+
+
+def source_role_allows_scopes(role: str | None, scopes: tuple[str, ...]) -> bool:
+    """Whether delegated operations stay within the source token's role."""
+    return all(role in SCOPE_SOURCE_ROLES.get(scope, frozenset()) for scope in scopes)
+
+
+def downstream_token(
+    source_token: str | None, scopes: list[str] | tuple[str, ...]
+) -> str | None:
+    """A reduced bearer for exact operations, or the dev bearer unchanged."""
+    if platform_secret() is None:
+        return source_token
+    requested_scopes = tuple(scopes)
+    role = source_token_role(source_token)
+    if not source_role_allows_scopes(role, requested_scopes):
+        shown_role = role or "unknown"
+        raise PermissionError(
+            f"the {shown_role} role may not delegate {', '.join(requested_scopes)}"
+        )
+    token = exchange_tool_token(source_token, requested_scopes)
+    if token is None:
+        raise RuntimeError("could not mint a scoped token for this operation")
+    return token
+
+
+def tool_execution_token(name: str, source_token: str | None) -> str | None:
+    """The bearer a named tool receives for one execution."""
+    return downstream_token(source_token, required_tool_scopes(name))
+
+
+def execute_tool(
+    name: str,
+    func,
+    args: dict,
+    token: str | None,
+) -> str:
     """Run one already-validated tool call and answer with its result.
 
     Raises what the tool raised, so both callers report a failure the way they
     always have.
     """
+    token = tool_execution_token(name, token)
     url = executor_url()
     if url is None:
         with user_token_scope(token):

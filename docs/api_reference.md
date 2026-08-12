@@ -84,7 +84,7 @@ Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>
 
 Add `"notify": true` when running a tool outside the model's turn, such as the viewer's plan-approval button calling `run_workflow`: the result is appended to the active sibyl session so the model can answer follow-up questions about it. sibyl never sets the flag, so a run the model itself asked for is not reported back to it twice.
 
-An `Authorization: Bearer <jwt>` header sets the identity the tool's own outbound calls go out as, for the length of that call. `PTOLEMY_API_TOKEN` is the service account ptolemy falls back on when there is no caller.
+An `Authorization: Bearer <jwt>` header sets the caller identity. Geolang exchanges it before execution for a role-free token that expires within five minutes and carries only the exact downstream operation scopes that named tool needs. `PTOLEMY_API_TOKEN` is the service account ptolemy falls back on in unauthenticated standalone mode.
 
 With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`) and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer, reading a share by id and reading a live layer by its token are never gated.
 
@@ -102,11 +102,13 @@ Mints the token an MCP client authenticates with. Needs a live platform token of
 
 Request `{"lifetime_seconds": <int>}`, optional, defaulting to and capped at `MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS` (30 days). Outside `0 < n <= cap` the route answers `422`. Response `{"token": "<jwt>", "expires_at": <unix seconds>}`, where `expires_at` is read back out of the minted token rather than computed beside it. With no secret set the route answers `503`: there is nothing to sign with.
 
-The token is an ordinary platform token carrying one extra private claim, `geolang_use: "mcp"`. Only this service reads it, and only to decide what may be presented at `/mcp`. Downstream services ignore it, and a tool's outbound calls carry this very token, so the credential's reach at ptolemy, tiletopia, geodukt and agora is unchanged. The claim is private rather than `aud` on purpose: every platform service decodes with an audience of `None`, which rejects any token that carries an `aud` at all, so an `aud` here would break the tools rather than scope them. The live document bridge's own `agent:<sub>` tokens are minted without the claim and are unaffected.
+The MCP token carries the private claim `geolang_use: "mcp"`, which only opens this endpoint, and the source platform role in `source_role`. Neither reaches a tool or downstream service. Before each execution geolang mints a role-free JWT carrying the same `sub`, `token_use: "tool"`, and a JSON string array named `scope`. Its `exp` is the earlier of the MCP token's expiry or five minutes from exchange. `ptolemy_query` gets `ptolemy:read`, `list_tilesets` gets `tiletopia:read`, and `run_workflow` gets `geodukt:run`. Other tools get an empty array. Exact scope strings are enforced downstream, with no role fallback. The source role also caps the exchange: a viewer can receive read scopes, but not `geodukt:run`.
+
+A bound result uses a separate `agora:write` token minted after the tool returns. The tool and remote executor never receive that token. The live document bridge's `agent:<sub>` WebSocket token is also role-free and limited to `agora:write`.
 
 The endpoint is stateless: no session id is issued and nothing is kept between requests, so a call is only ever as authorised as the bearer it arrives with.
 
-Every request needs `Authorization: Bearer <jwt>`, `initialize` included, and that bearer is the identity the tool's outbound calls go out as. A missing or bad token is `401` with `WWW-Authenticate: Bearer`. Without `PLATFORM_JWT_SECRET` the endpoint is open, like the rest of the API.
+Every request needs `Authorization: Bearer <jwt>`, `initialize` included. A missing or bad token is `401` with `WWW-Authenticate: Bearer`. Without `PLATFORM_JWT_SECRET` the endpoint is open, like the rest of the API.
 
 `MCP_ALLOWED_HOSTS` must name the public hostname, or every call answers `421`: the transport checks the `Host` header against it to block DNS rebinding, and behind the platform proxy the Host is the public name rather than localhost.
 
@@ -144,7 +146,7 @@ Last, a file expires **90 days** after the last time anything fetched it or a do
 
 The tool's own result text is never changed by any of this. A document write is reported as a second text content block beside it, whether it succeeded or failed, so a document that could not be written never costs the caller the tool result.
 
-The agent joins as `agent:<caller sub>`, a short-lived identity geolang signs with `PLATFORM_JWT_SECRET`. It is put on the document by a membership grant made with the **caller's own** token, so it can never reach a document its caller could not edit. Binding to a document id therefore needs that secret set and a live platform token; a share link binding writes as the link's own session instead and is refused unless the link grants edit.
+The agent joins as `agent:<caller sub>` using a short-lived `agora:write` token signed with `PLATFORM_JWT_SECRET`. It is put on the document by a membership grant made with a separate `agora:write` token for the caller's subject. Agora still applies the caller's document membership, so the agent cannot reach a document its caller could not edit. Binding to a document id therefore needs that secret set and a live platform token. A share link binding writes as the link's own session instead and is refused unless the link grants edit.
 
 ## Debug
 

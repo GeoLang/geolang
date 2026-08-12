@@ -13,7 +13,7 @@ import asyncio
 import json
 import threading
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import jwt
 import pytest
@@ -30,9 +30,14 @@ from src.core.auth import (
     MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
     MCP_CLAIM,
     MCP_CLAIM_VALUE,
+    MCP_SOURCE_ROLE_CLAIM,
     SECRET_ENV,
-    sign_platform_token,
+    TOOL_SCOPE_CLAIM,
+    TOOL_TOKEN_USE,
+    TOOL_TOKEN_USE_CLAIM,
+    sign_tool_token,
 )
+from src.core.tool_executor import AGORA_WRITE_SCOPE
 from src.core.user_token import current_user_token
 from tests.test_agora import FakeAgora
 from tests.test_route_auth import SECRET, mint
@@ -46,9 +51,16 @@ VIEWER_CMD = {"action": "fly_to", "params": {"lon": 2.35, "lat": 48.85}}
 DOCUMENT_ID = "0f8b1c2d-3e4f-4a5b-8c7d-9e0f1a2b3c4d"
 
 
-def mcp_mint(**claims):
+def mcp_mint(source_role="editor", lifetime=timedelta(hours=1), **claims):
     """A token for this endpoint, carrying what `POST /mcp/token` puts in one."""
-    return mint(**{MCP_CLAIM: MCP_CLAIM_VALUE, **claims})
+    payload = {
+        "sub": "u1",
+        "exp": datetime.now(timezone.utc) + lifetime,
+        MCP_CLAIM: MCP_CLAIM_VALUE,
+        MCP_SOURCE_ROLE_CLAIM: source_role,
+        **claims,
+    }
+    return jwt.encode(payload, SECRET, algorithm="HS256")
 
 
 @pytest.fixture(scope="module")
@@ -177,8 +189,7 @@ def test_an_unknown_tool_is_a_protocol_error(open_mode, client):
 # ── who the tool runs as ─────────────────────────────────────────────────
 
 
-def test_the_callers_bearer_is_what_the_tool_acts_as(gated, client, monkeypatch):
-    """The token on the MCP request is the one the tool's outbound calls carry."""
+def test_the_tool_acts_with_a_reduced_bearer(gated, client, monkeypatch):
     seen = []
 
     class NoArgs(BaseModel):
@@ -198,9 +209,44 @@ def test_the_callers_bearer_is_what_the_tool_acts_as(gated, client, monkeypatch)
     )
 
     assert text_of(response) == "ok"
-    assert seen == [token]
+    assert len(seen) == 1
+    claims = jwt.decode(seen[0], SECRET, algorithms=["HS256"])
+    assert claims["sub"] == "u1"
+    assert claims[TOOL_TOKEN_USE_CLAIM] == TOOL_TOKEN_USE
+    assert claims[TOOL_SCOPE_CLAIM] == []
+    assert "role" not in claims
     # and the scope is not left behind for the next caller
     assert current_user_token() is None
+
+
+def test_a_viewer_cannot_exchange_mcp_access_for_a_workflow_run(
+    gated, client, monkeypatch
+):
+    ran = []
+
+    class NoArgs(BaseModel):
+        pass
+
+    def run_workflow():
+        """Record a workflow run that should never start."""
+        ran.append(True)
+        return "ran"
+
+    monkeypatch.setattr(
+        mcp_server, "load_external_tools", lambda: [(run_workflow, NoArgs)]
+    )
+
+    response = call(
+        client,
+        "tools/call",
+        {"name": "run_workflow", "arguments": {}},
+        token=mcp_mint(source_role="viewer"),
+    )
+
+    result = result_of(response)
+    assert result["isError"] is True
+    assert "viewer role" in result["content"][0]["text"]
+    assert ran == []
 
 
 # ── the live document a call can bind itself to ──────────────────────────
@@ -242,6 +288,19 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
     gated, client, monkeypatch
 ):
     fake = FakeAgora()
+    execution_tokens = []
+
+    class NoArgs(BaseModel):
+        pass
+
+    def bound_probe():
+        """Return a map command and record the bearer used to produce it."""
+        execution_tokens.append(current_user_token())
+        return f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
+
+    monkeypatch.setattr(
+        mcp_server, "load_external_tools", lambda: [(bound_probe, NoArgs)]
+    )
 
     with agora_serving(fake, monkeypatch) as port:
         with respx.mock(base_url=f"http://127.0.0.1:{port}") as mock:
@@ -252,8 +311,8 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
                 client,
                 "tools/call",
                 {
-                    "name": "viewer_control",
-                    "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
+                    "name": "bound_probe",
+                    "arguments": {},
                 },
                 token=mcp_mint(),
                 document=DOCUMENT_ID,
@@ -263,7 +322,21 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
     # the tool's own text is untouched, the document write is reported beside it
     assert content[0]["text"] == f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
     assert content[1]["text"] == "Live document: camera moved."
+    execution_claims = jwt.decode(
+        execution_tokens[0], SECRET, algorithms=["HS256"]
+    )
+    assert execution_claims[TOOL_SCOPE_CLAIM] == []
+    assert AGORA_WRITE_SCOPE not in execution_claims[TOOL_SCOPE_CLAIM]
     assert grant.call_count == 1
+    grant_token = grant.calls.last.request.headers["authorization"].removeprefix(
+        "Bearer "
+    )
+    grant_claims = jwt.decode(grant_token, SECRET, algorithms=["HS256"])
+    assert grant_claims[TOOL_SCOPE_CLAIM] == [AGORA_WRITE_SCOPE]
+    assert "role" not in grant_claims
+    session_token = fake.authorization.removeprefix("Bearer ")
+    session_claims = jwt.decode(session_token, SECRET, algorithms=["HS256"])
+    assert session_claims[TOOL_SCOPE_CLAIM] == [AGORA_WRITE_SCOPE]
     assert [frame["type"] for frame in fake.received] == ["presence"]
     assert fake.received[0]["viewport"] == {"center": [2.35, 48.85], "zoom": 16}
 
@@ -393,6 +466,8 @@ def test_a_minted_token_acts_as_whoever_asked_for_it(gated, client):
 
     assert claims["sub"] == "someone-else"
     assert claims[MCP_CLAIM] == MCP_CLAIM_VALUE
+    assert claims[MCP_SOURCE_ROLE_CLAIM] == "editor"
+    assert "role" not in claims
     assert claims["exp"] == minted["expires_at"]
 
 
@@ -416,14 +491,18 @@ def test_minting_says_so_when_there_is_nothing_to_sign_with(open_mode, client):
     assert response.status_code == 503
 
 
-def test_the_bridges_agent_token_is_not_an_mcp_token(gated):
-    """It writes to agora, never back to us, so it must not carry the marker."""
-    token = sign_platform_token("agent:u1", "GeoLang agent", 120)
+def test_the_bridges_agent_token_only_writes_to_agora(gated):
+    token = sign_tool_token(
+        "agent:u1", "GeoLang agent", 120, [AGORA_WRITE_SCOPE]
+    )
 
     claims = jwt.decode(token, SECRET, algorithms=["HS256"])
 
     assert claims["sub"] == "agent:u1"
     assert MCP_CLAIM not in claims
+    assert claims[TOOL_TOKEN_USE_CLAIM] == TOOL_TOKEN_USE
+    assert claims[TOOL_SCOPE_CLAIM] == [AGORA_WRITE_SCOPE]
+    assert "role" not in claims
 
 
 # ── transport ────────────────────────────────────────────────────────────

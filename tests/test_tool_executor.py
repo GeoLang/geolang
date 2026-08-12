@@ -6,6 +6,7 @@ executor, and `src.api.executor` is the remote one. The suite itself never sets
 """
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -17,11 +18,23 @@ from pydantic import BaseModel
 
 from src.api import executor
 from src.core import tool_executor, utils
-from src.core.auth import SECRET_ENV, UNAUTHENTICATED_ENV
+from src.core.auth import (
+    MCP_SOURCE_ROLE_CLAIM,
+    SECRET_ENV,
+    TOOL_SCOPE_CLAIM,
+    TOOL_TOKEN_LIFETIME_SECONDS,
+    TOOL_TOKEN_USE,
+    TOOL_TOKEN_USE_CLAIM,
+    UNAUTHENTICATED_ENV,
+    sign_mcp_token,
+)
 from src.core.tool_executor import (
     EXECUTOR_SECRET_ENV,
     EXECUTOR_SECRET_HEADER,
     EXECUTOR_URL_ENV,
+    GEODUKT_RUN_SCOPE,
+    PTOLEMY_READ_SCOPE,
+    TILETOPIA_READ_SCOPE,
     execute_tool,
 )
 from src.core.user_token import current_user_token
@@ -249,9 +262,15 @@ def directory_tool(monkeypatch):
     )
 
 
-def platform_token(subject):
+def platform_token(subject, lifetime=timedelta(hours=1), role=None):
+    claims = {
+        "sub": subject,
+        "exp": datetime.now(timezone.utc) + lifetime,
+    }
+    if role:
+        claims["role"] = role
     return jwt.encode(
-        {"sub": subject, "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        claims,
         PLATFORM_SECRET,
         algorithm="HS256",
     )
@@ -287,12 +306,99 @@ def test_the_forwarded_call_names_the_verified_directory(monkeypatch, remote):
     assert "outputs_directory" not in body["args"]
 
 
-def test_an_anonymous_call_names_the_anonymous_directory(monkeypatch, remote):
+@pytest.mark.parametrize(
+    "name, expected_scopes",
+    [
+        ("ptolemy_query", [PTOLEMY_READ_SCOPE]),
+        ("list_tilesets", [TILETOPIA_READ_SCOPE]),
+        ("run_workflow", [GEODUKT_RUN_SCOPE]),
+        ("probe", []),
+    ],
+)
+def test_the_executor_only_receives_the_named_tools_scopes(
+    name, expected_scopes, monkeypatch, remote
+):
+    monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
+    source = platform_token("alice", role="admin")
+
+    execute_tool(name, tool_that_reports_its_caller, {}, source)
+
+    bearer = remote[-1]["headers"]["Authorization"].removeprefix("Bearer ")
+    claims = jwt.decode(bearer, PLATFORM_SECRET, algorithms=["HS256"])
+    assert claims["sub"] == "alice"
+    assert claims[TOOL_TOKEN_USE_CLAIM] == TOOL_TOKEN_USE
+    assert claims[TOOL_SCOPE_CLAIM] == expected_scopes
+    assert "role" not in claims
+
+
+def test_a_viewer_cannot_receive_the_workflow_run_scope(monkeypatch, remote):
+    monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
+    source = platform_token("alice", role="viewer")
+
+    with pytest.raises(PermissionError, match="viewer role"):
+        execute_tool("run_workflow", tool_that_reports_its_caller, {}, source)
+
+    assert remote == []
+
+
+def test_known_read_roles_keep_read_scopes(monkeypatch, remote):
     monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
 
-    execute_tool("probe", tool_that_reports_its_directory, {}, None)
+    execute_tool(
+        "ptolemy_query",
+        tool_that_reports_its_caller,
+        {},
+        platform_token("alice", role="viewer"),
+    )
 
-    assert remote[-1]["json"]["outputs_directory"] == utils.ANONYMOUS_OUTPUTS_DIRECTORY
+    bearer = remote[-1]["headers"]["Authorization"].removeprefix("Bearer ")
+    claims = jwt.decode(bearer, PLATFORM_SECRET, algorithms=["HS256"])
+    assert claims[TOOL_SCOPE_CLAIM] == [PTOLEMY_READ_SCOPE]
+
+
+def test_an_unknown_role_cannot_receive_a_downstream_scope(monkeypatch, remote):
+    monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
+    source = platform_token("alice", role="typo")
+
+    with pytest.raises(PermissionError, match="typo role"):
+        execute_tool("ptolemy_query", tool_that_reports_its_caller, {}, source)
+
+    assert remote == []
+
+
+def test_mcp_exchange_keeps_the_source_role_as_the_authority(monkeypatch, remote):
+    monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
+    source = sign_mcp_token("alice", "Alice", "editor", 60)
+
+    execute_tool("run_workflow", tool_that_reports_its_caller, {}, source)
+
+    bearer = remote[-1]["headers"]["Authorization"].removeprefix("Bearer ")
+    claims = jwt.decode(bearer, PLATFORM_SECRET, algorithms=["HS256"])
+    assert claims[TOOL_SCOPE_CLAIM] == [GEODUKT_RUN_SCOPE]
+    assert MCP_SOURCE_ROLE_CLAIM not in claims
+    assert "role" not in claims
+
+
+def test_tool_expiry_is_capped_by_five_minutes_and_the_source(monkeypatch, remote):
+    monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
+    source = platform_token("alice", lifetime=timedelta(seconds=30))
+    source_expiry = jwt.decode(source, PLATFORM_SECRET, algorithms=["HS256"])["exp"]
+
+    execute_tool("probe", tool_that_reports_its_caller, {}, source)
+
+    bearer = remote[-1]["headers"]["Authorization"].removeprefix("Bearer ")
+    claims = jwt.decode(bearer, PLATFORM_SECRET, algorithms=["HS256"])
+    assert claims["exp"] <= source_expiry
+    assert claims["exp"] - int(time.time()) <= TOOL_TOKEN_LIFETIME_SECONDS
+
+
+def test_a_gated_anonymous_call_is_refused_before_the_executor(monkeypatch, remote):
+    monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
+
+    with pytest.raises(RuntimeError, match="could not mint a scoped token"):
+        execute_tool("probe", tool_that_reports_its_directory, {}, None)
+
+    assert remote == []
 
 
 def test_two_subjects_write_to_different_directories(

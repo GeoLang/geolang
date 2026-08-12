@@ -11,9 +11,9 @@ standalone stack, the test suite and the eval harness, none of which hold a
 token. A platform token is worth as much as an SSH key to this host: any holder
 can run tools in this process, so treat it that way.
 
-Only the signature and `exp` are checked. `role` is not: the services a tool
-calls enforce their own rules and the token reaches them unchanged, so a role
-check here would be a second, drifting copy of theirs.
+The signature and `exp` are checked. `role` is not. Before a tool runs, this
+service exchanges the user or MCP token for a five-minute, role-free token with
+only the exact downstream operation scopes that tool needs.
 
 Gated: everything that runs code, writes a file, or reads back a session or a
 user's data. Open: `/health`, the `GET /tools` manifest sibyl fetches at startup
@@ -29,9 +29,8 @@ platform token is refused there, so handing an outside agent a way in is a
 deliberate act with an expiry on it rather than pasting the token you already
 hold.
 
-That marker only narrows which door of geolang the token opens. It is still an
-ordinary platform token everywhere else, because a tool's outbound calls go out
-as the token that arrived.
+That marker only narrows which door of geolang the token opens. The MCP token
+never reaches a tool or a downstream service.
 """
 
 from __future__ import annotations
@@ -53,7 +52,13 @@ TRUTHY = {"1", "true", "yes", "on"}
 # every other service rather than rejected the way an `aud` would be.
 MCP_CLAIM = "geolang_use"
 MCP_CLAIM_VALUE = "mcp"
+MCP_SOURCE_ROLE_CLAIM = "source_role"
 MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS = 30 * 24 * 60 * 60
+
+TOOL_TOKEN_USE_CLAIM = "token_use"
+TOOL_TOKEN_USE = "tool"
+TOOL_SCOPE_CLAIM = "scope"
+TOOL_TOKEN_LIFETIME_SECONDS = 5 * 60
 
 
 def platform_secret() -> str | None:
@@ -96,12 +101,15 @@ def platform_token_error(token: str | None) -> str | None:
     try:
         # naming the algorithm keeps a token that asks for "none", or an RS256
         # token forged with the public key, from being accepted
-        jwt.decode(
+        claims = jwt.decode(
             token, secret, algorithms=["HS256"], options={"require": ["exp"]}
         )
     except jwt.PyJWTError:
         # the reason is not echoed back: separating "expired" from "bad
         # signature" helps an attacker more than a caller
+        return "invalid or expired token"
+
+    if TOOL_TOKEN_USE_CLAIM in claims:
         return "invalid or expired token"
 
     return None
@@ -136,6 +144,20 @@ def platform_claims(token: str | None) -> dict | None:
         return None
 
 
+def source_token_role(token: str | None) -> str | None:
+    """The verified platform role from which a tool token would derive."""
+    claims = platform_claims(token)
+    if claims is None or TOOL_TOKEN_USE_CLAIM in claims:
+        return None
+    claim = (
+        MCP_SOURCE_ROLE_CLAIM
+        if claims.get(MCP_CLAIM) == MCP_CLAIM_VALUE
+        else "role"
+    )
+    role = claims.get(claim)
+    return role if isinstance(role, str) and role else None
+
+
 def _sign(claims: dict) -> str | None:
     """One place that signs, or None when the gate is off."""
     secret = platform_secret()
@@ -144,42 +166,84 @@ def _sign(claims: dict) -> str | None:
     return jwt.encode(claims, secret, algorithm="HS256")
 
 
-def sign_platform_token(subject: str, name: str, lifetime_seconds: int) -> str | None:
-    """Mint a platform token of our own, or None when the gate is off.
+def sign_tool_token(
+    subject: str,
+    name: str,
+    lifetime_seconds: int,
+    scopes: list[str] | tuple[str, ...],
+    expires_at: int | None = None,
+) -> str | None:
+    """Mint a role-free token limited to exact downstream operations."""
+    if not subject:
+        raise ValueError("tool token subject must not be empty")
+    if not 0 < lifetime_seconds <= TOOL_TOKEN_LIFETIME_SECONDS:
+        raise ValueError("tool token lifetime must be between 1 and 300 seconds")
+    unique_scopes = list(dict.fromkeys(scopes))
+    if any(not isinstance(scope, str) or not scope for scope in unique_scopes):
+        raise ValueError("tool scopes must be non-empty strings")
 
-    The only caller is the live document bridge, which needs an identity of its
-    own to write as. Nothing here decides what that identity may do: the
-    document's member list does, and only the caller's own token can add to it.
-    """
-    return _sign(
-        {"sub": subject, "name": name, "exp": int(time.time()) + lifetime_seconds}
+    expiry = int(time.time()) + lifetime_seconds
+    if expires_at is not None:
+        expiry = min(expiry, expires_at)
+
+    claims = {
+        "sub": subject,
+        "exp": expiry,
+        TOOL_TOKEN_USE_CLAIM: TOOL_TOKEN_USE,
+        TOOL_SCOPE_CLAIM: unique_scopes,
+    }
+    if name:
+        claims["name"] = name
+    return _sign(claims)
+
+
+def exchange_tool_token(
+    source_token: str | None, scopes: list[str] | tuple[str, ...]
+) -> str | None:
+    """Exchange a verified user or MCP token for one short tool credential."""
+    claims = platform_claims(source_token)
+    if claims is None or TOOL_TOKEN_USE_CLAIM in claims:
+        return None
+
+    subject = str(claims.get("sub") or "")
+    expires_at = claims.get("exp")
+    if not subject or not isinstance(expires_at, (int, float)):
+        return None
+
+    return sign_tool_token(
+        subject,
+        str(claims.get("name") or ""),
+        TOOL_TOKEN_LIFETIME_SECONDS,
+        scopes,
+        int(expires_at),
     )
 
 
-def sign_mcp_token(subject: str, name: str, lifetime_seconds: int) -> str | None:
+def sign_mcp_token(
+    subject: str, name: str, source_role: str, lifetime_seconds: int
+) -> str | None:
     """Mint a token `/mcp` will accept, or None when the gate is off.
 
-    The marker is a private claim rather than `aud` because every service in the
-    platform decodes with an audience of None, which rejects any token carrying
-    one. A tool's outbound calls go out as this very token, so an `aud` here
-    would fail at ptolemy, geodukt and agora rather than at us.
+    The marker is a private claim rather than `aud` because the shared platform
+    token shape has no audience. This token stops at the tool boundary, where it
+    is exchanged for one carrying exact downstream operation scopes.
     """
-    return _sign(
-        {
-            "sub": subject,
-            "name": name,
-            "exp": int(time.time()) + lifetime_seconds,
-            MCP_CLAIM: MCP_CLAIM_VALUE,
-        }
-    )
+    claims = {
+        "sub": subject,
+        "name": name,
+        "exp": int(time.time()) + lifetime_seconds,
+        MCP_CLAIM: MCP_CLAIM_VALUE,
+    }
+    if source_role:
+        claims[MCP_SOURCE_ROLE_CLAIM] = source_role
+    return _sign(claims)
 
 
 def mcp_token_error(token: str | None) -> str | None:
     """Why `token` may not be presented at `/mcp`, or None when it may.
 
-    The marker says which door the token is for, and nothing more: everywhere
-    else in the platform this is an ordinary token with an ordinary token's
-    reach.
+    The marker says which geolang door the token is for. It is exchanged before
+    any tool or downstream service receives a bearer.
     """
     detail = platform_token_error(token)
     if detail is not None:

@@ -1,17 +1,16 @@
-"""The caller's bearer token, for the length of one tool call.
+"""The current execution bearer, for the length of one tool call.
 
-The viewer's platform JWT rides the whole chain: viewer -> /chat/agui -> sibyl
--> /tools/{name} -> the services a tool calls (ptolemy, tiletopia, geodukt). It
-is forwarded opaquely, never re-signed and never swapped for a token of our own.
+The viewer's platform JWT reaches geolang through sibyl. At the tool boundary,
+geolang exchanges it for a five-minute, role-free token containing only that
+tool's downstream operation scopes.
 
 Tools are called by name with only their schema arguments, so the token travels
 in a context variable rather than through every tool signature. It is scoped to
 one call and reset afterwards, so a pooled worker thread cannot carry one
 caller's identity into the next request.
 
-A headless run (the eval harness, a sibyl session with no token) carries no
-token: services are then called anonymously, public reads work and gated writes
-fail loud.
+A headless run carries no token in standalone mode. Services are then called
+anonymously, public reads work and gated writes fail loud.
 
 Never log it, never write it to disk.
 """
@@ -52,7 +51,7 @@ def current_user_token() -> str | None:
 def service_headers(fallback_env: str | None = None) -> dict:
     """Authorization header for an outbound call to a platform service.
 
-    The caller's own token wins, so a tool acts as the person who asked.
+    A tool's short, scoped execution token wins and keeps the caller's subject.
     `fallback_env` names a service-account token variable to fall back on when
     there is no caller, which only happens with the gate switched off: with it
     on there is always a caller, and falling back would let a request that

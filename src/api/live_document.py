@@ -32,8 +32,9 @@ from pathlib import Path
 import anyio.to_thread
 
 from src.core import agora, utils
-from src.core.auth import SECRET_ENV, platform_claims, sign_platform_token
+from src.core.auth import SECRET_ENV, platform_claims, sign_tool_token
 from src.core.markers import UI_SPEC_MARKER, VIEWER_COMMAND_MARKER, marker_payloads
+from src.core.tool_executor import AGORA_WRITE_SCOPE
 
 logger = logging.getLogger(__name__)
 
@@ -409,7 +410,12 @@ async def sweep_other_documents(current_document: str) -> set[str]:
     for document_id, subject in await anyio.to_thread.run_sync(
         sweepable_documents, current_document
     ):
-        token = sign_platform_token(subject, AGENT_NAME, AGENT_TOKEN_LIFETIME_SECONDS)
+        token = sign_tool_token(
+            subject,
+            AGENT_NAME,
+            AGENT_TOKEN_LIFETIME_SECONDS,
+            [AGORA_WRITE_SCOPE],
+        )
         if token is None:
             return verified
         try:
@@ -587,8 +593,10 @@ async def open_binding(binding: str, caller_token: str | None) -> Binding:
             "presenting a live platform token"
         )
     subject, name = identity
-    token = sign_platform_token(subject, name, AGENT_TOKEN_LIFETIME_SECONDS)
-    # the caller's own token, so agora refuses a grant the caller may not make
+    token = sign_tool_token(
+        subject, name, AGENT_TOKEN_LIFETIME_SECONDS, [AGORA_WRITE_SCOPE]
+    )
+    # the caller's subject, so agora refuses a grant they may not make
     await agora.grant_edit_role(document_id, subject, caller_token)
     return Binding(document_id=document_id, token=token, subject=subject)
 

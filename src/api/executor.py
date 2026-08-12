@@ -3,8 +3,8 @@
 A tool hands caller-written arguments to geopandas, QGIS and DuckDB, so this
 process is treated as one an attacker may end up inside. It is given no platform
 signing secret, no service account token and no model API key. The only
-credential it sees is the caller's own bearer, which arrives per call, is
-forwarded to the services that call's tool talks to, and is never written down.
+credential it sees is a five-minute role-free bearer with the exact downstream
+operation scopes that call's tool needs. It is never written down.
 
 `GEOLANG_EXECUTOR_SECRET` says the caller is the API. Whoever is inside here
 already knows that value, which is the point: it keeps anything else that can

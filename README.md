@@ -143,8 +143,9 @@ Set `PLATFORM_JWT_SECRET` to the shared platform secret and every route that
 runs code, writes a file, or reads back a session or a user's data requires an
 `Authorization: Bearer <jwt>` header holding a live HS256 token, the same
 `{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts. Signature
-and `exp` are checked, nothing else, and the token is forwarded unchanged to the
-services a tool calls, which enforce their own roles.
+and `exp` are checked. At the tool boundary, geolang exchanges that token for a
+role-free token that expires within five minutes and contains only the exact
+downstream operation scopes that tool needs.
 
 The service refuses to start without that variable, as ptolemy and interiora
 already do. Running with no authentication at all takes a second, explicit
@@ -192,8 +193,7 @@ is true.
 
 Set `GEOLANG_EXECUTOR_URL` to move tool code into a separate process that holds
 no signing secret, no service account token and no model API key. The only
-credential it sees is the caller's own bearer, which arrives per call and is
-forwarded to the services that tool talks to. Both processes share the same
+credential it sees is the short scoped token minted for that call. Both processes share the same
 `TOOL_EXEC_DIR`, because a tool writes the output files the API then serves.
 
 ```bash
@@ -217,10 +217,10 @@ process, which is fine for a single tenant and is what the standalone stack, the
 test suite and the eval harness do. With the gate on and no executor configured
 the API logs a warning naming what that costs, and keeps running.
 
-One remaining gap once the executor is in place: a tool still holds the
-caller's own bearer while it runs. Outputs are no longer shared, each caller
-reads and writes their own directory under `outputs/`, keyed on the subject of
-the token they presented. The executor is told which directory that is, since
+The tool holds a five-minute role-free bearer while it runs, limited to the
+operations mapped to that tool. Outputs are split by caller, each caller reads
+and writes their own directory under `outputs/`, keyed on the subject of the
+token they presented. The executor is told which directory that is, since
 naming it needs the signing secret the executor does not have, and it refuses a
 name that is not a single directory of the expected shape.
 
@@ -266,18 +266,19 @@ Then point Claude, Cursor or any MCP client at it:
 with `this endpoint needs a token from POST /mcp/token`. Mint one and swap it
 into the client config.
 
-The bearer is required on every MCP request when the gate is on, and is the
-identity the tools act as. Set `MCP_ALLOWED_HOSTS` to the public hostname,
+The bearer is required on every MCP request when the gate is on and supplies
+the subject copied into each execution token. Set `MCP_ALLOWED_HOSTS` to the public hostname,
 otherwise the transport's DNS-rebinding check answers `421` to everything. See
 [`docs/api_reference.md`](docs/api_reference.md#mcp).
 
-**An MCP token is not a reduced token.** It carries a private `geolang_use`
-claim that decides which door of *this* service it opens, and nothing else
-reads that claim. A tool's outbound calls go out as the token that arrived, so
-at ptolemy, tiletopia, geodukt and agora it is an ordinary platform token with
-your full reach. Minting narrows what gets onto `/mcp`, not what the credential
-is worth once it is there. Treat it like the SSH key described above, and pick
-the shortest lifetime you can live with.
+The MCP token only opens this service. Before each tool runs, geolang exchanges
+it for a role-free JWT with `token_use: "tool"` and an exact `scope` array. The
+exchange token expires at the earlier of the MCP token's expiry or five minutes.
+The MCP token keeps the minting token's role in a private claim so the exchange
+cannot delegate an operation that role could not perform directly.
+The executor never receives an Agora scope. If a bound result needs a live
+document write, geolang-api mints a separate `agora:write` token after the tool
+returns and keeps it out of the tool process.
 
 `sql_query` is the one tool `/chat` has that this does not: it runs SQL the
 caller wrote in a browser, which only makes sense when they are the same person.
@@ -309,4 +310,3 @@ caller's token, so it can only reach documents its caller could already edit.
 AGPL-3.0-or-later, see [LICENSE](LICENSE).
 
 Copyright (C) 2026 Grok Image Compression Inc.
-

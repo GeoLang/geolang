@@ -20,7 +20,8 @@ from websockets.asyncio.server import serve
 
 from src.api import live_document
 from src.core import agora, utils
-from src.core.auth import SECRET_ENV
+from src.core.auth import SECRET_ENV, TOOL_SCOPE_CLAIM, TOOL_TOKEN_USE, TOOL_TOKEN_USE_CLAIM
+from src.core.tool_executor import AGORA_WRITE_SCOPE
 from tests.test_agora import PEERS, SNAPSHOT, FakeAgora
 from tests.test_route_auth import SECRET, mint
 
@@ -1085,16 +1086,22 @@ def test_a_forged_caller_token_is_nobody(monkeypatch):
     assert live_document.agent_identity(None) is None
 
 
-def test_the_agent_token_is_short_lived_and_signed_with_the_platform_secret(caller):
+def test_the_agent_token_is_short_lived_and_scoped_to_agora(caller):
     subject, name = live_document.agent_identity(caller)
-    token = live_document.sign_platform_token(
-        subject, name, live_document.AGENT_TOKEN_LIFETIME_SECONDS
+    token = live_document.sign_tool_token(
+        subject,
+        name,
+        live_document.AGENT_TOKEN_LIFETIME_SECONDS,
+        [AGORA_WRITE_SCOPE],
     )
 
     claims = jwt.decode(token, SECRET, algorithms=["HS256"])
     assert claims["sub"] == "agent:u1"
     assert claims["name"] == "GeoLang agent (Ada)"
     assert claims["exp"] - int(time.time()) <= live_document.AGENT_TOKEN_LIFETIME_SECONDS
+    assert claims[TOOL_TOKEN_USE_CLAIM] == TOOL_TOKEN_USE
+    assert claims[TOOL_SCOPE_CLAIM] == [AGORA_WRITE_SCOPE]
+    assert "role" not in claims
 
 
 def test_without_a_platform_secret_a_document_id_cannot_be_bound(monkeypatch):

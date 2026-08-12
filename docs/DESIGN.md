@@ -33,7 +33,7 @@ A tool hands caller-written arguments to geopandas, QGIS and DuckDB, so a proces
 
 `GEOLANG_EXECUTOR_URL` moves tool code into [`src/api/executor.py`](../src/api/executor.py), a process given no signing secret, no service account and no model key. `POST /tools/{name}` and the MCP `call_tool` both go through `execute_tool` in [`src/core/tool_executor.py`](../src/core/tool_executor.py), which forwards or runs locally; the split is invisible to sibyl and to MCP clients.
 
-What stayed in the API: the platform gate, minting MCP tokens, and the live-document write, which needs the signing secret to mint the agent identity it writes as and already ran after the tool returned. What crosses to the executor: the tool name, its validated arguments, the caller's bearer, and the name of the outputs directory the call's files belong in.
+What stayed in the API: the platform gate, token exchange, minting MCP tokens, and the live-document write. What crosses to the executor: the tool name, its validated arguments, a role-free token with only that tool's downstream operation scopes, and the name of the outputs directory the call's files belong in. A separate `agora:write` token is minted after the tool returns and never crosses into the executor.
 
 That last one crosses because the executor cannot work it out: turning a bearer into a subject needs the signing secret it is deliberately not given, so left to itself it would write every caller's files to one directory. The API sends the name it verified, `anonymous` included, and the executor re-checks that it is a single path component of the shape the naming produces. A name that fails is refused rather than replaced with a shared one.
 
@@ -43,7 +43,7 @@ Arguments are validated on both sides. The API's copy fails fast and keeps an un
 
 Unset, tools run in the API process, which is the standalone stack, the test suite, the eval harness and any single-tenant self-host. Nothing in the process can tell one deployment from the other, so this is not refused: the API logs a warning naming the cost when the gate is on and no executor is configured.
 
-One gap the split does not close, about tenants sharing an instance rather than about the signing secret: a tool holds the caller's own bearer while it runs.
+A tool holds a bearer while it runs, but that bearer expires within five minutes and only carries the exact downstream operation scopes mapped to the tool name. Unknown tools and tools with no downstream service need get an empty scope array.
 
 `outputs/` is one directory per caller, named for the `sub` of the token that arrived and created on first use. The routes that serve a file by name resolve it inside that directory, so one user's filenames and files are not another's to list or fetch. A caller with no verified subject, which is every caller when the gate is off, writes to a fixed `anonymous` directory that no subject can name. Files written before either split stay in the parent, in both trees, and are no longer listed or served. That hides uploads that predate it, which was accepted rather than migrated.
 
@@ -69,7 +69,7 @@ The shared reference data those tools legitimately read is not an exemption. `ge
 
 The same declaration labels a workflow plan: every step of a `__PLAN__` payload carries `runs_caller_code`, so the approval panel marks a step that runs caller-written code instead of leaving it to the persona prose a model can ignore. Nothing is refused on that basis: geodukt's validator already rejects an operation it does not have, and where it cannot be consulted the label is what the user approves on.
 
-`/mcp` also takes a token of its own now, minted by `POST /mcp/token` and marked with a private `geolang_use` claim, so reaching an outside agent in is a deliberate act with an expiry rather than a paste of the token you already hold. What it is not is a reduced credential: tools call downstream with the token that arrived, so everywhere but this endpoint it is worth exactly what the minting token was worth. Narrowing that too needs per-tool scopes the platform has no notion of yet.
+`/mcp` takes a token minted by `POST /mcp/token` and marked with a private `geolang_use` claim. It stops at the tool boundary. It also keeps the minting token's role in a private claim, so an exchange cannot delegate an operation the source role could not perform. Each execution exchanges it for a JWT with the same subject, `token_use: "tool"`, no role, and an exact JSON `scope` array. The expiry is capped by both the source token and five minutes. Downstream services distinguish these from normal user JWTs, require exact scopes, and never fall back to a role on a marked tool token.
 
 Still open, and viewer-side rather than here: DuckDB-WASM will fetch any domain the SQL names, so a `/chat` user's own agent can be talked into reading `http://attacker.example/leak` or an address on their corporate network. An allowlist of fetchable domains belongs in the viewer.
 
