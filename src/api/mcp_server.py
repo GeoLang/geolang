@@ -31,7 +31,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from src.agents.agent_manager import load_external_tools, runs_caller_code
 from src.api.live_document import document_binding, publish
 from src.core.auth import mcp_token_error
-from src.core.user_token import bearer_token, user_token_scope
+from src.core.tool_executor import execute_tool
+from src.core.user_token import bearer_token
 
 logger = logging.getLogger(__name__)
 
@@ -199,12 +200,11 @@ def create_mcp_app(
             return _text_result(f"❌ Invalid arguments: {e}", is_error=True)
 
         def run_tool():
-            with user_token_scope(token):
-                return func(**args)
+            return execute_tool(params.name, func, args, token)
 
         try:
-            # tools are sync and block for minutes, so they must not run on the
-            # event loop that is serving every other MCP request
+            # a tool call blocks for minutes, so it must not run on the event
+            # loop that is serving every other MCP request
             result = await anyio.to_thread.run_sync(run_tool)
         except Exception as e:
             logger.exception(f"Tool {params.name} failed")

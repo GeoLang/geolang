@@ -65,7 +65,8 @@ from src.core.auth import (
     sign_mcp_token,
 )
 from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
-from src.core.user_token import bearer_token, user_token_scope
+from src.core.tool_executor import execute_tool, report_configuration
+from src.core.user_token import bearer_token
 from src.core.utils import (
     EXEC_DIR,
     LIVE_DATA_DIR,
@@ -74,6 +75,7 @@ from src.core.utils import (
     USER_DATA_DIR,
     load_catalogue,
     load_shares,
+    preload_geo_stack,
     resolve_under,
     save_catalogue,
     save_shares,
@@ -84,20 +86,6 @@ logger = logging.getLogger(__name__)
 
 # sibyl owns the agent loop and session history, geolang runs the tools
 SIBYL_TIMEOUT = 30.0
-
-
-def _preload_geo_stack():
-    """Pay the geo-stack import cost at boot instead of on the first tool call."""
-    try:
-        import geopandas
-        import rasterio
-
-        logger.info(
-            f"Geo stack preloaded: geopandas {geopandas.__version__}, "
-            f"rasterio {rasterio.__version__}"
-        )
-    except Exception as e:
-        logger.warning(f"Geo stack preload failed (first tool call will be slow): {e}")
 
 
 def _slim_schema(node):
@@ -160,7 +148,7 @@ mcp_app, mcp_session_manager = create_mcp_app(tool_manifest, layer_geojson)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    Thread(target=_preload_geo_stack, daemon=True).start()
+    Thread(target=preload_geo_stack, daemon=True).start()
     async with mcp_session_manager.run():
         yield
 
@@ -198,6 +186,7 @@ def cors_origins() -> list[str]:
 
 
 require_configuration()
+report_configuration()
 
 app = FastAPI(title="GeoLang API", lifespan=lifespan)
 
@@ -305,7 +294,11 @@ def run_tool(
     request: ToolCallRequest,
     authorization: Annotated[str | None, Header()] = None,
 ):
-    """Execute a tool in-process and return its string result.
+    """Run a tool and return its string result.
+
+    The code runs in the isolated executor when one is configured, and in this
+    process otherwise. Either way the arguments are validated here first, so an
+    unknown tool or a bad argument never reaches it.
 
     sibyl passes the caller's bearer through on every tool call of a run, and the
     viewer sends its own on the plan-approval path. Whatever arrives is what the
@@ -332,8 +325,7 @@ def run_tool(
         return {"result": f"❌ Invalid arguments: {e}"}
 
     try:
-        with user_token_scope(token):
-            result = func(**args)
+        result = execute_tool(name, func, args, token)
     except Exception as e:
         logger.exception(f"Tool {name} failed")
         result = f"❌ Tool execution failed: {e}"

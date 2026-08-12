@@ -1,6 +1,6 @@
 # Architecture Overview
 
-GeoLang is a FastAPI service that owns the geospatial tools and exposes an agent to ViewTopia (and other clients) over HTTP + Server-Sent Events. The agent loop lives in **sibyl**, a separate Rust service. GeoLang is the integration surface: it serves sibyl a tool manifest, runs the tools in-process, and renders sibyl's run events as AG-UI.
+GeoLang is a FastAPI service that owns the geospatial tools and exposes an agent to ViewTopia (and other clients) over HTTP + Server-Sent Events. The agent loop lives in **sibyl**, a separate Rust service. GeoLang is the integration surface: it serves sibyl a tool manifest, runs the tools, and renders sibyl's run events as AG-UI.
 
 ## Process topology
 
@@ -11,7 +11,7 @@ GeoLang is a FastAPI service that owns the geospatial tools and exposes an agent
 └──────────────┘   viewer_cmd    │                      │  NDJSON events  │              │
                                  │  loads tools from    │ ◄────────────── │  agent loop  │
                                  │  src/agents/tools/   │  GET /tools     │  + sessions  │
-                                 │  and runs them       │  POST /tools/x  │  + LLM calls │
+                                 │  and dispatches them │  POST /tools/x  │  + LLM calls │
                                  └──────────┬───────────┘                 └──────┬───────┘
                                             │                                    │
                           ┌─────────────────┼────────────────┐                   │
@@ -25,7 +25,8 @@ GeoLang is a FastAPI service that owns the geospatial tools and exposes an agent
 
 - **sibyl** owns the conversation, sessions, history, and the tool-call loop. GeoLang never sees raw token streams, it sees NDJSON run events (text, tool calls, tool returns).
 - **GeoLang API** ([`src/api/server.py`](../src/api/server.py)) is a single-file FastAPI app. It serves the tool manifest at `GET /tools`, executes a tool at `POST /tools/{name}`, and proxies `/sessions/*` to sibyl. `POST /chat/agui` opens a sibyl run and renders its events as AG-UI SSE.
-- **Tools** are plain Python functions discovered by `pkgutil.iter_modules` of the `tools` package. Each module exports `TOOL_FUNCTION` and `TOOL_SCHEMA` (pydantic). They run in the GeoLang process and may shell out to QGIS, GeoPandas, or downstream services.
+- **Tools** are plain Python functions discovered by `pkgutil.iter_modules` of the `tools` package. Each module exports `TOOL_FUNCTION` and `TOOL_SCHEMA` (pydantic). They may shell out to QGIS, GeoPandas, or downstream services.
+- **The tool executor** ([`src/api/executor.py`](../src/api/executor.py)) is where that code runs when `GEOLANG_EXECUTOR_URL` is set: a second process holding no platform signing secret, no service account and no model key. The API validates arguments, then [`src/core/tool_executor.py`](../src/core/tool_executor.py) either forwards the call or runs it here. See the README's "Where tool code runs".
 - **ViewTopia** consumes `/chat/agui` (AG-UI protocol SSE) and dispatches `viewer_cmd` custom events through [`viewer/commands.ts`](https://github.com/GeoLang/viewtopia/blob/main/src/viewer/commands.ts).
 
 ## SSE event vocabulary

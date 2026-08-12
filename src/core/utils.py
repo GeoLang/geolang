@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 SIBYL_URL = os.environ.get("SIBYL_URL", "http://localhost:8090")
 # Default to the geolang repo root (three levels up from src/core/utils.py),
@@ -17,6 +20,20 @@ SHARES_FILE = os.path.join(EXEC_DIR, ".shares.json")
 LIVE_DATA_DIR = Path(EXEC_DIR) / "live_data"
 USER_DATA_DIR = Path(EXEC_DIR) / "user_data"
 CATALOGUE_FILE = USER_DATA_DIR / "catalogue.json"
+
+
+def preload_geo_stack() -> None:
+    """Pay the geo-stack import cost at boot instead of on the first tool call."""
+    try:
+        import geopandas
+        import rasterio
+
+        logger.info(
+            f"Geo stack preloaded: geopandas {geopandas.__version__}, "
+            f"rasterio {rasterio.__version__}"
+        )
+    except Exception as e:
+        logger.warning(f"Geo stack preload failed (first tool call will be slow): {e}")
 
 
 def resolve_under(names, search_dirs, roots) -> str | None:

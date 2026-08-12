@@ -10,7 +10,7 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 39 geospatial tools served to sibyl over HTTP and executed in-process, and to outside agents over MCP
+- 39 geospatial tools served to sibyl over HTTP, and to outside agents over MCP. Tool code runs in the API process, or in an isolated executor that holds no platform secret
 - Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan for the user to approve, `run_workflow` executes it
 - AG-UI event stream for ViewTopia
 
@@ -151,13 +151,14 @@ already do. Running with no authentication at all takes a second, explicit
 `GEOLANG_ALLOW_UNAUTHENTICATED=1`, which is what `docker-compose.yml` sets for
 the standalone stack. Never set it where the port is reachable.
 
-**Treat a platform token like an SSH key to this host.** Tools run in the API
-process with its privileges and no sandbox, and `geopandas_api`, `pyqgis_api`
-and `run_qgis_algorithm` take expressions and algorithm parameters the caller
-chooses. Anyone holding a live token can compute arbitrary things on this
-machine and read and write everything under `outputs/` and `user_data/`. That is
-by design for a geoprocessing agent, so the token is the security boundary and
-the only one. Scope it short, never commit it, and rotate it like a key.
+**Treat a platform token like an SSH key to this host.** `geopandas_api`,
+`pyqgis_api`, `run_qgis_algorithm` and `sql_query` take expressions and
+algorithm parameters the caller chooses, so anyone holding a live token can
+compute arbitrary things and read and write everything under `outputs/` and
+`user_data/`. That is by design for a geoprocessing agent. Scope the token
+short, never commit it, and rotate it like a key.
+
+What that reaches is bounded by where the tool runs, which is the next section.
 
 Gated deployments must also name the browser origins allowed to call the API in
 `CORS_ORIGINS`, comma separated. Startup fails without it, and `*` is refused
@@ -179,6 +180,45 @@ With `GEOLANG_ALLOW_UNAUTHENTICATED=1` and no secret the whole API stays open.
 That is the standalone `docker compose up` flow, the test suite and the eval
 harness, none of which carry a token. With the gate on the client has to send
 the header on every call, layer fetches and download links included.
+
+### Where tool code runs
+
+By default a tool runs in the API process. That process holds
+`PLATFORM_JWT_SECRET`, so a tool that can be made to run something other than
+geoprocessing can read the secret and sign a token for any user on any service
+in the platform. One tenant cannot be promised isolation from another while that
+is true.
+
+Set `GEOLANG_EXECUTOR_URL` to move tool code into a separate process that holds
+no signing secret, no service account token and no model API key. The only
+credential it sees is the caller's own bearer, which arrives per call and is
+forwarded to the services that tool talks to. Both processes share the same
+`TOOL_EXEC_DIR`, because a tool writes the output files the API then serves.
+
+```bash
+# the executor, with nothing worth stealing in its environment
+GEOLANG_EXECUTOR_SECRET=<random> TOOL_EXEC_DIR=... \
+  python -m uvicorn src.api.executor:app --port 8081
+
+# the API, pointed at it
+GEOLANG_EXECUTOR_URL=http://localhost:8081 GEOLANG_EXECUTOR_SECRET=<same> \
+  python -m uvicorn src.api.server:app --port 8080
+```
+
+`GEOLANG_EXECUTOR_SECRET` is how the executor knows its caller is the API. It
+claims nothing about the executor itself, whose contents are assumed reachable:
+it keeps anything else on the network from running tools there. The executor
+refuses to start without it, publishes no port in the platform stack, drops all
+capabilities and runs under memory, CPU and process limits.
+
+Leaving the executor unset is a deployment's choice to run tools in the API
+process, which is fine for a single tenant and is what the standalone stack, the
+test suite and the eval harness do. With the gate on and no executor configured
+the API logs a warning naming what that costs, and keeps running.
+
+Two remaining gaps once the executor is in place: a tool still holds the
+caller's own bearer while it runs, and `outputs/` is one directory shared by
+every user of the instance.
 
 ### MCP for outside agents
 

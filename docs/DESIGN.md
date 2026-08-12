@@ -22,12 +22,26 @@ The agent loop runs in **sibyl** (Rust, `../sibyl`, port 8090). GeoLang keeps th
 The contract in both directions:
 
 - `GET /tools` on geolang returns `{"tools": [{"name", "description", "parameters"}]}`, built from the modules under `src/agents/tools/`. `parameters` is `TOOL_SCHEMA.model_json_schema()`.
-- `POST /tools/{name}` with `{"args": {...}}` runs the tool **in the geolang process** and returns `{"result": "<string>"}`. Validation errors and exceptions come back as `200` with a ❌ result so the agent can recover. The routes are sync `def`, so FastAPI runs them in its threadpool, tools block for minutes.
+- `POST /tools/{name}` with `{"args": {...}}` runs the tool and returns `{"result": "<string>"}`. Validation errors and exceptions come back as `200` with a ❌ result so the agent can recover. The routes are sync `def`, so FastAPI runs them in its threadpool, tools block for minutes.
 - `POST /runs` on sibyl takes `{"system_prompt", "message"}` and streams NDJSON events (`text`, `tool_call`, `tool_return`, `error`, `done`). `agent_event_stream` normalises those into the `(kind, payload)` tuples the AG-UI renderer consumes.
 
 `PLATFORM_JWT_SECRET` is required to start. With it, every route that runs code, writes a file, or reads back a session or a user's data requires a live HS256 platform token and answers `401` otherwise. `/health`, the `GET /tools` manifest, the static viewer, reading a share by id and reading a live layer by its token stay open. `GEOLANG_ALLOW_UNAUTHENTICATED=1` opens all of it, and is the only way to get there.
 
-There is no tool sandbox any more. A tool runs with the API's privileges, in its process, against the bind-mounted repo.
+## Where tool code runs
+
+A tool hands caller-written arguments to geopandas, QGIS and DuckDB, so a process running one can be made to run other things. The API process holds `PLATFORM_JWT_SECRET`, which signs a token for any user on any service, so with tools in it no tenant can be promised isolation from another.
+
+`GEOLANG_EXECUTOR_URL` moves tool code into [`src/api/executor.py`](../src/api/executor.py), a process given no signing secret, no service account and no model key. `POST /tools/{name}` and the MCP `call_tool` both go through `execute_tool` in [`src/core/tool_executor.py`](../src/core/tool_executor.py), which forwards or runs locally; the split is invisible to sibyl and to MCP clients.
+
+What stayed in the API: the platform gate, minting MCP tokens, and the live-document write, which needs the signing secret to mint the agent identity it writes as and already ran after the tool returned. What crosses to the executor: the tool name, its validated arguments, and the caller's bearer.
+
+Arguments are validated on both sides. The API's copy fails fast and keeps an unknown tool off the wire; the executor's is the one that matters, because the endpoint is on a network.
+
+`GEOLANG_EXECUTOR_SECRET` says the caller is the API. Whoever is inside the executor already knows it, which is the point: it claims nothing about that process, it keeps anything else on the network from running tools there. The executor refuses to start without it.
+
+Unset, tools run in the API process, which is the standalone stack, the test suite, the eval harness and any single-tenant self-host. Nothing in the process can tell one deployment from the other, so this is not refused: the API logs a warning naming the cost when the gate is on and no executor is configured.
+
+Two gaps the split does not close, both about tenants sharing an instance rather than about the signing secret: a tool holds the caller's own bearer while it runs, and `outputs/` is one directory every user reads and writes.
 
 ## 🔴 Rotate the API keys that were once committed to `docker-compose.yml`
 
@@ -141,3 +155,4 @@ Keep a short history at the bottom so we can see the trajectory without diving i
 - **2026-06**: Populated `architecture.md` and `api_reference.md` (were empty stubs).
 - **2026-07**: Replaced the embedded agent-memory server with sibyl. Deleted the tool registration and sandbox machinery, the tool-exec venv entrypoint, `.agent_id`, and `.sessions.json`. Tools now run in-process behind `/tools`. The image is a plain `python:3.11-slim-bookworm` with QGIS.
 - **2026-07**: Added pytest coverage for the AG-UI renderers, the sibyl run stream, the session proxies, and the tool manifest/executor.
+- **2026-08**: Split tool execution out of the API process into `src/api/executor.py`, behind `GEOLANG_EXECUTOR_URL`. The platform stack runs it as `geolang-executor`: no published port, no `PLATFORM_JWT_SECRET`, no `.env`, all capabilities dropped, memory/CPU/process limits.
