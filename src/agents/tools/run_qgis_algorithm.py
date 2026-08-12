@@ -1,45 +1,95 @@
 import os
 import json
+import sys
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import PathRefused, tool_input_path, tool_output_path
+from src.core import utils
+from src.core.utils import tool_input_path, tool_output_path
 
-# what a parameter value has to end in to be read as a layer to open
-LAYER_EXTENSIONS = (
-    ".gpkg",
-    ".shp",
-    ".geojson",
-    ".json",
-    ".tif",
-    ".tiff",
-    ".csv",
-    ".gml",
-    ".kml",
+# the tool venv is isolated; the qgis bindings and the processing plugin live in
+# the system paths, so bridge them onto sys.path
+QGIS_SYSTEM_PATHS = (
+    "/usr/lib/python3/dist-packages",
+    "/usr/share/qgis/python",
+    "/usr/share/qgis/python/plugins",
 )
 
+# the QGIS parameter types whose value names a file to read
+INPUT_FILE_TYPES = frozenset(
+    {"source", "vector", "raster", "layer", "multilayer", "mesh", "pointcloud", "file"}
+)
+# ... and the ones whose value names a file to write
+DESTINATION_TYPES = frozenset(
+    {
+        "sink",
+        "vectorDestination",
+        "rasterDestination",
+        "fileDestination",
+        "folderDestination",
+        "pointCloudDestination",
+        "vectorTileDestination",
+    }
+)
+# these name layers inside a structure this tool cannot take apart, so a path in
+# one of them would reach QGIS unchecked
+UNRESOLVABLE_LAYER_TYPES = frozenset(
+    {
+        "alignrasterlayers",
+        "dxflayers",
+        "idw_interpolation_data",
+        "tininputlayers",
+        "vectortilewriterlayers",
+    }
+)
+# a destination named this is written to a temporary file QGIS picks
+TEMPORARY_OUTPUT = "TEMPORARY_OUTPUT"
 
-def confined_parameter(key, value):
-    """One algorithm parameter, with any layer it names resolved to a real file.
 
-    Every other parameter shape QGIS takes is a value rather than a path, so a
-    value that still looks like a path is refused: this tool cannot tell which
-    of an algorithm's parameters it would open, and a wrong guess here opens
-    another caller's file.
+def bridge_qgis_onto_path():
+    for path in QGIS_SYSTEM_PATHS:
+        if os.path.isdir(path) and path not in sys.path:
+            sys.path.append(path)
+
+
+def confined_parameter(key, value, parameter_type):
+    """One algorithm parameter, with any file it names resolved to a real file.
+
+    The type comes from the algorithm's own definitions, so a value is treated
+    as a filename only where QGIS would open or write one. Guessing it from the
+    string refused ordinary values instead: a field calculator FORMULA of
+    `"population" / "area"` looks exactly like a path.
     """
+    if parameter_type in UNRESOLVABLE_LAYER_TYPES:
+        # off the module, so a reload of utils cannot leave two classes by this name
+        raise utils.PathRefused(
+            f"parameters.{key} names layers in a form this tool cannot confine "
+            f"to your own files, so '{key}' cannot be used here."
+        )
     if isinstance(value, list):
-        return [confined_parameter(key, item) for item in value]
+        return [confined_parameter(key, item, parameter_type) for item in value]
     if not isinstance(value, str):
+        return value
+    if parameter_type in DESTINATION_TYPES:
+        if value == TEMPORARY_OUTPUT:
+            return value
+        return tool_output_path(f"parameters.{key}", value)
+    if parameter_type not in INPUT_FILE_TYPES:
         return value
     # a layer can carry a suffix that is not part of the name: "roads.gpkg|layername=x"
     name, separator, suffix = value.partition("|")
-    if name.lower().endswith(LAYER_EXTENSIONS):
-        return tool_input_path(f"parameters.{key}", name) + separator + suffix
-    if any(mark in value for mark in ("/", "\\", "..")):
-        raise PathRefused(
-            f"parameters.{key} looks like a path. Name a layer of your own by "
-            f"its filename alone, e.g. 'roads.gpkg': '{value}'"
-        )
-    return value
+    return tool_input_path(f"parameters.{key}", name) + separator + suffix
+
+
+def confined_parameters(params, parameter_types):
+    """Every parameter the caller gave, confined by what the algorithm calls it.
+
+    A name the algorithm does not define is passed through untouched: QGIS
+    ignores it, so nothing opens it.
+    """
+    return {
+        key: confined_parameter(key, value, parameter_types.get(key))
+        for key, value in params.items()
+    }
 
 
 class RunQGISAlgorithmArgs(BaseModel):
@@ -77,18 +127,9 @@ def run_qgis_algorithm(
     Layers here are usually EPSG:4326, where units are degrees: to buffer in
     metres, first reproject to EPSG:3857 ('native:reprojectlayer'), run the
     buffer, then reproject back to EPSG:4326 for display."""
-    import sys
     import traceback
 
-    # the tool venv is isolated; qgis bindings and the processing plugin live
-    # in the system paths, so bridge them onto sys.path
-    for p in (
-        "/usr/lib/python3/dist-packages",
-        "/usr/share/qgis/python",
-        "/usr/share/qgis/python/plugins",
-    ):
-        if os.path.isdir(p) and p not in sys.path:
-            sys.path.append(p)
+    bridge_qgis_onto_path()
 
     try:
         params = json.loads(parameters)
@@ -99,17 +140,6 @@ def run_qgis_algorithm(
         return "ERROR: parameters must be a JSON object of parameter names to values"
 
     given_output = params.pop("OUTPUT", None)
-    params = {key: confined_parameter(key, value) for key, value in params.items()}
-
-    if output_filename:
-        params["OUTPUT"] = tool_output_path("output_filename", output_filename)
-    elif given_output:
-        params["OUTPUT"] = tool_output_path("parameters.OUTPUT", str(given_output))
-    else:
-        safe_name = algorithm_id.replace(":", "_").replace("/", "_")
-        params["OUTPUT"] = tool_output_path(
-            "output_filename", f"{safe_name}_output.gpkg"
-        )
 
     try:
         from qgis.core import QgsApplication
@@ -132,6 +162,32 @@ def run_qgis_algorithm(
             return (
                 f"❌ '{algorithm_id}' failed: QGIS processing module is not available. "
                 "Use GeoPandas-based tools instead (e.g. geopandas_api, spatial_join, clip_layer, buffer_clip_dissolve)."
+            )
+
+        # confinement needs the algorithm's parameter definitions, so it cannot
+        # run before this point
+        algorithm = QgsApplication.processingRegistry().algorithmById(algorithm_id)
+        if algorithm is None:
+            qgs.exitQgis()
+            return (
+                f"❌ '{algorithm_id}' is not a QGIS algorithm ID. Give a provider "
+                "and a name, e.g. 'native:buffer'."
+            )
+
+        parameter_types = {
+            definition.name(): definition.type()
+            for definition in algorithm.parameterDefinitions()
+        }
+        params = confined_parameters(params, parameter_types)
+
+        if output_filename:
+            params["OUTPUT"] = tool_output_path("output_filename", output_filename)
+        elif given_output:
+            params["OUTPUT"] = tool_output_path("parameters.OUTPUT", str(given_output))
+        else:
+            safe_name = algorithm_id.replace(":", "_").replace("/", "_")
+            params["OUTPUT"] = tool_output_path(
+                "output_filename", f"{safe_name}_output.gpkg"
             )
 
         result = processing.run(algorithm_id, params)
@@ -165,6 +221,8 @@ def run_qgis_algorithm(
             f"Outputs:\n" + "\n".join(output_lines)
         )
 
+    except utils.PathRefused as e:
+        return f"❌ '{algorithm_id}' refused a parameter: {e}"
     except Exception as e:
         return f"❌ '{algorithm_id}' failed: {str(e)}\n{traceback.format_exc()}"
 

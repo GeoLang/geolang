@@ -23,6 +23,7 @@ from shapely.geometry import Point
 from src.agents.tools.download_natural_earth import DownloadNaturalEarthArgs
 from src.agents.tools.export_to_gpkg import export_to_gpkg
 from src.agents.tools.geocode_place import geocode_place
+from src.agents.tools.run_qgis_algorithm import confined_parameters
 from src.agents.tools.spatial_join import spatial_join
 from src.core import utils
 from src.core.utils import caller_directory_scope
@@ -216,6 +217,126 @@ def test_a_caller_cannot_name_a_raster_outside_their_own_files(tree):
     with caller_directory_scope(BOB):
         with pytest.raises(utils.PathRefused):
             utils.tool_input_path_or_none("ghsl_raster_path", str(hidden))
+
+
+# ── a QGIS parameter is confined by the type the algorithm gives it ──────
+
+# the types QGIS really reports for these, read off parameterDefinitions()
+FIELD_CALCULATOR_TYPES = {
+    "INPUT": "source",
+    "FIELD_NAME": "string",
+    "FORMULA": "expression",
+    "OUTPUT": "sink",
+}
+EXTRACT_BY_ATTRIBUTE_TYPES = {
+    "INPUT": "source",
+    "FIELD": "field",
+    "VALUE": "string",
+    "OUTPUT": "sink",
+    "FAIL_OUTPUT": "sink",
+}
+
+
+def test_a_value_parameter_is_not_treated_as_a_path(tree):
+    """A formula divides, an attribute value carries a slash. Neither is a file."""
+    with caller_directory_scope(BOB):
+        confined = confined_parameters(
+            {"FORMULA": '"population" / "area"', "FIELD_NAME": "density"},
+            FIELD_CALCULATOR_TYPES,
+        )
+        by_attribute = confined_parameters(
+            {"VALUE": "Kingston/St. Andrew", "FIELD": "parish"},
+            EXTRACT_BY_ATTRIBUTE_TYPES,
+        )
+
+    assert confined["FORMULA"] == '"population" / "area"'
+    assert by_attribute["VALUE"] == "Kingston/St. Andrew"
+
+
+def test_an_input_layer_parameter_resolves_to_the_callers_own_file(tree):
+    mine = layer(outputs_of(BOB) / "points.gpkg", "bob's")
+
+    with caller_directory_scope(BOB):
+        confined = confined_parameters({"INPUT": "points.gpkg"}, FIELD_CALCULATOR_TYPES)
+
+    assert confined["INPUT"] == str(mine)
+
+
+def test_an_input_layer_parameter_refuses_another_callers_file(tree):
+    secret = layer(outputs_of(ALICE) / "secret.gpkg", "alice's")
+
+    with caller_directory_scope(BOB):
+        for attempt in (str(secret), f"../{ALICE}/secret.gpkg", "../../etc/passwd"):
+            with pytest.raises(utils.PathRefused):
+                confined_parameters({"INPUT": attempt}, FIELD_CALCULATOR_TYPES)
+
+
+def test_a_layer_parameter_keeps_the_suffix_that_names_its_table(tree):
+    mine = layer(outputs_of(BOB) / "points.gpkg", "bob's")
+
+    with caller_directory_scope(BOB):
+        confined = confined_parameters(
+            {"INPUT": "points.gpkg|layername=points"}, FIELD_CALCULATOR_TYPES
+        )
+
+    assert confined["INPUT"] == f"{mine}|layername=points"
+
+
+def test_a_second_destination_lands_in_the_callers_own_outputs(tree):
+    with caller_directory_scope(BOB):
+        confined = confined_parameters(
+            {"FAIL_OUTPUT": "rejects.gpkg"}, EXTRACT_BY_ATTRIBUTE_TYPES
+        )
+
+        with pytest.raises(utils.PathRefused):
+            confined_parameters(
+                {"FAIL_OUTPUT": f"../{ALICE}/planted.gpkg"}, EXTRACT_BY_ATTRIBUTE_TYPES
+            )
+
+    assert confined["FAIL_OUTPUT"] == str(outputs_of(BOB) / "rejects.gpkg")
+
+
+def test_a_temporary_destination_is_left_to_qgis(tree):
+    """QGIS picks the file itself for this one, so there is no name to confine."""
+    with caller_directory_scope(BOB):
+        confined = confined_parameters(
+            {"FAIL_OUTPUT": "TEMPORARY_OUTPUT"}, EXTRACT_BY_ATTRIBUTE_TYPES
+        )
+
+    assert confined["FAIL_OUTPUT"] == "TEMPORARY_OUTPUT"
+
+
+def test_a_parameter_naming_layers_inside_a_structure_is_refused(tree):
+    """dxf export takes its layers as objects, so no name here can be resolved."""
+    with caller_directory_scope(BOB):
+        with pytest.raises(utils.PathRefused):
+            confined_parameters(
+                {"LAYERS": [{"layer": f"outputs/{ALICE}/secret.gpkg"}]},
+                {"LAYERS": "dxflayers"},
+            )
+
+
+def test_every_layer_in_a_multilayer_list_is_confined(tree):
+    mine = layer(outputs_of(BOB) / "mine.gpkg", "bob's")
+    secret = layer(outputs_of(ALICE) / "secret.gpkg", "alice's")
+
+    with caller_directory_scope(BOB):
+        confined = confined_parameters({"INPUT": ["mine.gpkg"]}, {"INPUT": "multilayer"})
+
+        with pytest.raises(utils.PathRefused):
+            confined_parameters(
+                {"INPUT": ["mine.gpkg", str(secret)]}, {"INPUT": "multilayer"}
+            )
+
+    assert confined["INPUT"] == [str(mine)]
+
+
+def test_a_parameter_the_algorithm_does_not_define_is_passed_through(tree):
+    """QGIS ignores a name it does not know, so nothing opens it."""
+    with caller_directory_scope(BOB):
+        confined = confined_parameters({"NOT_A_PARAMETER": "a/b"}, {"INPUT": "source"})
+
+    assert confined["NOT_A_PARAMETER"] == "a/b"
 
 
 def test_the_natural_earth_dataset_name_cannot_climb_out_of_its_directory():
