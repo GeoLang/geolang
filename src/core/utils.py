@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from src.core.user_token import current_user_token
@@ -28,10 +30,14 @@ CATALOGUE_FILE = USER_DATA_DIR / "catalogue.json"
 
 
 ANONYMOUS_OUTPUTS_DIRECTORY = "anonymous"
-UNSAFE_SUBJECT_CHARACTERS = re.compile(r"[^A-Za-z0-9_-]")
+DIRECTORY_NAME_CHARACTERS = "A-Za-z0-9_-"
+UNSAFE_SUBJECT_CHARACTERS = re.compile(f"[^{DIRECTORY_NAME_CHARACTERS}]")
+CALLER_DIRECTORY_NAME = re.compile(f"[{DIRECTORY_NAME_CHARACTERS}]+")
 READABLE_SUBJECT_LENGTH = 64
 SUBJECT_DIGEST_LENGTH = 32
 
+# set by the executor, which is told the name because it cannot verify a subject
+_caller_directory: ContextVar[str | None] = ContextVar("caller_directory", default=None)
 _warned_about_shared_outputs = False
 
 
@@ -49,24 +55,50 @@ def caller_directory_name(subject: str) -> str:
     return f"{readable}-{digest}"
 
 
-def caller_outputs_dir() -> str:
-    """Where the caller of this call writes and reads files, created if absent.
+def valid_caller_directory_name(name: str) -> bool:
+    """Whether `name` is one directory of the shape `caller_directory_name` makes."""
+    return CALLER_DIRECTORY_NAME.fullmatch(name) is not None
+
+
+@contextmanager
+def caller_directory_scope(name: str | None):
+    """Run the block with `name` as the caller's directory. None reads the token."""
+    reset = _caller_directory.set(name or None)
+    try:
+        yield
+    finally:
+        _caller_directory.reset(reset)
+
+
+def current_caller_directory() -> str:
+    """The name of the directory this call's files belong in.
 
     The subject comes from re-verifying the bearer, so a caller cannot pick the
     directory they land in. Anonymous is a directory of its own rather than the
     shared parent, and no subject can reach it: every other name ends in a
     hyphen and a digest, and this one has neither.
+
+    A name in scope wins: the executor holds no signing secret, so it is told
+    which directory the call belongs to by the side that could verify one.
     """
+    told = _caller_directory.get()
+    if told:
+        return told
+
     # not a module-level import: every tool imports this module, auth pulls in jwt
     from src.core.auth import platform_claims
 
     claims = platform_claims(current_user_token())
     subject = str((claims or {}).get("sub") or "")
-    if subject:
-        directory = os.path.join(OUTPUTS_ROOT, caller_directory_name(subject))
-    else:
+    if not subject:
         _warn_about_shared_outputs()
-        directory = os.path.join(OUTPUTS_ROOT, ANONYMOUS_OUTPUTS_DIRECTORY)
+        return ANONYMOUS_OUTPUTS_DIRECTORY
+    return caller_directory_name(subject)
+
+
+def caller_outputs_dir() -> str:
+    """Where the caller of this call writes and reads files, created if absent."""
+    directory = os.path.join(OUTPUTS_ROOT, current_caller_directory())
     os.makedirs(directory, exist_ok=True)
     return directory
 

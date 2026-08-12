@@ -33,7 +33,9 @@ A tool hands caller-written arguments to geopandas, QGIS and DuckDB, so a proces
 
 `GEOLANG_EXECUTOR_URL` moves tool code into [`src/api/executor.py`](../src/api/executor.py), a process given no signing secret, no service account and no model key. `POST /tools/{name}` and the MCP `call_tool` both go through `execute_tool` in [`src/core/tool_executor.py`](../src/core/tool_executor.py), which forwards or runs locally; the split is invisible to sibyl and to MCP clients.
 
-What stayed in the API: the platform gate, minting MCP tokens, and the live-document write, which needs the signing secret to mint the agent identity it writes as and already ran after the tool returned. What crosses to the executor: the tool name, its validated arguments, and the caller's bearer.
+What stayed in the API: the platform gate, minting MCP tokens, and the live-document write, which needs the signing secret to mint the agent identity it writes as and already ran after the tool returned. What crosses to the executor: the tool name, its validated arguments, the caller's bearer, and the name of the outputs directory the call's files belong in.
+
+That last one crosses because the executor cannot work it out: turning a bearer into a subject needs the signing secret it is deliberately not given, so left to itself it would write every caller's files to one directory. The API sends the name it verified, `anonymous` included, and the executor re-checks that it is a single path component of the shape the naming produces. A name that fails is refused rather than replaced with a shared one.
 
 Arguments are validated on both sides. The API's copy fails fast and keeps an unknown tool off the wire; the executor's is the one that matters, because the endpoint is on a network.
 

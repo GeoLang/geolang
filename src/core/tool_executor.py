@@ -12,6 +12,10 @@ Unset, tools run here. That is the standalone stack, the test suite and a
 single-tenant self-host, where there is no second tenant for an escape to reach.
 Nothing in the process can tell a single-tenant deployment from a multi-tenant
 one, so this is a deployment's choice rather than something checked here.
+
+The forwarded call also carries which outputs directory the files belong in.
+Only this side holds the secret that turns a bearer into a subject, so the
+executor would otherwise have to write every caller's files to one directory.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import os
 import httpx
 
 from src.core.user_token import user_token_scope
+from src.core.utils import current_caller_directory
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +69,14 @@ def _execute_remotely(url: str, name: str, args: dict, token: str | None) -> str
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
+    with user_token_scope(token):
+        outputs_directory = current_caller_directory()
+
     try:
         response = httpx.post(
             f"{url}/run/{name}",
-            json={"args": args},
+            # its own field, not one of the args: args are the caller's to write
+            json={"args": args, "outputs_directory": outputs_directory},
             headers=headers,
             timeout=EXECUTOR_TIMEOUT_SECONDS,
         )

@@ -13,6 +13,11 @@ reach the port from running tools, and claims nothing about the process itself.
 Arguments are validated again here rather than trusted from the API. This is a
 network endpoint, and the schema is the only thing standing between a request
 body and a tool's parameters.
+
+The call names the outputs directory its files belong in, because verifying a
+subject needs the signing secret this process is deliberately not given. The
+name is checked here anyway, and a name that fails is refused: writing to the
+shared parent instead is the leak this exists to close.
 """
 
 from __future__ import annotations
@@ -29,7 +34,11 @@ from pydantic import BaseModel, ValidationError
 from src.agents.agent_manager import load_external_tools
 from src.core.tool_executor import EXECUTOR_SECRET_ENV, executor_secret
 from src.core.user_token import bearer_token, user_token_scope
-from src.core.utils import preload_geo_stack
+from src.core.utils import (
+    caller_directory_scope,
+    preload_geo_stack,
+    valid_caller_directory_name,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,6 +76,7 @@ app = FastAPI(title="GeoLang tool executor", lifespan=lifespan)
 
 class ToolCallRequest(BaseModel):
     args: dict = {}
+    outputs_directory: str | None = None
 
 
 # sync so FastAPI runs it in the threadpool: tools block for minutes
@@ -77,6 +87,10 @@ def run_tool(
     authorization: Annotated[str | None, Header()] = None,
 ):
     """Execute one tool as the holder of the bearer, and answer with its result."""
+    directory = request.outputs_directory
+    if directory is not None and not valid_caller_directory_name(directory):
+        raise HTTPException(status_code=400, detail="malformed outputs directory")
+
     entry = next(
         (t for t in load_external_tools() if t[0].__name__ == name and t[1]), None
     )
@@ -89,8 +103,9 @@ def run_tool(
     except ValidationError as e:
         return {"error": f"Invalid arguments: {e}"}
 
+    token = bearer_token(authorization)
     try:
-        with user_token_scope(bearer_token(authorization)):
+        with user_token_scope(token), caller_directory_scope(directory):
             return {"result": str(func(**args))}
     except Exception as e:
         logger.exception(f"Tool {name} failed")

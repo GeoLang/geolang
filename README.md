@@ -219,7 +219,9 @@ the API logs a warning naming what that costs, and keeps running.
 One remaining gap once the executor is in place: a tool still holds the
 caller's own bearer while it runs. Outputs are no longer shared, each caller
 reads and writes their own directory under `outputs/`, keyed on the subject of
-the token they presented.
+the token they presented. The executor is told which directory that is, since
+naming it needs the signing secret the executor does not have, and it refuses a
+name that is not a single directory of the expected shape.
 
 ### MCP for outside agents
 
