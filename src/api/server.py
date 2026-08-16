@@ -347,7 +347,9 @@ def run_tool(
     return {"result": result}
 
 
-async def agent_event_stream(message: str, user_token: str | None = None):
+async def agent_event_stream(
+    message: str, user_token: str | None = None, thread_id: str | None = None
+):
     """Run a sibyl agent run and yield normalized (kind, payload) events.
 
     Single source of truth for the marker parsing. kinds:
@@ -364,6 +366,8 @@ async def agent_event_stream(message: str, user_token: str | None = None):
     body = {"system_prompt": PERSONA, "message": message}
     if user_token:
         body["user_token"] = user_token
+    if thread_id:
+        body["thread_id"] = thread_id
 
     def run_in_thread():
         # no read timeout: a tool call can keep the stream silent for minutes
@@ -587,7 +591,9 @@ async def chat_agui(input: RunAgentInput, request: Request):
     return StreamingResponse(
         agui_stream(
             agent_event_stream(
-                prompt, user_token=bearer_token(request.headers.get("authorization"))
+                prompt,
+                user_token=bearer_token(request.headers.get("authorization")),
+                thread_id=input.thread_id,
             ),
             thread_id=input.thread_id,
             run_id=input.run_id,

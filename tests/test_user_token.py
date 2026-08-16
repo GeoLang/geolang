@@ -156,6 +156,7 @@ def test_chat_agui_forwards_the_authorization_header_into_the_run():
         assert response.status_code == 200
 
     assert _sibyl_body(route)["user_token"] == TOKEN
+    assert _sibyl_body(route)["thread_id"] == "t1"
 
 
 def test_chat_agui_without_a_header_starts_an_anonymous_run():
