@@ -74,6 +74,6 @@ The agent should prefer **client-side** work (a `viewer_cmd` like `sql_query` ru
 
 ## Known limitations
 
-- **Tools run in the API process.** A tool that blocks holds a threadpool slot, and a tool that crashes the interpreter takes the API with it. There is no sandbox between the agent's tool calls and this process.
-- **CORS is wide-open** (`allow_origins=["*"]`) in [`server.py`](../src/api/server.py) — fine for development, must be tightened in any shared deployment.
-- **The tool endpoints are unauthenticated.** Anything that can reach `POST /tools/{name}` can run a tool. Keep the port off the public network.
+- **Tools run in the API process unless `GEOLANG_EXECUTOR_URL` is set.** The platform compose runs `geolang-executor`. Standalone and tests stay in-process and log a warning when the auth gate is on. See [`DESIGN.md`](DESIGN.md).
+- **CORS is origin-listed** once the auth gate is on (`GEOLANG_CORS_ORIGINS`, or a default that includes the viewer). `GEOLANG_ALLOW_UNAUTHENTICATED=1` is the only way back to `*`.
+- **Tool endpoints require a platform JWT** when the gate is on. `GET /tools` stays open so sibyl can fetch the manifest.
