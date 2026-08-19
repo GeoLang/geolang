@@ -10,8 +10,8 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 39 geospatial tools served to sibyl over HTTP, and to outside agents over MCP. Tool code runs in the API process, or in an isolated executor that holds no platform secret
-- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan for the user to approve, `run_workflow` executes it
+- 39 geospatial tools served to sibyl over HTTP, and 38 of them to outside agents over MCP: the MCP manifest drops every tool declaring `TOOL_RUNS_CALLER_CODE`, and `sql_query` is the only one. Tool code runs in the API process, or in an isolated executor that holds no platform secret
+- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan for the user to approve, `run_workflow` executes it. The approval step is persona text only: `run_workflow` checks for no prior plan and will execute a manifest it has never seen planned
 - AG-UI event stream for ViewTopia
 
 ---
@@ -54,12 +54,17 @@ Sessions live in sibyl's SQLite database on the `sibyl-data` volume.
 ### Run the API server on the host
 
 ```bash
-pip install -r requirements_client.txt
+pip install -r requirements.txt -r requirements_client.txt
 
 # sibyl must be reachable. SIBYL_URL defaults to http://localhost:8090
 python -m uvicorn src.api.server:app --reload --port 8080
 # → http://localhost:8080/
 ```
+
+Both files are needed. `requirements_client.txt` names none of the geospatial
+libraries, and tools import lazily, so with it alone the server starts and `GET
+/tools` still advertises 39 while roughly 25 of them fail at call time. `requests`
+is declared in neither file and arrives transitively through osmnx.
 
 `TOOL_EXEC_DIR` auto-detects the geolang repo root from `src/core/utils.py`, so
 no env var is needed in dev. Override it via the `TOOL_EXEC_DIR` env var if you
@@ -144,8 +149,10 @@ runs code, writes a file, or reads back a session or a user's data requires an
 `Authorization: Bearer <jwt>` header holding a live HS256 token, the same
 `{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts. Signature
 and `exp` are checked. At the tool boundary, geolang exchanges that token for a
-role-free token that expires within five minutes and contains only the exact
-downstream operation scopes that tool needs.
+role-free token that expires within five minutes and carries only the downstream
+operation scopes mapped to that tool. Only 3 of the 39 tools have any scopes
+mapped today; the other 36 exchange to an empty scope list, so for them the
+exchange shortens the expiry and drops the role but narrows no operation.
 
 The service refuses to start without that variable, as ptolemy and interiora
 already do. Running with no authentication at all takes a second, explicit
@@ -153,12 +160,17 @@ already do. Running with no authentication at all takes a second, explicit
 the standalone stack. Never set it where the port is reachable.
 
 **Treat a platform token like an SSH key to this host.** `geopandas_api`,
-`pyqgis_api`, `run_qgis_algorithm` and `sql_query` take expressions and
-algorithm parameters the caller chooses, so anyone holding a live token can
-compute arbitrary things and read and write everything under their own
-directories in `outputs/` and `user_data/`. That is by design for a
-geoprocessing agent. Scope the token
+`run_qgis_algorithm` and `sql_query` take expressions and algorithm parameters
+the caller chooses, so anyone holding a live token can compute arbitrary things
+and read and write everything under their own directories in `outputs/` and
+`user_data/`. That is by design for a geoprocessing agent. Scope the token
 short, never commit it, and rotate it like a key.
+
+`pyqgis_api` is not confined. Its schema takes only `function_name`, `uri` and
+`layer_name`, so most algorithms reject the call for want of their parameters,
+and the `uri` it does take is passed straight to `QgsVectorLayer` /
+`QgsRasterLayer` with no confinement check, so it is not bounded to the caller's
+directories the way the tools above are.
 
 What that reaches is bounded by where the tool runs, which is the next section.
 
@@ -174,9 +186,14 @@ Gated: `POST /tools/{name}` and `POST /chat/agui`, the file writers `/upload`,
 gated too.
 
 Open: `/health`, the viewer's static assets, the `GET /tools` manifest sibyl
-fetches at startup before anyone has signed in, and reading a share by id, whose
-whole point is a link that works for someone who never signs in. That reader
-gets the view and the summary, not the layers behind them.
+fetches at startup before anyone has signed in, `GET /debug/tools`, which carries
+no auth dependency and returns every tool name, `GET /live-data/{token}`, which
+is open by design and reaches what its token names, and reading a share by id,
+whose whole point is a link that works for someone who never signs in. That
+reader gets the view and the summary, not the layers behind them.
+
+`POST /mcp/token` is in neither list. It hangs off no gate dependency and checks
+the platform bearer itself, so it needs a live platform token either way.
 
 With `GEOLANG_ALLOW_UNAUTHENTICATED=1` and no secret the whole API stays open.
 That is the standalone `docker compose up` flow, the test suite and the eval
@@ -238,6 +255,15 @@ is refused with an error rather than opened, and an output filename carrying a
 directory part is refused rather than trimmed, so no two callers can be steered
 onto one file.
 
+**`plan_workflow` and `run_workflow` are the exception to all of that.** They
+forward the model's TOML manifest to geodukt verbatim, and a manifest's
+`[[source]]` and `[[sink]]` `path` fields are real filesystem paths that geodukt
+opens with no confinement root of its own. A relative path resolves against the
+shared repo root rather than the caller's directory, and an absolute path is
+opened rather than refused. It is also broken as a feature: the persona tells the
+model to write sinks as `outputs/foo.gpkg`, which lands in the shared parent
+where `list_outputs` and the download routes cannot see it.
+
 ### MCP for outside agents
 
 The tools are served over the Model Context Protocol at `POST /mcp`,
@@ -270,6 +296,11 @@ The bearer is required on every MCP request when the gate is on and supplies
 the subject copied into each execution token. Set `MCP_ALLOWED_HOSTS` to the public hostname,
 otherwise the transport's DNS-rebinding check answers `421` to everything. See
 [`docs/api_reference.md`](docs/api_reference.md#mcp).
+
+The platform compose sets `MCP_ALLOWED_HOSTS` nowhere, and the default is
+localhost only, so as shipped every MCP request through a real hostname gets a
+`421` and only local access works. The `https://<host>/agent/mcp` examples above
+need the variable set on the geolang service first.
 
 The MCP token only opens this service. Before each tool runs, geolang exchanges
 it for a role-free JWT with `token_use: "tool"` and an exact `scope` array. The
