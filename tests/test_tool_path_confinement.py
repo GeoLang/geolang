@@ -395,3 +395,22 @@ def test_the_natural_earth_dataset_name_cannot_climb_out_of_its_directory():
             DownloadNaturalEarthArgs(dataset=name)
 
     assert DownloadNaturalEarthArgs(dataset="admin_0_countries").dataset
+
+
+# ── pyqgis_api uri is confined the same way as every other input ─────────
+
+
+@pytest.mark.parametrize("function_name", ["QgsVectorLayer", "QgsRasterLayer"])
+def test_pyqgis_api_refuses_an_absolute_uri_outside_the_tree(tree, function_name):
+    from src.agents.tools.pygis_api import confined_uri, pyqgis_api
+
+    outside = str(tree / "outside" / "secret.gpkg")
+
+    with caller_directory_scope(BOB):
+        with pytest.raises(utils.PathRefused) as refusal:
+            confined_uri(outside)
+        result = pyqgis_api(function_name, uri=outside)
+
+    assert "absolute path" in str(refusal.value)
+    assert "absolute path" in result
+    assert "QGIS init failed" not in result

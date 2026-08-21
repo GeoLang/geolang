@@ -8,10 +8,12 @@ Nothing runs here: run_workflow executes the same manifest after the user agrees
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from src.core.errors import PathRefused
 from src.core.user_token import service_headers
 
 from ._geodukt import (
     SUPPORTED_FORMATS,
+    confine_manifest,
     direct_tool_advice,
     error_detail,
     escape_hatch_steps,
@@ -66,6 +68,10 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
     manifest, error = parse_manifest(manifest_toml)
     if error:
         return f"ERROR: {error} Fix the TOML and call plan_workflow again."
+    try:
+        manifest_toml = confine_manifest(manifest_toml, manifest)
+    except PathRefused as e:
+        return f"ERROR: {e}"
 
     url = geodukt_url()
     try:

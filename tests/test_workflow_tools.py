@@ -6,6 +6,7 @@ so they are stubbed here the way the other external services are stubbed.
 
 import asyncio
 import json
+import pathlib
 import sys
 from types import SimpleNamespace
 
@@ -21,7 +22,9 @@ from src.agents.tools.list_workflow_operations import (
 from src.agents.tools.plan_workflow import PlanWorkflowArgs, plan_workflow
 from src.agents.tools.run_workflow import RunWorkflowArgs, run_workflow
 from src.api import server
+from src.core import utils
 from src.core.user_token import user_token_scope
+from src.core.utils import caller_directory_scope
 
 MANIFEST = """
 [project]
@@ -44,6 +47,13 @@ input = "catchment"
 format = "gpkg"
 path = "outputs/depot_catchment.gpkg"
 """
+
+
+def confined(toml: str, caller: str | None = None) -> str:
+    caller = caller or utils.ANONYMOUS_OUTPUTS_DIRECTORY
+    for root in ("outputs/", "user_data/"):
+        toml = toml.replace(root, f"{root}{caller}/")
+    return toml
 
 # "wide" is declared before the step it consumes, so only geodukt's reported
 # order puts the plan in execution order
@@ -311,7 +321,7 @@ def test_plan_emits_the_structured_plan(geodukt):
 
     res = plan_workflow(MANIFEST, title="Depot catchment areas")
 
-    assert fake.calls == [("/validate", {"manifest": MANIFEST})]
+    assert fake.calls == [("/validate", {"manifest": confined(MANIFEST)})]
     assert "Nothing has run yet" in res
     assert "validated by geodukt" in res
 
@@ -326,11 +336,11 @@ def test_plan_emits_the_structured_plan(geodukt):
     ]
     assert plan["steps"][1]["operation"] == "buffer"
     assert plan["steps"][1]["params"] == {"distance": 500.0}
-    assert plan["datasets"] == ["outputs/depots.geojson"]
-    assert plan["outputs"] == ["outputs/depot_catchment.gpkg"]
+    assert plan["datasets"] == [confined("outputs/depots.geojson")]
+    assert plan["outputs"] == [confined("outputs/depot_catchment.gpkg")]
     assert plan["formats"] == ["geojson", "gpkg"]
-    # the viewer's approve action re-runs exactly this manifest
-    assert plan["manifest"] == MANIFEST
+    # the viewer's approve action re-runs exactly this (confined) manifest
+    assert plan["manifest"] == confined(MANIFEST)
     # the marker stays on one line so the stream parser can split on it
     assert "\n" not in res.split("__PLAN__:", 1)[1]
 
@@ -412,7 +422,7 @@ def test_plan_still_works_without_the_validate_route(geodukt):
 
     assert "not validated" in res
     plan = plan_of(res)
-    assert plan["outputs"] == ["outputs/depot_catchment.gpkg"]
+    assert plan["outputs"] == [confined("outputs/depot_catchment.gpkg")]
     # the panel needs this as a flag, not as prose in the summary
     assert plan["validated"] is False
 
@@ -458,10 +468,10 @@ def test_run_workflow_reports_counts_and_outputs(geodukt):
 
     res = run_workflow(MANIFEST)
 
-    assert fake.calls == [("/run", {"manifest": MANIFEST})]
+    assert fake.calls == [("/run", {"manifest": confined(MANIFEST)})]
     assert 'Workflow "depot-catchment" run 7 completed.' in res
     assert "catchment: 12 features" in res
-    assert "wrote outputs/depot_catchment.gpkg (gpkg)" in res
+    assert f"wrote {confined('outputs/depot_catchment.gpkg')} (gpkg)" in res
     assert "emit_ui_spec" in res
     assert not res.startswith("ERROR")
     # no per-step status from this build, but the run completed, so every step did
@@ -470,7 +480,7 @@ def test_run_workflow_reports_counts_and_outputs(geodukt):
     assert report["outputs"] == [
         {
             "name": "out",
-            "path": "outputs/depot_catchment.gpkg",
+            "path": confined("outputs/depot_catchment.gpkg"),
             "format": "gpkg",
             "written": True,
         }
@@ -494,7 +504,7 @@ def test_a_successful_run_emits_the_structured_report(geodukt):
     ]
     # the panel only offers a download for a file that was actually written
     assert [(o["path"], o["written"]) for o in report["outputs"]] == [
-        ("outputs/depot_catchment.gpkg", True)
+        (confined("outputs/depot_catchment.gpkg"), True)
     ]
     # the marker stays on one line so the stream parser can split on it
     assert "\n" not in res.split("__RUN__:", 1)[1]
@@ -528,7 +538,7 @@ def test_a_mid_pipeline_failure_reports_every_step(geodukt):
         ("out", "not_run", ""),
     ]
     assert [(o["path"], o["written"]) for o in report["outputs"]] == [
-        ("outputs/depot_catchment.gpkg", False)
+        (confined("outputs/depot_catchment.gpkg"), False)
     ]
 
 
@@ -826,3 +836,129 @@ def test_a_forbidden_run_is_treated_the_same(geodukt):
 
     assert "cannot execute workflows" in result
     assert "editor or admin role required" in result
+
+
+# ── source and sink paths stay inside the caller's own directories ────────
+
+CALLER = "bob-fedcba9876543210"
+
+
+@pytest.fixture
+def tree(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
+    monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
+    monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
+    return tmp_path
+
+
+def _outputs_of(directory):
+    with caller_directory_scope(directory):
+        return pathlib.Path(utils.caller_outputs_dir())
+
+
+def _user_data_of(directory):
+    with caller_directory_scope(directory):
+        return pathlib.Path(utils.caller_user_data_dir())
+
+
+def test_an_outputs_prefix_is_rewritten_to_the_caller_directory(tree, geodukt):
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+    manifest = """
+[project]
+name = "depot-catchment"
+
+[[source]]
+name = "depots"
+format = "geojson"
+path = "outputs/foo.gpkg"
+
+[[sink]]
+name = "out"
+input = "depots"
+format = "gpkg"
+path = "outputs/foo.gpkg"
+"""
+    expected = f"outputs/{CALLER}/foo.gpkg"
+
+    with caller_directory_scope(CALLER):
+        planned = plan_workflow(manifest)
+        run_workflow(manifest)
+
+    posted_plan = fake.calls[0][1]["manifest"]
+    posted_run = fake.calls[1][1]["manifest"]
+    assert f'path = "{expected}"' in posted_plan
+    assert "outputs/foo.gpkg" not in posted_plan.replace(expected, "")
+    assert posted_run == posted_plan
+    plan = plan_of(planned)
+    assert plan["manifest"] == posted_plan
+    assert plan["datasets"] == [expected]
+    assert plan["outputs"] == [expected]
+
+
+def test_a_manifest_path_outside_the_tree_is_refused(tree, monkeypatch):
+    monkeypatch.setitem(sys.modules, "requests", _NoHttp())
+    manifest = """
+[[source]]
+name = "secret"
+format = "geojson"
+path = "/etc/passwd"
+
+[[sink]]
+name = "out"
+input = "secret"
+format = "gpkg"
+path = "outputs/leaked.gpkg"
+"""
+
+    with caller_directory_scope(CALLER):
+        planned = plan_workflow(manifest)
+        ran = run_workflow(manifest)
+
+    assert planned.startswith("ERROR")
+    assert ran.startswith("ERROR")
+    assert "__PLAN__" not in planned
+    assert "__RUN__" not in ran
+    assert "absolute path" in planned
+    assert "absolute path" in ran
+
+
+def test_a_source_filename_is_looked_up_in_the_callers_dirs(tree, geodukt):
+    fake = geodukt(validate=(200, VALIDATED))
+    (_user_data_of(CALLER) / "parcels.geojson").write_text("{}")
+    (_outputs_of(CALLER) / "depots.geojson").write_text("{}")
+    manifest = """
+[project]
+name = "from-uploads"
+
+[[source]]
+name = "parcels"
+format = "geojson"
+path = "parcels.geojson"
+
+[[source]]
+name = "depots"
+format = "geojson"
+path = "depots.geojson"
+
+[[sink]]
+name = "out"
+input = "parcels"
+format = "gpkg"
+path = "combined.gpkg"
+"""
+
+    with caller_directory_scope(CALLER):
+        planned = plan_workflow(manifest)
+
+    posted = fake.calls[0][1]["manifest"]
+    assert f'path = "user_data/{CALLER}/parcels.geojson"' in posted
+    assert f'path = "outputs/{CALLER}/depots.geojson"' in posted
+    assert f'path = "outputs/{CALLER}/combined.gpkg"' in posted
+    plan = plan_of(planned)
+    assert plan["manifest"] == posted
+    assert plan["datasets"] == [
+        f"user_data/{CALLER}/parcels.geojson",
+        f"outputs/{CALLER}/depots.geojson",
+    ]
+    assert plan["outputs"] == [f"outputs/{CALLER}/combined.gpkg"]

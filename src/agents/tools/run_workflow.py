@@ -7,9 +7,16 @@ seam plan_workflow uses for the plan itself.
 
 from pydantic import BaseModel, Field
 
+from src.core.errors import PathRefused
 from src.core.user_token import service_headers
 
-from ._geodukt import error_detail, geodukt_url, parse_manifest, run_payload
+from ._geodukt import (
+    confine_manifest,
+    error_detail,
+    geodukt_url,
+    parse_manifest,
+    run_payload,
+)
 
 
 class RunWorkflowArgs(BaseModel):
@@ -32,6 +39,10 @@ def run_workflow(manifest_toml: str) -> str:
     manifest, error = parse_manifest(manifest_toml)
     if error:
         return f"ERROR: {error}"
+    try:
+        manifest_toml = confine_manifest(manifest_toml, manifest)
+    except PathRefused as e:
+        return f"ERROR: {e}"
 
     url = geodukt_url()
     try:

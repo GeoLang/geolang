@@ -166,11 +166,9 @@ and read and write everything under their own directories in `outputs/` and
 `user_data/`. That is by design for a geoprocessing agent. Scope the token
 short, never commit it, and rotate it like a key.
 
-`pyqgis_api` is not confined. Its schema takes only `function_name`, `uri` and
-`layer_name`, so most algorithms reject the call for want of their parameters,
-and the `uri` it does take is passed straight to `QgsVectorLayer` /
-`QgsRasterLayer` with no confinement check, so it is not bounded to the caller's
-directories the way the tools above are.
+`pyqgis_api` still only takes `function_name`, `uri` and `layer_name`, so most
+algorithms reject the call for want of their parameters. The `uri` it does take
+goes through `tool_input_path`, the same confinement as the tools above.
 
 What that reaches is bounded by where the tool runs, which is the next section.
 
@@ -255,14 +253,12 @@ is refused with an error rather than opened, and an output filename carrying a
 directory part is refused rather than trimmed, so no two callers can be steered
 onto one file.
 
-**`plan_workflow` and `run_workflow` are the exception to all of that.** They
-forward the model's TOML manifest to geodukt verbatim, and a manifest's
-`[[source]]` and `[[sink]]` `path` fields are real filesystem paths that geodukt
-opens with no confinement root of its own. A relative path resolves against the
-shared repo root rather than the caller's directory, and an absolute path is
-opened rather than refused. It is also broken as a feature: the persona tells the
-model to write sinks as `outputs/foo.gpkg`, which lands in the shared parent
-where `list_outputs` and the download routes cannot see it.
+`plan_workflow` and `run_workflow` rewrite each `[[source]]` and `[[sink]]`
+`path` onto the caller's own directories before the manifest reaches geodukt.
+`outputs/foo.gpkg` becomes `outputs/<caller>/foo.gpkg`, which is what
+`list_outputs` and the download routes serve. An absolute path outside those
+directories is refused. geodukt itself still has no confinement root: the
+rewrite is the check.
 
 ### MCP for outside agents
 

@@ -8,8 +8,14 @@ from what /run will execute.
 
 import os
 import re
+from pathlib import Path
+
+from src.core import utils
+from src.core.errors import PathRefused
 
 DEFAULT_GEODUKT_URL = "http://geodukt:8080"
+
+_PATH_ASSIGNMENT = re.compile(r'^(\s*path\s*=\s*)(["\'])(.*)\2(.*)$')
 
 # geodukt names the operation it refused: "transform 'x' uses operation 'y'
 # which cannot run: <why>"
@@ -80,6 +86,104 @@ def parse_manifest(manifest_toml: str):
         return tomllib.loads(manifest_toml or ""), None
     except Exception as e:
         return None, f"manifest is not valid TOML: {e}"
+
+
+def _relative_to_exec_dir(path: str | Path) -> str:
+    resolved = Path(path).resolve()
+    root = Path(utils.EXEC_DIR).resolve()
+    if not resolved.is_relative_to(root):
+        raise PathRefused(
+            f"path names '{path}', which points out of your own directory. "
+            "Pick another name."
+        )
+    return resolved.relative_to(root).as_posix()
+
+
+def _prefix_into_caller(argument: str, value: str, root_name: str) -> str:
+    caller = utils.current_caller_directory()
+    rest = value[len(root_name) :].lstrip("/\\")
+    rest_parts = Path(rest).parts if rest else ()
+    if rest_parts and rest_parts[0] == caller:
+        rewritten = f"{root_name}/{rest}" if rest else root_name
+    else:
+        rewritten = f"{root_name}/{caller}/{rest}" if rest else f"{root_name}/{caller}"
+    target = (Path(utils.EXEC_DIR) / rewritten).resolve()
+    allowed = Path(
+        utils.caller_outputs_dir()
+        if root_name == "outputs"
+        else utils.caller_user_data_dir()
+    ).resolve()
+    if not target.is_relative_to(allowed):
+        raise PathRefused(
+            f"{argument} names '{value}', which points out of your own "
+            "directory. Pick another name."
+        )
+    return _relative_to_exec_dir(target)
+
+
+def confine_workflow_path(argument: str, value: str, *, sink: bool) -> str:
+    """geodukt's cwd is EXEC_DIR and it has no confinement of its own, so
+    outputs/foo.gpkg would land in the shared parent."""
+    if not value:
+        raise PathRefused(f"{argument} has no path")
+    if ".." in Path(value).parts:
+        raise PathRefused(
+            f"{argument} names '{value}', which points out of your own "
+            "directory. Pick another name."
+        )
+    if os.path.isabs(value):
+        resolved = Path(value).resolve()
+        for directory in (utils.caller_outputs_dir(), utils.caller_user_data_dir()):
+            if resolved.is_relative_to(Path(directory).resolve()):
+                return _relative_to_exec_dir(resolved)
+        raise PathRefused(
+            f"{argument} must be a filename in your own outputs, in user_data, "
+            f"or in a natural earth set, not an absolute path: '{value}'"
+        )
+    parts = Path(value).parts
+    if parts and parts[0] in ("outputs", "user_data"):
+        return _prefix_into_caller(argument, value, parts[0])
+    if sink:
+        return _relative_to_exec_dir(utils.tool_output_path(argument, value))
+    return _relative_to_exec_dir(utils.tool_input_path(argument, value))
+
+
+def confine_manifest(manifest_toml: str, parsed: dict) -> str:
+    for kind, sink in (("source", False), ("sink", True)):
+        for entry in parsed.get(kind) or []:
+            if not isinstance(entry, dict) or not entry.get("path"):
+                continue
+            entry["path"] = confine_workflow_path("path", entry["path"], sink=sink)
+
+    kind = None
+    indexes = {"source": -1, "sink": -1}
+    current = None
+    lines = []
+    for line in manifest_toml.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped in ("[[source]]", "[[sink]]"):
+            kind = stripped[2:-2]
+            indexes[kind] += 1
+            entries = parsed.get(kind) or []
+            current = entries[indexes[kind]] if indexes[kind] < len(entries) else None
+        elif stripped.startswith("["):
+            kind = None
+            current = None
+        if current is not None and "path" in current:
+            ending = ""
+            body = line
+            if body.endswith("\r\n"):
+                body, ending = body[:-2], "\r\n"
+            elif body.endswith("\n"):
+                body, ending = body[:-1], "\n"
+            match = _PATH_ASSIGNMENT.match(body)
+            if match:
+                line = (
+                    f"{match.group(1)}{match.group(2)}{current['path']}"
+                    f"{match.group(2)}{match.group(4)}{ending}"
+                )
+        lines.append(line)
+    return "".join(lines)
 
 
 def error_detail(resp) -> str:

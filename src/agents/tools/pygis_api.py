@@ -1,6 +1,9 @@
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from src.core.errors import PathRefused
+from src.core.utils import tool_input_path
+
 
 class PyQGISArgs(BaseModel):
     function_name: str = Field(
@@ -15,11 +18,22 @@ class PyQGISArgs(BaseModel):
     )
 
 
+def confined_uri(uri: str) -> str:
+    name, separator, suffix = uri.partition("|")
+    return tool_input_path("uri", name) + separator + suffix
+
+
 def pyqgis_api(function_name: str, **kwargs) -> str:
     """
     Calls a PyQGIS function for QGIS-specific tasks.
     """
     import os
+
+    if function_name in ("QgsVectorLayer", "QgsRasterLayer") and kwargs.get("uri"):
+        try:
+            kwargs = {**kwargs, "uri": confined_uri(kwargs["uri"])}
+        except PathRefused as e:
+            return f"Error executing '{function_name}': {e}"
 
     try:
         from qgis.core import QgsApplication
