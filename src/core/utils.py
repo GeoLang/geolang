@@ -29,6 +29,8 @@ LIVE_DATA_DIR = Path(EXEC_DIR) / "live_data"
 # one directory per caller, never written to directly, same as OUTPUTS_ROOT
 USER_DATA_ROOT = Path(EXEC_DIR) / "user_data"
 CATALOGUE_NAME = "catalogue.json"
+NATURAL_EARTH_DIRECTORY_NAME = "natural_earth"
+NATURAL_EARTH_SCALES = ("10m", "50m", "110m")
 
 
 ANONYMOUS_OUTPUTS_DIRECTORY = "anonymous"
@@ -167,17 +169,42 @@ def resolve_under(names, search_dirs, roots) -> str | None:
     return None
 
 
-def natural_earth_dirs() -> list[str]:
-    """The reference sets on disk, whichever of them have been downloaded.
+def natural_earth_directory(scale: str) -> Path:
+    """The writable mounted directory for one Natural Earth scale."""
+    if scale not in NATURAL_EARTH_SCALES:
+        raise ValueError(f"unsupported Natural Earth scale: {scale}")
+    return Path(EXEC_DIR) / NATURAL_EARTH_DIRECTORY_NAME / scale
 
-    A glob rather than a list of names, so a set someone downloads next is
-    reachable without a code change. A set that arrives as a symlink is skipped:
-    it would resolve outside the tree and widen the boundary.
+
+def natural_earth_dirs(scale: str | None = None) -> list[str]:
+    """The safe reference directories for one scale, or every downloaded set.
+
+    New downloads use the mounted `natural_earth/<scale>` layout. The direct
+    `natural_earth_<scale>*` layout remains readable for existing datasets. A
+    symlinked set is skipped because it would widen the file boundary.
     """
+    scales = (scale,) if scale is not None else NATURAL_EARTH_SCALES
+    for item in scales:
+        if item not in NATURAL_EARTH_SCALES:
+            raise ValueError(f"unsupported Natural Earth scale: {item}")
+
+    directories = [natural_earth_directory(item) for item in scales]
+    for item in scales:
+        directories.extend(sorted(Path(EXEC_DIR).glob(f"natural_earth_{item}*")))
+
     return [
         str(path)
-        for path in sorted(Path(EXEC_DIR).glob("natural_earth*"))
+        for path in directories
         if path.is_dir() and not path.is_symlink()
+    ]
+
+
+def natural_earth_dataset_paths(dataset: str) -> list[str]:
+    """The shapefile paths for every readable scale of `dataset`."""
+    return [
+        str(Path(directory) / f"ne_{scale}_{dataset}.shp")
+        for scale in NATURAL_EARTH_SCALES
+        for directory in natural_earth_dirs(scale)
     ]
 
 

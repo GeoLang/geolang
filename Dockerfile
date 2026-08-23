@@ -44,11 +44,13 @@ RUN python -m venv /opt/venv \
     && playwright install --with-deps chromium \
     && rm /tmp/requirements_client.txt /tmp/requirements.txt
 
-# SELinux-friendly outputs
-RUN mkdir -p /app/geolang/outputs && chmod 777 /app/geolang/outputs
+# SELinux-friendly outputs and writable runtime mount targets
+RUN mkdir -p /app/geolang/outputs /app/geolang/user_data /app/geolang/live_data /app/geolang/natural_earth \
+    && chown 1000:1000 /app/geolang/outputs /app/geolang/user_data /app/geolang/live_data /app/geolang/natural_earth \
+    && chmod 777 /app/geolang/outputs
 
-# the repo is bind-mounted here by compose
 WORKDIR /app/geolang
+COPY src/ ./src/
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \

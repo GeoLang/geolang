@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from src.core.utils import natural_earth_dataset_paths
 
 
 class GeocodePlaceArgs(BaseModel):
@@ -18,8 +19,6 @@ def geocode_place(place_name: str) -> str:
     """
     import os
     import traceback
-
-    exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
 
     # platform geokode first: authoritative for addresses in the loaded extract
     geokode_url = os.environ.get("GEOKODE_URL")
@@ -53,12 +52,7 @@ def geocode_place(place_name: str) -> str:
             pass  # geokode unavailable or no match: fall back to Natural Earth
 
     # Search across available Natural Earth populated places datasets
-    search_paths = [
-        os.path.join(exec_dir, "natural_earth_10m", "ne_10m_populated_places.shp"),
-        os.path.join(exec_dir, "natural_earth_50m", "ne_50m_populated_places.shp"),
-        os.path.join(exec_dir, "natural_earth_110m", "ne_110m_populated_places.shp"),
-        os.path.join(exec_dir, "natural_earth", "ne_110m_populated_places.shp"),
-    ]
+    search_paths = natural_earth_dataset_paths("populated_places")
 
     try:
         import geopandas as gpd

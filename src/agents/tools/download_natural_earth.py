@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import tool_output_path
+from src.core.utils import natural_earth_directory, tool_output_path
 
 
 class DownloadNaturalEarthArgs(BaseModel):
@@ -56,8 +56,7 @@ def download_natural_earth_dataset(
         scale = "110m"
 
     url = f"https://naturalearth.s3.amazonaws.com/{scale}_cultural/ne_{scale}_{dataset}.zip"
-    tool_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
-    output_dir = os.path.join(tool_dir, f"natural_earth_{scale}")
+    output_dir = str(natural_earth_directory(scale))
     zip_path = os.path.join(output_dir, f"ne_{scale}_{dataset}.zip")
 
     try:

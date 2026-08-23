@@ -54,10 +54,10 @@ Sessions live in sibyl's SQLite database on the `sibyl-data` volume.
 ### Run the API server on the host
 
 ```bash
-pip install -r requirements.txt -r requirements_client.txt
-
 # sibyl must be reachable. SIBYL_URL defaults to http://localhost:8090
-python -m uvicorn src.api.server:app --reload --port 8080
+uv run --with-requirements requirements.txt \
+  --with-requirements requirements_client.txt \
+  -- python -m uvicorn src.api.server:app --reload --port 8080
 # → http://localhost:8080/
 ```
 
@@ -82,8 +82,8 @@ want outputs elsewhere.
 ## Tests
 
 ```bash
-# unit tests, run inside the container (deps are pinned for its python)
-docker exec viewtopia-geolang-api-1 sh -c "pip install -q pytest respx && python -m pytest tests/ -q"
+# unit tests, run inside the container with temporary test dependencies
+docker exec viewtopia-geolang-api-1 sh -c "uv run --with pytest --with respx -- python -m pytest tests/ -q"
 
 # NL evals: real agent runs against the local model. Auto-skipped unless
 # geolang api, sibyl (local mode), and the llama server are all up.
