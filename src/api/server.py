@@ -46,7 +46,7 @@ from ag_ui.encoder import EventEncoder
 
 import httpx
 
-from src.agents.agent_manager import PERSONA, load_external_tools
+from src.agents.agent_manager import PERSONA, approval_route_only, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
 from src.api.live_document import (
     LAYER_DATA_SUFFIX,
@@ -111,10 +111,24 @@ def _slim_schema(node):
     return node
 
 
+def offered_tools() -> list[tuple]:
+    """The tools the manifest advertises and `POST /tools/{name}` dispatches.
+
+    Everything except the approval route's own tool: that one records a person
+    pressing approve, so a caller that could ask a tool route for it would never
+    have had to press anything.
+    """
+    return [
+        (func, schema)
+        for func, schema in load_external_tools()
+        if not approval_route_only(func)
+    ]
+
+
 def tool_manifest() -> list[dict]:
     """What geolang can run and with which arguments, one entry per tool."""
     tools = []
-    for func, schema in load_external_tools():
+    for func, schema in offered_tools():
         if schema is None:
             logger.warning(f"Tool {func.__name__} has no TOOL_SCHEMA, skipping")
             continue
@@ -318,9 +332,10 @@ def run_tool(
     # before the lookup, so an unauthenticated caller learns nothing from a 404
     require_platform_token(token)
 
-    # schema-less modules are not in the manifest either, so they are unknown here
+    # schema-less modules are not in the manifest either, so they are unknown
+    # here, and so is the approval route's own tool
     entry = next(
-        (t for t in load_external_tools() if t[0].__name__ == name and t[1]), None
+        (t for t in offered_tools() if t[0].__name__ == name and t[1]), None
     )
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Unknown tool: {name}")
@@ -345,6 +360,56 @@ def run_tool(
         asyncio.run(notify_agent(f"[{name} run from the viewer] {prose[:800]}"))
 
     return {"result": result}
+
+
+class ApprovalRequest(BaseModel):
+    manifest_toml: str
+
+
+# the module under src/agents/tools/ that records the click, dispatched by name
+# the way every other tool is: the record has to land in the process that runs
+# plan_workflow and run_workflow, which is the executor when one is configured
+APPROVAL_TOOL = "approve_workflow"
+# the one string that tool answers with when it recorded something
+APPROVED_ATTRIBUTE = "APPROVED"
+
+
+# sync for the same reason as the tool route: this dispatches a tool
+@app.post("/workflow/approve", dependencies=[Depends(platform_auth)])
+def approve_workflow(
+    request: ApprovalRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Record that the person at the viewer approved a plan.
+
+    The viewer's approve button posts this before it posts the run, and
+    run_workflow refuses a manifest that has no approval. There is no tool route
+    to the same record: a caller that could ask a tool for it never had to click.
+
+    The bearer is the caller the approval is recorded for, so the plan, the
+    approval and the run all have to be the same person.
+    """
+    token = bearer_token(authorization)
+
+    entry = next(
+        (t for t in load_external_tools() if t[0].__name__ == APPROVAL_TOOL), None
+    )
+    if entry is None:
+        raise HTTPException(status_code=503, detail="the approval tool is not loaded")
+    func, _ = entry
+
+    try:
+        result = execute_tool(
+            APPROVAL_TOOL, func, {"manifest_toml": request.manifest_toml}, token
+        )
+    except Exception as e:
+        logger.exception("Recording a plan approval failed")
+        result = f"❌ Approval failed: {e}"
+
+    # the tool's own success string, read off the module the loader returned so
+    # this is not a second copy of it. Anything else is a refusal
+    recorded = getattr(inspect.getmodule(func), APPROVED_ATTRIBUTE, None)
+    return {"approved": result == recorded, "message": result}
 
 
 async def agent_event_stream(
@@ -1196,7 +1261,7 @@ async def set_model(request: Request):
 @app.get("/debug/tools")
 def debug_tools():
     """Names of the tools geolang serves to sibyl."""
-    return {"tools": [func.__name__ for func, _ in load_external_tools()]}
+    return {"tools": [func.__name__ for func, _ in offered_tools()]}
 
 
 class ShareRequest(BaseModel):

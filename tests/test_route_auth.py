@@ -81,6 +81,7 @@ GATED = [
     ("models", "get", "/models", {}),
     ("model_set", "put", "/model", {"json": {"profile": "local"}}),
     ("share_create", "post", "/share", {"json": {}}),
+    ("workflow_approve", "post", "/workflow/approve", {"json": {"manifest_toml": ""}}),
 ]
 
 OPEN = [

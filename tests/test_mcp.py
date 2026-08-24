@@ -139,12 +139,47 @@ def test_a_tool_that_runs_caller_code_cannot_be_called(open_mode, client):
     assert response.json()["error"]["code"] == -32602
 
 
+def test_a_tool_needing_the_users_approval_is_not_listed(open_mode, client):
+    """`/chat` keeps run_workflow: there the user has a viewer to approve in."""
+    tools = result_of(call(client, "tools/list", {}))["tools"]
+
+    assert "run_workflow" in {t["name"] for t in server.tool_manifest()}
+    assert "run_workflow" not in {t["name"] for t in tools}
+
+
+def test_a_tool_needing_the_users_approval_cannot_be_called(open_mode, client):
+    response = call(
+        client,
+        "tools/call",
+        {"name": "run_workflow", "arguments": {"manifest_toml": "[project]"}},
+    )
+
+    assert response.json()["error"]["code"] == -32602
+
+
+def test_the_approval_itself_is_on_no_surface_here(open_mode, client):
+    """The one thing an external agent must not be able to do for the user."""
+    offered = {func.__name__ for func, _ in mcp_server.external_tools()}
+    response = call(
+        client,
+        "tools/call",
+        {"name": "approve_workflow", "arguments": {"manifest_toml": "[project]"}},
+    )
+
+    assert "approve_workflow" not in offered
+    assert response.json()["error"]["code"] == -32602
+
+
 def test_the_exclusion_is_the_tool_modules_own_declaration():
     """No name list in the endpoint: the tool declares it, so a new one is caught."""
     loaded = {func.__name__: func for func, _ in load_external_tools()}
 
     assert mcp_server.runs_caller_code(loaded["sql_query"])
     assert not mcp_server.runs_caller_code(loaded["viewer_control"])
+    assert mcp_server.needs_user_approval(loaded["run_workflow"])
+    assert not mcp_server.needs_user_approval(loaded["plan_workflow"])
+    assert mcp_server.approval_route_only(loaded["approve_workflow"])
+    assert not mcp_server.approval_route_only(loaded["run_workflow"])
 
 
 def test_a_tool_runs_and_comes_back_as_text(open_mode, client):

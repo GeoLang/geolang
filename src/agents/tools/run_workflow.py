@@ -4,14 +4,15 @@ Returns a readable summary for the model plus a ``__RUN__:{json}`` marker that
 server.py's agent_event_stream turns into a "run" event for the viewer, the same
 seam plan_workflow uses for the plan itself.
 
-A manifest plan_workflow never validated is refused before geodukt is called at
-all: see core's planned_manifests.
+A manifest plan_workflow never validated, and one the user never approved in the
+viewer, are both refused before geodukt is called at all: see core's
+planned_manifests.
 """
 
 from pydantic import BaseModel, Field
 
 from src.core.errors import PathRefused
-from src.core.planned_manifests import manifest_was_planned
+from src.core.planned_manifests import manifest_was_approved, manifest_was_planned
 from src.core.user_token import service_headers
 
 from ._geodukt import (
@@ -29,6 +30,18 @@ NOT_PLANNED = (
     "after planning it, call plan_workflow again with the edited one."
 )
 
+# a bare refusal sends the model looking for another way to do the job, and it
+# finds sql_query and the raw geopandas tools, which is the opposite of the
+# reviewable plan the user is meant to approve
+NOT_APPROVED = (
+    "ERROR: the user has not approved this plan, so it cannot run. The manifest "
+    "is fine and you have done nothing wrong. Approving is theirs alone: they "
+    "press Approve on the plan in the viewer, and no tool you can call does it "
+    "for them. Do NOT retry this call, and do NOT fall back to sql_query, "
+    "geopandas_api or pyqgis_api to do the work another way. Tell the user the "
+    "plan is ready and ask them to approve it."
+)
+
 
 class RunWorkflowArgs(BaseModel):
     manifest_toml: str = Field(
@@ -43,9 +56,10 @@ class RunWorkflowArgs(BaseModel):
 def run_workflow(manifest_toml: str) -> str:
     """Execute a geodukt pipeline manifest and report per-step feature counts and
     the files it wrote. Only call this after plan_workflow and after the user has
-    approved that plan. If the user asked for a change, revise the manifest and
-    call plan_workflow again instead of running it. A manifest plan_workflow has
-    not validated is refused here rather than run."""
+    approved that plan in the viewer. If the user asked for a change, revise the
+    manifest and call plan_workflow again instead of running it. A manifest
+    plan_workflow has not validated, and one the user has not approved, are
+    refused here rather than run."""
     import json
 
     manifest, error = parse_manifest(manifest_toml)
@@ -57,6 +71,8 @@ def run_workflow(manifest_toml: str) -> str:
         return f"ERROR: {e}"
     if not manifest_was_planned(manifest_toml):
         return NOT_PLANNED
+    if not manifest_was_approved(manifest_toml):
+        return NOT_APPROVED
 
     url = geodukt_url()
     try:
@@ -135,3 +151,6 @@ def run_workflow(manifest_toml: str) -> str:
 
 TOOL_FUNCTION = run_workflow
 TOOL_SCHEMA = RunWorkflowArgs
+# the approval is a click in the user's own viewer, which an agent reaching this
+# service from outside does not have, so it could never get past the gate
+TOOL_NEEDS_USER_APPROVAL = True

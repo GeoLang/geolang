@@ -26,8 +26,8 @@ from fastapi.testclient import TestClient
 from src.api import server
 from src.core import utils
 from src.core.qgis_session import QgisUnavailable, qgis_session
-from tool_sweep.arguments import STAGED_LAYERS, SWEEP_ARGUMENTS
-from tool_sweep.runner import ERROR_MARKER
+from tool_sweep.arguments import STAGED_LAYERS, SWEEP_ARGUMENTS, SWEEP_MANIFEST_TOML
+from tool_sweep.runner import ERROR_MARKER, approve_manifest
 
 client = TestClient(server.app)
 
@@ -82,6 +82,18 @@ def test_offline_tool_runs_through_the_route(staged_layers, name):
     assert response.status_code == 200
     result = response.json()["result"]
     assert result and ERROR_MARKER not in result, result[:400]
+
+
+def test_the_sweeps_approve_step_reaches_the_route(staged_layers):
+    """run_workflow needs geodukt, so only the nightly runs it. The call standing
+    between it and the approval gate is checked here rather than at night.
+
+    The layers are staged first for the same reason the nightly stages them
+    before any tool runs: confining a manifest path looks the file up.
+    """
+    assert SWEEP_ARGUMENTS["run_workflow"].needs_approval
+    # nothing planned this manifest in this process, so the route says exactly that
+    assert "never planned" in approve_manifest(client, SWEEP_MANIFEST_TOML)
 
 
 def test_api_reference_lists_every_tool_and_counts_them():

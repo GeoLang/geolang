@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- 2026-08-24: `run_workflow` refuses a plan the user never approved. The viewer's
+  approve button posts the plan's own manifest to `POST /workflow/approve`
+  before it posts the run, that marks the plan record in
+  `src/core/planned_manifests.py` approved, and a manifest without one is
+  refused with an error telling the model to ask the user rather than retry.
+  Approving text nobody planned records nothing, planning again drops the
+  earlier approval, and an approval expires with its plan. The route dispatches
+  `approve_workflow`, a tool module kept off `GET /tools`, off
+  `POST /tools/{name}` and off `/mcp` by `TOOL_APPROVAL_ROUTE_ONLY`, so the
+  record of a person pressing a button is not something a model can ask for; it
+  is a tool module at all because the record has to land in the process that
+  runs `plan_workflow` and `run_workflow`, which is the executor when one is
+  configured. `run_workflow` declares `TOOL_NEEDS_USER_APPROVAL`, which drops it
+  from `/mcp` the way `TOOL_RUNS_CALLER_CODE` drops `sql_query`: an agent
+  reaching that endpoint has no viewer to approve in, so it could never get
+  past the gate. The nightly sweep presses approve for its `run_workflow` entry
+  through the same route the button posts to.
+
 ### Fixed
 - 2026-08-24: the QGIS tools work more than once per process. Each of
   `check_qgis_status`, `list_qgis_algorithms`, `run_qgis_algorithm` and

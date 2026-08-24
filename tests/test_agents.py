@@ -2,7 +2,7 @@
 """The tool manifest and executor sibyl calls: geolang runs tools in-process."""
 from fastapi.testclient import TestClient
 
-from src.agents.agent_manager import load_external_tools
+from src.agents.agent_manager import approval_route_only, load_external_tools
 from src.api import server
 
 client = TestClient(server.app)
@@ -10,11 +10,21 @@ client = TestClient(server.app)
 
 def test_manifest_covers_every_tool_module():
     manifest = client.get("/tools").json()["tools"]
+    modules = {
+        f.__name__ for f, _ in load_external_tools() if not approval_route_only(f)
+    }
 
-    assert {t["name"] for t in manifest} == {f.__name__ for f, _ in load_external_tools()}
+    assert {t["name"] for t in manifest} == modules
     for tool in manifest:
         assert tool["description"], f"{tool['name']} has no docstring"
         assert tool["parameters"]["type"] == "object"
+
+
+def test_the_approval_route_is_the_one_tool_left_off_the_manifest():
+    """It records the user pressing approve, so nothing the model can call has it."""
+    left_off = {f.__name__ for f, _ in load_external_tools() if approval_route_only(f)}
+
+    assert left_off == {"approve_workflow"}
 
 
 def test_executor_runs_a_tool_and_returns_a_string():

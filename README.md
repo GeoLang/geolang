@@ -10,8 +10,8 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 39 geospatial tools served to sibyl over HTTP, and 38 of them to outside agents over MCP: the MCP manifest drops every tool declaring `TOOL_RUNS_CALLER_CODE`, and `sql_query` is the only one. Tool code runs in the API process, or in an isolated executor that holds no platform secret
-- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan for the user to approve, `run_workflow` executes it. The approval step is persona text only: `run_workflow` checks for no prior plan and will execute a manifest it has never seen planned
+- 39 geospatial tools served to sibyl over HTTP, and 37 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
+- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan, the user presses approve in the viewer, and `run_workflow` executes it. Both halves are checked rather than trusted to the persona: `run_workflow` refuses a manifest `plan_workflow` never validated, and one the approve button never posted to `POST /workflow/approve`
 - AG-UI event stream for ViewTopia
 
 ---
@@ -327,8 +327,10 @@ The executor never receives an Agora scope. If a bound result needs a live
 document write, geolang-api mints a separate `agora:write` token after the tool
 returns and keeps it out of the tool process.
 
-`sql_query` is the one tool `/chat` has that this does not: it runs SQL the
-caller wrote in a browser, which only makes sense when they are the same person.
+Two tools `/chat` has are missing here. `sql_query` runs SQL the caller wrote in
+a browser, which only makes sense when they are the same person. `run_workflow`
+runs a manifest the user pressed approve on in their viewer, and an agent
+arriving here has no viewer, so it could only ever be refused.
 
 Add one more header and the call's map effects also land in a live agora
 document, so every open viewer redraws while the outside agent works:

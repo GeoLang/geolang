@@ -20,6 +20,10 @@ uploads them itself.
 `after` names a tool that must run first. `run_workflow` refuses a manifest
 `plan_workflow` did not validate, and both halves must be the same text.
 
+`needs_approval` marks a tool that refuses what nobody approved in the viewer.
+The sweep posts the entry's `manifest_toml` to `/workflow/approve` first, which
+is the call the approve button makes.
+
 `needs_qgis` marks the tools that need the QGIS bindings, which only the
 platform image has. They are offline, so the per-push suite runs them wherever
 QGIS starts and skips them where it does not.
@@ -123,6 +127,7 @@ class ToolSample:
     needs_qgis: bool = False
     crashes_executor: bool = False
     after: str | None = None
+    needs_approval: bool = False
 
 
 SWEEP_ARGUMENTS: dict[str, ToolSample] = {
@@ -253,7 +258,9 @@ SWEEP_ARGUMENTS: dict[str, ToolSample] = {
     "list_workflow_operations": ToolSample(),
     "plan_workflow": ToolSample(args={"manifest_toml": SWEEP_MANIFEST_TOML}),
     "run_workflow": ToolSample(
-        args={"manifest_toml": SWEEP_MANIFEST_TOML}, after="plan_workflow"
+        args={"manifest_toml": SWEEP_MANIFEST_TOML},
+        after="plan_workflow",
+        needs_approval=True,
     ),
     "geocode_place": ToolSample(args={"place_name": SWEEP_PLACE}, external=True),
     "batch_geocode": ToolSample(

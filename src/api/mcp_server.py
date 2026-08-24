@@ -28,7 +28,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from src.agents.agent_manager import load_external_tools, runs_caller_code
+from src.agents.agent_manager import (
+    approval_route_only,
+    load_external_tools,
+    needs_user_approval,
+    runs_caller_code,
+)
 from src.api.live_document import document_binding, publish
 from src.core.auth import mcp_token_error
 from src.core.tool_executor import (
@@ -120,13 +125,19 @@ class NoStandaloneStream:
 
 
 def external_tools() -> list[tuple]:
-    """The tools this endpoint offers: everything except tools that run a
-    caller-written payload, which an external agent must never author for
-    someone else's browser."""
+    """The tools this endpoint offers.
+
+    Left out: a tool that runs a caller-written payload, which an external agent
+    must never author for someone else's browser, and a tool that needs the user
+    pressing approve in their own viewer, which an agent arriving here has no way
+    to obtain.
+    """
     return [
         (func, schema)
         for func, schema in load_external_tools()
         if not runs_caller_code(func)
+        and not needs_user_approval(func)
+        and not approval_route_only(func)
     ]
 
 

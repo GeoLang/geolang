@@ -22,10 +22,11 @@ from src.agents.tools.list_workflow_operations import (
 from src.agents.tools.plan_workflow import PlanWorkflowArgs, plan_workflow
 from src.agents.tools.run_workflow import RunWorkflowArgs, run_workflow
 from src.api import server
-from src.core import utils
+from src.core import planned_manifests, utils
 from src.core.planned_manifests import (
     forget_planned_manifests,
     record_planned_manifest,
+    record_user_approval,
 )
 from src.core.user_token import user_token_scope
 from src.core.utils import caller_directory_scope
@@ -69,8 +70,15 @@ def no_standing_approval():
 
 
 def approve(manifest: str, caller: str | None = None) -> None:
-    """Record what plan_workflow would, for a test that is only about the run."""
+    """Record what plan_workflow and the approve click would, for a test that is
+    only about the run."""
     record_planned_manifest(confined(manifest, caller))
+    record_user_approval(confined(manifest, caller))
+
+
+def press_approve(manifest: str) -> dict:
+    """The approve click, through the route the viewer's button posts to."""
+    return server.approve_workflow(server.ApprovalRequest(manifest_toml=manifest))
 
 # "wide" is declared before the step it consumes, so only geodukt's reported
 # order puts the plan in execution order
@@ -916,6 +924,7 @@ path = "outputs/foo.gpkg"
 
     with caller_directory_scope(CALLER):
         planned = plan_workflow(manifest)
+        press_approve(manifest)
         run_workflow(manifest)
 
     posted_plan = fake.calls[0][1]["manifest"]
@@ -1038,6 +1047,7 @@ def test_a_planned_manifest_runs_and_runs_again(geodukt):
     fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
 
     plan_workflow(MANIFEST)
+    press_approve(MANIFEST)
     first = run_workflow(MANIFEST)
     second = run_workflow(MANIFEST)
 
@@ -1065,6 +1075,7 @@ def test_one_callers_plan_does_not_authorize_anothers_run(geodukt):
 
     with caller_directory_scope(CALLER):
         plan_workflow(PATHLESS_MANIFEST)
+        press_approve(PATHLESS_MANIFEST)
     with caller_directory_scope(SECOND_CALLER):
         refused = run_workflow(PATHLESS_MANIFEST)
     with caller_directory_scope(CALLER):
@@ -1074,3 +1085,147 @@ def test_one_callers_plan_does_not_authorize_anothers_run(geodukt):
     assert "__RUN__" not in refused
     assert "run 7 completed" in allowed
     assert [path for path, _ in fake.calls] == ["/validate", "/run"]
+
+
+# ── and only what the user approved in the viewer ─────────────────────────────
+
+
+def test_a_plan_the_user_never_approved_is_refused(geodukt):
+    """The gap the approval route closes: the plan is real, the click never was."""
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    plan_workflow(MANIFEST)
+    refused = run_workflow(MANIFEST)
+
+    assert refused.startswith("ERROR")
+    assert "has not approved" in refused
+    assert "__RUN__" not in refused
+    # and it says not to go around the plan, which is where a bare refusal leads
+    assert "sql_query" in refused
+    assert [path for path, _ in fake.calls] == ["/validate"]
+
+
+def test_the_approve_click_lets_the_planned_manifest_run(geodukt):
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    plan_workflow(MANIFEST)
+    approval = press_approve(MANIFEST)
+    ran = run_workflow(MANIFEST)
+
+    assert approval["approved"] is True
+    assert "run 7 completed" in ran
+    assert [path for path, _ in fake.calls] == ["/validate", "/run"]
+
+
+def test_approving_a_manifest_nobody_planned_records_nothing(geodukt):
+    """Fail closed: an approval only ever attaches to a plan the user was shown,
+    so it cannot be banked before the plan it would authorize."""
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    early = press_approve(MANIFEST)
+    plan_workflow(MANIFEST)
+    refused = run_workflow(MANIFEST)
+
+    assert early["approved"] is False
+    assert "never planned" in early["message"]
+    assert "has not approved" in refused
+    assert [path for path, _ in fake.calls] == ["/validate"]
+
+
+def test_an_edited_manifest_needs_its_own_approval(geodukt):
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    plan_workflow(MANIFEST)
+    press_approve(MANIFEST)
+    plan_workflow(EDITED_MANIFEST)
+    refused = run_workflow(EDITED_MANIFEST)
+
+    assert "has not approved" in refused
+    assert [path for path, _ in fake.calls] == ["/validate", "/validate"]
+
+
+def test_planning_again_drops_the_earlier_approval(geodukt):
+    """A second plan is a second thing to look at, whatever the text."""
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    plan_workflow(MANIFEST)
+    press_approve(MANIFEST)
+    plan_workflow(MANIFEST)
+    refused = run_workflow(MANIFEST)
+
+    assert "has not approved" in refused
+    assert [path for path, _ in fake.calls] == ["/validate", "/validate"]
+
+
+def test_an_approval_expires_with_the_plan(geodukt, monkeypatch):
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    plan_workflow(MANIFEST)
+    press_approve(MANIFEST)
+    monkeypatch.setattr(planned_manifests, "PLAN_LIFETIME_SECONDS", -1.0)
+    refused = run_workflow(MANIFEST)
+
+    # the whole record is gone, so this asks for the plan again rather than the click
+    assert "Call plan_workflow" in refused
+    assert [path for path, _ in fake.calls] == ["/validate"]
+
+
+def test_one_callers_approval_does_not_authorize_anothers_run(geodukt):
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    with caller_directory_scope(CALLER):
+        plan_workflow(PATHLESS_MANIFEST)
+    with caller_directory_scope(SECOND_CALLER):
+        plan_workflow(PATHLESS_MANIFEST)
+        press_approve(PATHLESS_MANIFEST)
+    with caller_directory_scope(CALLER):
+        refused = run_workflow(PATHLESS_MANIFEST)
+
+    assert "has not approved" in refused
+    assert [path for path, _ in fake.calls] == ["/validate", "/validate"]
+
+
+def test_the_approval_route_records_the_confined_text(tree, geodukt):
+    """The viewer posts what the plan carried, the model posts what it wrote, and
+    both have to land on one digest or one of them is refused."""
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+    manifest = """
+[project]
+name = "depot-catchment"
+
+[[source]]
+name = "depots"
+format = "geojson"
+path = "outputs/foo.gpkg"
+
+[[sink]]
+name = "out"
+input = "depots"
+format = "gpkg"
+path = "outputs/bar.gpkg"
+"""
+
+    with caller_directory_scope(CALLER):
+        planned = plan_workflow(manifest)
+        # the plan's own manifest, which is what the approve button posts back
+        approval = press_approve(plan_of(planned)["manifest"])
+        ran = run_workflow(manifest)
+
+    assert approval["approved"] is True
+    assert "run 7 completed" in ran
+    assert [path for path, _ in fake.calls] == ["/validate", "/run"]
+
+
+def test_the_approval_tool_is_not_a_tool_the_model_can_call():
+    """Leaving it off the manifest is not the gate: naming the tool route must
+    fail too, because sibyl posts whatever name the model emitted."""
+    from fastapi.testclient import TestClient
+
+    assert "approve_workflow" not in {t["name"] for t in server.tool_manifest()}
+    assert "approve_workflow" not in server.debug_tools()["tools"]
+
+    response = TestClient(server.app).post(
+        "/tools/approve_workflow", json={"args": {"manifest_toml": MANIFEST}}
+    )
+
+    assert response.status_code == 404

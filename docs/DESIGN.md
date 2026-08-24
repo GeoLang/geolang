@@ -75,6 +75,16 @@ The same declaration labels a workflow plan: every step of a `__PLAN__` payload 
 
 Still open, and viewer-side rather than here: DuckDB-WASM will fetch any domain the SQL names, so a `/chat` user's own agent can be talked into reading `http://attacker.example/leak` or an address on their corporate network. An allowlist of fetchable domains belongs in the viewer.
 
+## What `run_workflow` requires before it executes
+
+Two records, both keyed to the caller and to the digest of the confined manifest text, both in [`src/core/planned_manifests.py`](../src/core/planned_manifests.py): `plan_workflow` validated this text, and the user pressed approve on it. Without the first the model is told to plan; without the second it is told the user has not approved and to ask them rather than retry.
+
+The press arrives at `POST /workflow/approve`, which the viewer's approve button posts before it posts the run. The route dispatches `approve_workflow`, a tool module that is not offered as a tool: `TOOL_APPROVAL_ROUTE_ONLY = True` keeps it out of `GET /tools`, out of `POST /tools/{name}` and out of `/mcp`, because sibyl posts whatever tool name the model emitted and the record of a person pressing a button must not be one of them. It is a tool module because the record has to land in the process that runs `plan_workflow` and `run_workflow`, which is the executor wherever one is configured.
+
+`run_workflow` declares `TOOL_NEEDS_USER_APPROVAL = True`, which drops it from `/mcp` the way `TOOL_RUNS_CALLER_CODE` drops `sql_query`. An agent reaching that endpoint has no viewer to press approve in.
+
+The approval is not a credential: it is a record in the process, so both routes still take the caller's own platform token, and `platform_token_error` accepts an MCP-minted token as a platform token. A holder of one can therefore still reach `POST /tools/plan_workflow`, `POST /workflow/approve` and `POST /tools/run_workflow` over plain HTTP, which is the same reach it had before this gate existed. Narrowing the approval route to non-MCP tokens would close that and take `run_workflow` away from an MCP client entirely.
+
 ## A platform token is equivalent to code execution here
 
 Not a defect to fix, a boundary to state. Tools run in the API process with its privileges and no sandbox, and the escape hatches are what makes the agent useful: `geopandas_api` takes a pandas `query` expression, `pyqgis_api` and `run_qgis_algorithm` take algorithm parameters, and every tool reads and writes under the caller's own directories in `outputs/` and `user_data/`. Hardening `filter_query`'s grammar was considered and rejected: it would narrow one expression parser while leaving the surface it sits on unchanged, and buy the illusion that a token holder is contained.

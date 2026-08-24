@@ -11,6 +11,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 CALLER_CODE_ATTRIBUTE = "TOOL_RUNS_CALLER_CODE"
+APPROVAL_ROUTE_ATTRIBUTE = "TOOL_APPROVAL_ROUTE_ONLY"
+USER_APPROVAL_ATTRIBUTE = "TOOL_NEEDS_USER_APPROVAL"
 
 # Ensure the tools/ package (under src/agents/tools/) is importable by name.
 AGENTS_DIR = str(Path(__file__).parent)
@@ -210,14 +212,15 @@ PERSONA = (
     "When the user names the source CRS, set from_crs explicitly on reproject "
     "steps rather than relying on autodetection. "
     "Then describe the returned steps to the user in plain language and WAIT for "
-    "their go-ahead ('yes', 'run it', 'go ahead') before calling run_workflow with "
-    "the same manifest. If they ask for a change instead, revise the manifest and "
-    "call plan_workflow again. If plan_workflow returns an error, fix the manifest "
-    "from the message and call it again. Never call run_workflow to find out "
-    "whether a manifest is valid. "
-    # run_workflow refuses a manifest plan_workflow never validated, so a model
-    # that ignores this gets an error rather than a run. Whether the user
-    # actually approved the plan is still only the persona's to enforce
+    "them to approve the plan in the viewer. Only the person at the viewer can "
+    "approve it: run_workflow refuses a plan they have not approved, and no tool "
+    "you can call approves one. If they ask for a change instead, revise the "
+    "manifest and call plan_workflow again. If plan_workflow returns an error, "
+    "fix the manifest from the message and call it again. Never call run_workflow "
+    "to find out whether a manifest is valid. "
+    # run_workflow refuses a manifest plan_workflow never validated and one the
+    # viewer's approve button never posted, so a model that ignores this gets an
+    # error rather than a run
     # Behaviour
     "Use exactly the buffer size and parameters the user specifies — never expand them. "
     "Be decisive on single actions: geocoding, boundary and dataset lookups, "
@@ -281,3 +284,15 @@ def runs_caller_code(func) -> bool:
     """Whether the tool hands a caller-written argument to something that
     executes it, declared by the tool module as ``TOOL_RUNS_CALLER_CODE = True``."""
     return bool(getattr(inspect.getmodule(func), CALLER_CODE_ATTRIBUTE, False))
+
+
+def approval_route_only(func) -> bool:
+    """Whether only the viewer's approval route may dispatch this tool, declared
+    by the tool module as ``TOOL_APPROVAL_ROUTE_ONLY = True``."""
+    return bool(getattr(inspect.getmodule(func), APPROVAL_ROUTE_ATTRIBUTE, False))
+
+
+def needs_user_approval(func) -> bool:
+    """Whether the tool refuses what the user has not approved in the viewer,
+    declared by the tool module as ``TOOL_NEEDS_USER_APPROVAL = True``."""
+    return bool(getattr(inspect.getmodule(func), USER_APPROVAL_ATTRIBUTE, False))

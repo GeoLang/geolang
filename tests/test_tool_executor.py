@@ -216,6 +216,20 @@ def test_an_unknown_tool_is_404_with_it(one_tool):
     assert run(name="nonexistent").status_code == 404
 
 
+def test_the_approval_reaches_the_process_that_runs_the_workflow():
+    """The API keeps approve_workflow off its own tool route, and it still has to
+    dispatch here: the plan record it marks lives in whichever process runs
+    plan_workflow and run_workflow, which is this one."""
+    response = client.post(
+        "/run/approve_workflow",
+        json={"args": {"manifest_toml": "[project]\nname = 'p'\n"}},
+        headers={EXECUTOR_SECRET_HEADER: SECRET},
+    )
+
+    assert response.status_code == 200
+    assert "never planned" in response.json()["result"]
+
+
 def test_the_bearer_becomes_the_identity_the_tool_runs_as(one_tool):
     assert run(token=TOKEN).json()["result"] == f"ran as {TOKEN}"
 

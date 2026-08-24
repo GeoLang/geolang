@@ -24,7 +24,7 @@ from pathlib import Path
 
 import httpx
 
-from tool_sweep.arguments import STAGED_LAYERS, SWEEP_ARGUMENTS
+from tool_sweep.arguments import STAGED_LAYERS, SWEEP_ARGUMENTS, ToolSample
 
 DEFAULT_BASE_URL = "http://localhost:8080"
 DEFAULT_RESULTS = "outputs/tool_sweep.jsonl"
@@ -68,12 +68,36 @@ def stage_layers(client: httpx.Client) -> None:
         response.raise_for_status()
 
 
+def approve_manifest(client: httpx.Client, manifest_toml: str) -> str:
+    """Press approve on a planned manifest, or say why that failed.
+
+    run_workflow refuses a plan nobody approved, so the sweep makes the call the
+    viewer's button makes.
+    """
+    try:
+        response = client.post(
+            "/workflow/approve", json={"manifest_toml": manifest_toml}
+        )
+    except httpx.HTTPError as e:
+        return f"approval request failed: {e}"
+    if response.status_code != 200:
+        return f"approval got HTTP {response.status_code}: {response.text}"
+    body = response.json()
+    if body.get("approved"):
+        return ""
+    return f"approval refused: {body.get('message')}"
+
+
 def run_tool(
-    client: httpx.Client, name: str, args: dict
+    client: httpx.Client, name: str, sample: ToolSample
 ) -> tuple[bool, str, float]:
+    if sample.needs_approval:
+        refusal = approve_manifest(client, sample.args.get("manifest_toml", ""))
+        if refusal:
+            return False, refusal, 0.0
     started = time.monotonic()
     try:
-        response = client.post(f"/tools/{name}", json={"args": args})
+        response = client.post(f"/tools/{name}", json={"args": sample.args})
     except httpx.HTTPError as e:
         return False, f"request failed: {e}", time.monotonic() - started
     seconds = time.monotonic() - started
@@ -159,7 +183,7 @@ def main() -> int:
 
         for name in selected:
             sample = SWEEP_ARGUMENTS[name]
-            ok, message, seconds = run_tool(client, name, sample.args)
+            ok, message, seconds = run_tool(client, name, sample)
             record = {
                 "name": name,
                 "ok": ok,

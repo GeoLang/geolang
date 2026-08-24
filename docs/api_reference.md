@@ -84,16 +84,27 @@ Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>
 
 Add `"notify": true` when running a tool outside the model's turn, such as the viewer's plan-approval button calling `run_workflow`: the result is appended to the active sibyl session so the model can answer follow-up questions about it. sibyl never sets the flag, so a run the model itself asked for is not reported back to it twice.
 
+`approve_workflow` is not dispatched here and is not in the manifest: it answers `404` like any unknown name. It records the user pressing approve, and a caller that could ask a tool route for it never had to press anything. `POST /workflow/approve` below is the only way in.
+
+### `POST /workflow/approve`
+Request `{ "manifest_toml": "<the plan's own manifest>" }`, response `{ "approved": <bool>, "message": "<string>" }`. The viewer's approve button posts this before it posts `run_workflow`, and `run_workflow` refuses a manifest that has no approval, so a model that calls it on its own gets an error rather than a run.
+
+`approved` is false when the manifest was never planned by this caller, when its TOML does not parse, and when a `path` points outside the caller's own directories. Nothing is recorded in those cases: an approval only ever attaches to a plan record, so the two halves cannot arrive out of order. Planning the same manifest again drops the earlier approval, and both halves expire together an hour after the plan.
+
+The digest is taken from the confined manifest text, so the bytes the viewer posts back from the plan and the bytes the model posts to `run_workflow` land on one record. Anything else, an edit included, is refused.
+
+Same bearer requirement as `POST /tools/{name}`, and the record is keyed to that caller: the plan, the approval and the run all have to be the same person.
+
 An `Authorization: Bearer <jwt>` header sets the caller identity. Geolang exchanges it before execution for a role-free token that expires within five minutes and carries only the exact downstream operation scopes that named tool needs. `PTOLEMY_API_TOKEN` is the service account ptolemy falls back on in unauthenticated standalone mode.
 
-With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`) and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer, reading a share by id and reading a live layer by its token are never gated.
+With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, `POST /workflow/approve`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`) and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer, reading a share by id and reading a live layer by its token are never gated.
 
 ## MCP
 
 ### `POST /mcp`
 The tools over the [Model Context Protocol](https://modelcontextprotocol.io/), streamable HTTP transport, for external agents such as Claude or Cursor. Externally that is `/agent/mcp`. `tools/list` returns the manifest above with `parameters` renamed to `inputSchema`; `tools/call` runs the tool and returns its string as one text content block, markers included, plus a second block when the call is bound to a live document. Bad arguments and tool exceptions come back as a result with `isError` and a ❌ text, an unknown tool as JSON-RPC `-32602`.
 
-A tool whose module sets `TOOL_RUNS_CALLER_CODE = True` is left out of both `tools/list` and `tools/call`, and answers `-32602` like any other unknown name. `sql_query` is the only one: it runs SQL the caller wrote in whichever browser receives the command, which the `/chat` path can assume is the caller's own and this one cannot.
+A tool whose module sets `TOOL_RUNS_CALLER_CODE = True`, `TOOL_NEEDS_USER_APPROVAL = True` or `TOOL_APPROVAL_ROUTE_ONLY = True` is left out of both `tools/list` and `tools/call`, and answers `-32602` like any other unknown name. `sql_query` runs SQL the caller wrote in whichever browser receives the command, which the `/chat` path can assume is the caller's own and this one cannot. `run_workflow` runs a manifest the user pressed approve on in their viewer, and an agent arriving here has none, so it could only ever be refused. `approve_workflow` is that press, which is nothing an agent may make on the user's behalf.
 
 Every request, `initialize` included, needs a bearer minted by `POST /mcp/token`. A plain platform token answers `401` with `this endpoint needs a token from POST /mcp/token`, so an unauthenticated caller never learns which tools exist.
 
@@ -169,7 +180,7 @@ The agent joins as `agent:<caller sub>` using a short-lived `agora:write` token 
 
 **Platform services** — `ptolemy_query` (geodatabase datasets/branches/features), `list_tilesets` (TileTopia assets + catalog), `sql_query` (in-browser DuckDB Spatial via viewer command).
 
-**Workflows**: `list_workflow_operations` (geodukt transform catalog), `plan_workflow` (validate a geodukt TOML manifest, emit the plan as a `__PLAN__` marker for approval), `run_workflow` (execute the approved manifest). Shared client code sits in `_geodukt.py`, which the loader skips because of the leading underscore.
+**Workflows**: `list_workflow_operations` (geodukt transform catalog), `plan_workflow` (validate a geodukt TOML manifest, emit the plan as a `__PLAN__` marker for approval), `run_workflow` (execute the approved manifest). Shared client code sits in `_geodukt.py`, which the loader skips because of the leading underscore. `approve_workflow.py` is loaded but is not one of the tools counted above: it records the user pressing approve and only `POST /workflow/approve` dispatches it.
 
 Every step of a `__PLAN__` payload carries `runs_caller_code`. It is true when the step's `operation` names a tool module that sets `TOOL_RUNS_CALLER_CODE = True`, so the panel can mark that step as an escape hatch before the user approves the plan, rather than the user having to trust the prose around it. The tool's own declaration is the only source, so there is no second list to drift. geodukt rejects any operation it does not have, so the flag can only be true on a build without `/validate`, where the plan is `validated: false` and nothing checked the manifest.
 
