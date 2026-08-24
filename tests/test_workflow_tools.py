@@ -23,6 +23,10 @@ from src.agents.tools.plan_workflow import PlanWorkflowArgs, plan_workflow
 from src.agents.tools.run_workflow import RunWorkflowArgs, run_workflow
 from src.api import server
 from src.core import utils
+from src.core.planned_manifests import (
+    forget_planned_manifests,
+    record_planned_manifest,
+)
 from src.core.user_token import user_token_scope
 from src.core.utils import caller_directory_scope
 
@@ -54,6 +58,19 @@ def confined(toml: str, caller: str | None = None) -> str:
     for root in ("outputs/", "user_data/"):
         toml = toml.replace(root, f"{root}{caller}/")
     return toml
+
+
+@pytest.fixture(autouse=True)
+def no_standing_approval():
+    """A record outlives the run that used it, so no test inherits another's."""
+    forget_planned_manifests()
+    yield
+    forget_planned_manifests()
+
+
+def approve(manifest: str, caller: str | None = None) -> None:
+    """Record what plan_workflow would, for a test that is only about the run."""
+    record_planned_manifest(confined(manifest, caller))
 
 # "wide" is declared before the step it consumes, so only geodukt's reported
 # order puts the plan in execution order
@@ -384,6 +401,7 @@ def test_invalid_manifest_comes_back_as_a_fixable_error(geodukt):
 
 def test_run_failure_message_is_lifted_out_of_the_error_body(geodukt):
     geodukt(run=(422, {"kind": "source", "message": "source 'depots' has no path"}))
+    approve(MANIFEST)
 
     res = run_workflow(MANIFEST)
 
@@ -407,6 +425,7 @@ def test_a_mid_pipeline_failure_reports_the_status_reason(geodukt):
             },
         )
     )
+    approve(MANIFEST)
 
     res = run_workflow(MANIFEST)
 
@@ -465,6 +484,7 @@ def test_the_label_follows_the_tools_own_declaration():
 
 def test_run_workflow_reports_counts_and_outputs(geodukt):
     fake = geodukt(run=(200, RUN_RECORD))
+    approve(MANIFEST)
 
     res = run_workflow(MANIFEST)
 
@@ -489,6 +509,7 @@ def test_run_workflow_reports_counts_and_outputs(geodukt):
 
 def test_a_successful_run_emits_the_structured_report(geodukt):
     geodukt(run=(200, RUN_RECORD_WITH_STEP_STATUS))
+    approve(MANIFEST)
 
     res = run_workflow(MANIFEST)
 
@@ -515,6 +536,7 @@ def test_a_mid_pipeline_failure_reports_every_step(geodukt):
     # geodukt answers a failed run 4xx with the record, so the per-step detail is
     # in the error body rather than in a successful reply
     geodukt(run=(422, FAILED_RUN_RECORD))
+    approve(MANIFEST)
 
     res = run_workflow(MANIFEST)
 
@@ -548,6 +570,7 @@ def test_the_run_goes_out_as_the_user_who_approved_it(geodukt):
     fake = geodukt(run=(200, RUN_RECORD))
 
     with user_token_scope("header.payload.signature"):
+        approve(MANIFEST)
         run_workflow(MANIFEST)
 
     assert fake.headers == [{"Authorization": "Bearer header.payload.signature"}]
@@ -557,6 +580,7 @@ def test_a_headless_run_carries_no_token(geodukt):
     # the eval harness runs with nobody signed in: no header, and geodukt
     # answers 401 unless it is running without a platform secret
     fake = geodukt(run=(200, RUN_RECORD))
+    approve(MANIFEST)
 
     run_workflow(MANIFEST)
 
@@ -578,6 +602,7 @@ def test_planning_and_the_catalog_travel_as_the_caller_too(geodukt):
 
 def test_run_workflow_surfaces_a_failed_run(geodukt):
     geodukt(run=(200, {"id": 1, "status": {"Failed": "clip: no overlap"}, "steps": []}))
+    approve(MANIFEST)
 
     res = run_workflow(MANIFEST)
 
@@ -713,6 +738,7 @@ def test_a_viewer_run_is_reported_back_into_the_session(geodukt, monkeypatch):
         sent.append(text)
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
+    approve(MANIFEST)
 
     body = server.run_tool(
         "run_workflow",
@@ -733,6 +759,8 @@ def test_an_approved_run_reaches_geodukt_as_the_approving_user(geodukt):
     """The viewer's approve button posts the tool call itself, so its bearer is
     what the executor must run the tool under."""
     fake = geodukt(run=(200, RUN_RECORD))
+    with user_token_scope("header.payload.signature"):
+        approve(MANIFEST)
 
     body = server.run_tool(
         "run_workflow",
@@ -753,6 +781,8 @@ def test_the_models_own_run_is_not_reported_twice(geodukt, monkeypatch):
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
 
+    approve(MANIFEST)
+
     # exactly the body sibyl sends: no notify field at all
     body = server.run_tool(
         "run_workflow", server.ToolCallRequest(**{"args": {"manifest_toml": MANIFEST}})
@@ -770,6 +800,7 @@ def test_a_failed_viewer_run_is_still_reported(geodukt, monkeypatch):
         sent.append(text)
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
+    approve(MANIFEST)
 
     server.run_tool(
         "run_workflow",
@@ -820,6 +851,7 @@ def test_an_ordinary_rejection_still_asks_for_a_fix(geodukt):
 def test_an_unauthorized_run_tells_the_model_to_stop_and_ask(geodukt):
     """A bare 401 sent the model looking for another way and it found raw tools."""
     geodukt(run=(401, {"error": "missing bearer token"}))
+    approve(MANIFEST)
     result = run_workflow(MANIFEST)
 
     assert "cannot execute workflows" in result
@@ -832,6 +864,7 @@ def test_an_unauthorized_run_tells_the_model_to_stop_and_ask(geodukt):
 
 def test_a_forbidden_run_is_treated_the_same(geodukt):
     geodukt(run=(403, {"error": "editor or admin role required"}))
+    approve(MANIFEST)
     result = run_workflow(MANIFEST)
 
     assert "cannot execute workflows" in result
@@ -962,3 +995,82 @@ path = "combined.gpkg"
         f"outputs/{CALLER}/depots.geojson",
     ]
     assert plan["outputs"] == [f"outputs/{CALLER}/combined.gpkg"]
+
+
+# ── a run only executes a manifest plan_workflow validated ───────────────────
+
+EDITED_MANIFEST = MANIFEST.replace("distance = 500.0", "distance = 5000.0")
+
+SECOND_CALLER = "eve-0123456789abcdef"
+
+# no source or sink path, so confinement leaves the text untouched and two
+# callers hash the same bytes: the only thing that can refuse the second one is
+# the record being keyed to the first
+PATHLESS_MANIFEST = """
+[project]
+name = "no-files"
+
+[[source]]
+name = "depots"
+format = "geojson"
+
+[[sink]]
+name = "out"
+input = "depots"
+format = "gpkg"
+"""
+
+
+def test_a_run_without_a_plan_is_refused(monkeypatch):
+    monkeypatch.setitem(sys.modules, "requests", _NoHttp())
+
+    result = run_workflow(MANIFEST)
+
+    assert result.startswith("ERROR")
+    assert "Call plan_workflow" in result
+    assert "__RUN__" not in result
+
+
+def test_a_planned_manifest_runs_and_runs_again(geodukt):
+    """The record is kept rather than consumed by the run: retrying the approved
+    pipeline is the same reviewed work, and a manifest the model has to re-plan
+    to retry is where it starts reaching for sql_query instead."""
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    plan_workflow(MANIFEST)
+    first = run_workflow(MANIFEST)
+    second = run_workflow(MANIFEST)
+
+    assert "run 7 completed" in first
+    assert "run 7 completed" in second
+    assert [path for path, _ in fake.calls] == ["/validate", "/run", "/run"]
+
+
+def test_an_edited_manifest_has_to_be_planned_again(geodukt):
+    fake = geodukt(validate=(200, VALIDATED))
+
+    plan_workflow(MANIFEST)
+    edited = run_workflow(EDITED_MANIFEST)
+    respaced = run_workflow(MANIFEST + "\n")
+
+    assert "Call plan_workflow" in edited
+    assert "Call plan_workflow" in respaced
+    assert "__RUN__" not in edited
+    # both refused before geodukt was asked to run anything
+    assert [path for path, _ in fake.calls] == ["/validate"]
+
+
+def test_one_callers_plan_does_not_authorize_anothers_run(geodukt):
+    fake = geodukt(validate=(200, VALIDATED), run=(200, RUN_RECORD))
+
+    with caller_directory_scope(CALLER):
+        plan_workflow(PATHLESS_MANIFEST)
+    with caller_directory_scope(SECOND_CALLER):
+        refused = run_workflow(PATHLESS_MANIFEST)
+    with caller_directory_scope(CALLER):
+        allowed = run_workflow(PATHLESS_MANIFEST)
+
+    assert "Call plan_workflow" in refused
+    assert "__RUN__" not in refused
+    assert "run 7 completed" in allowed
+    assert [path for path, _ in fake.calls] == ["/validate", "/run"]

@@ -3,11 +3,15 @@
 Returns a readable summary for the model plus a ``__RUN__:{json}`` marker that
 server.py's agent_event_stream turns into a "run" event for the viewer, the same
 seam plan_workflow uses for the plan itself.
+
+A manifest plan_workflow never validated is refused before geodukt is called at
+all: see core's planned_manifests.
 """
 
 from pydantic import BaseModel, Field
 
 from src.core.errors import PathRefused
+from src.core.planned_manifests import manifest_was_planned
 from src.core.user_token import service_headers
 
 from ._geodukt import (
@@ -16,6 +20,13 @@ from ._geodukt import (
     geodukt_url,
     parse_manifest,
     run_payload,
+)
+
+NOT_PLANNED = (
+    "ERROR: this manifest was not planned, so it cannot run. Call plan_workflow "
+    "with it, describe the steps it returns to the user, and call run_workflow "
+    "again with the same manifest once they approve. If you edited the manifest "
+    "after planning it, call plan_workflow again with the edited one."
 )
 
 
@@ -33,7 +44,8 @@ def run_workflow(manifest_toml: str) -> str:
     """Execute a geodukt pipeline manifest and report per-step feature counts and
     the files it wrote. Only call this after plan_workflow and after the user has
     approved that plan. If the user asked for a change, revise the manifest and
-    call plan_workflow again instead of running it."""
+    call plan_workflow again instead of running it. A manifest plan_workflow has
+    not validated is refused here rather than run."""
     import json
 
     manifest, error = parse_manifest(manifest_toml)
@@ -43,6 +55,8 @@ def run_workflow(manifest_toml: str) -> str:
         manifest_toml = confine_manifest(manifest_toml, manifest)
     except PathRefused as e:
         return f"ERROR: {e}"
+    if not manifest_was_planned(manifest_toml):
+        return NOT_PLANNED
 
     url = geodukt_url()
     try:

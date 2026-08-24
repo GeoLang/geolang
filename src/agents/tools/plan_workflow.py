@@ -3,12 +3,15 @@
 Returns a readable summary for the model plus a ``__PLAN__:{json}`` marker that
 server.py's agent_event_stream turns into a "plan" event for the viewer.
 Nothing runs here: run_workflow executes the same manifest after the user agrees.
+A validated manifest is recorded in core's planned_manifests, which is what lets
+run_workflow refuse one that was never planned.
 """
 
 from pydantic import BaseModel, Field
 from typing import Optional
 
 from src.core.errors import PathRefused
+from src.core.planned_manifests import record_planned_manifest
 from src.core.user_token import service_headers
 
 from ._geodukt import (
@@ -115,6 +118,7 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
             "and one [[sink]] table."
         )
 
+    record_planned_manifest(manifest_toml)
     plan = plan_payload(title, manifest, steps, manifest_toml, not route_missing)
     checked = (
         "not validated (this geodukt build has no /validate endpoint)"

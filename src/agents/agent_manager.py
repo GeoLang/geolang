@@ -215,8 +215,9 @@ PERSONA = (
     "call plan_workflow again. If plan_workflow returns an error, fix the manifest "
     "from the message and call it again. Never call run_workflow to find out "
     "whether a manifest is valid. "
-    # v1 approval is persona-level only: sibyl does not block run_workflow on a
-    # prior plan_workflow call, so a model that ignores this can still execute
+    # run_workflow refuses a manifest plan_workflow never validated, so a model
+    # that ignores this gets an error rather than a run. Whether the user
+    # actually approved the plan is still only the persona's to enforce
     # Behaviour
     "Use exactly the buffer size and parameters the user specifies — never expand them. "
     "Be decisive on single actions: geocoding, boundary and dataset lookups, "
