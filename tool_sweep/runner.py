@@ -11,6 +11,10 @@ unauthenticated, which only reaches a stack started with the auth gate off.
 Each result is appended to the JSONL file as its tool finishes, so a run killed
 half way still says how far it got and which tool it died on.
 
+Output files a tool says it saved are deleted through `DELETE /outputs/{name}`
+once every tool has run, so a nightly does not fill the outputs volume. A
+delete that does not land is printed and does not fail the sweep.
+
 Exit status is 1 when anything failed, tool and external alike. A tool in the
 manifest with no entry in the arguments table is one of those failures.
 """
@@ -18,6 +22,7 @@ manifest with no entry in the arguments table is one of those failures.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -33,6 +38,10 @@ MESSAGE_CHARS = 300
 # the error marker every tool returns its failures behind, and the one thing a
 # 200 body has to be read for: the route answers a tool exception with one
 ERROR_MARKER = "❌"
+# a tool announces the file it wrote as "Saved to outputs/<name>". Only that
+# form is collected: list_outputs prints every name already in the directory,
+# and the sweep must not delete files from someone else's run.
+SAVED_OUTPUT = re.compile(r"[Ss]aved to outputs/([A-Za-z0-9_\-]+\.[A-Za-z0-9]+)")
 
 
 def _headers() -> dict:
@@ -111,6 +120,29 @@ def run_tool(
     return True, result, seconds
 
 
+def output_names(result: str) -> list[str]:
+    """The output files a tool result says it wrote, first-seen order."""
+    return list(dict.fromkeys(SAVED_OUTPUT.findall(result)))
+
+
+def delete_outputs(client: httpx.Client, names: list[str]) -> None:
+    """Delete the sweep's own outputs through the route the viewer calls.
+
+    Best-effort: a name the route will not delete is printed and the sweep
+    carries on, so a full outputs volume is reported rather than a failed run.
+    """
+    for name in names:
+        try:
+            response = client.delete(f"/outputs/{name}")
+        except httpx.HTTPError as e:
+            print(f"cleanup: delete {name} failed: {e}", flush=True)
+            continue
+        if response.status_code != 200:
+            print(
+                f"cleanup: delete {name} got HTTP {response.status_code}", flush=True
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
@@ -181,9 +213,11 @@ def main() -> int:
             results_file.write(json.dumps(record) + "\n")
         results_file.flush()
 
+        produced = []
         for name in selected:
             sample = SWEEP_ARGUMENTS[name]
             ok, message, seconds = run_tool(client, name, sample)
+            produced += output_names(message)
             record = {
                 "name": name,
                 "ok": ok,
@@ -195,6 +229,8 @@ def main() -> int:
             results_file.write(json.dumps(record) + "\n")
             results_file.flush()
             print(f"{'ok  ' if ok else 'FAIL'} {seconds:7.2f}s  {name}", flush=True)
+
+    delete_outputs(client, list(dict.fromkeys(produced)))
 
     broken = [r for r in records if not r["ok"] and not r["external"]]
     external_down = [r for r in records if not r["ok"] and r["external"]]

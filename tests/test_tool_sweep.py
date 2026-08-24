@@ -20,14 +20,21 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api import server
 from src.core import utils
 from src.core.qgis_session import QgisUnavailable, qgis_session
+from src.core.utils import caller_outputs_dir
 from tool_sweep.arguments import STAGED_LAYERS, SWEEP_ARGUMENTS, SWEEP_MANIFEST_TOML
-from tool_sweep.runner import ERROR_MARKER, approve_manifest
+from tool_sweep.runner import (
+    ERROR_MARKER,
+    approve_manifest,
+    delete_outputs,
+    output_names,
+)
 
 client = TestClient(server.app)
 
@@ -94,6 +101,38 @@ def test_the_sweeps_approve_step_reaches_the_route(staged_layers):
     assert SWEEP_ARGUMENTS["run_workflow"].needs_approval
     # nothing planned this manifest in this process, so the route says exactly that
     assert "never planned" in approve_manifest(client, SWEEP_MANIFEST_TOML)
+
+
+def test_output_names_reads_only_what_a_tool_says_it_wrote():
+    result = (
+        "Clipped 3 features. Saved to outputs/sweep_clip.gpkg. "
+        "Saved to outputs/sweep_clip.gpkg again.\n"
+        "Output files (1):\n  outputs/from_an_earlier_run.gpkg (4 KB)"
+    )
+
+    assert output_names(result) == ["sweep_clip.gpkg"]
+
+
+def test_the_sweep_deletes_the_outputs_it_produced(staged_layers, capsys):
+    written = Path(caller_outputs_dir()) / "sweep_clip.gpkg"
+    written.write_text("x")
+
+    delete_outputs(client, ["sweep_clip.gpkg"])
+
+    assert not written.exists()
+    # and a name the route no longer has is reported, not raised
+    delete_outputs(client, ["sweep_clip.gpkg"])
+    assert "cleanup: delete sweep_clip.gpkg got HTTP 404" in capsys.readouterr().out
+
+
+def test_a_failed_cleanup_does_not_fail_the_sweep(capsys):
+    class RefusingClient:
+        def delete(self, url):
+            raise httpx.ConnectError("connection refused")
+
+    delete_outputs(RefusingClient(), ["sweep_clip.gpkg"])
+
+    assert "cleanup: delete sweep_clip.gpkg failed" in capsys.readouterr().out
 
 
 def test_api_reference_lists_every_tool_and_counts_them():

@@ -687,6 +687,30 @@ async def get_output(
     return FileResponse(path)
 
 
+@app.delete("/outputs/{filename}", dependencies=[Depends(platform_auth)])
+async def delete_output(
+    filename: str, authorization: Annotated[str | None, Header()] = None
+):
+    """Delete one file from the caller's own outputs directory.
+
+    Same lookup as the GET on this path, so a delete reaches exactly the files
+    that a get serves: a traversal, an absolute name and a symlink out of the
+    tree all land outside the caller's directory and read as not found.
+    """
+    with user_token_scope(bearer_token(authorization)):
+        outputs = caller_outputs_dir()
+    path = resolve_under([filename], [outputs], [outputs])
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    name = os.path.basename(path)
+    try:
+        os.remove(path)
+    except OSError:
+        logger.exception(f"could not delete output file {name}")
+        raise HTTPException(status_code=500, detail="Could not delete the file")
+    return {"deleted": name}
+
+
 @app.get("/download/{filename}", dependencies=[Depends(platform_auth)])
 async def download_file(
     filename: str, authorization: Annotated[str | None, Header()] = None

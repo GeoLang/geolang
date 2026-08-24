@@ -47,6 +47,7 @@ User-uploaded files for the agent to operate on. Uploads are one directory per c
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/outputs/{filename}` | Serve a tool output file. |
+| `DELETE` | `/outputs/{filename}` | Delete one of the caller's own output files. `404` if there is no such file. |
 | `GET` | `/download/{filename}` | Download a tool output file with `Content-Disposition: attachment`. |
 
 ## Drawing and export
@@ -97,7 +98,7 @@ Same bearer requirement as `POST /tools/{name}`, and the record is keyed to that
 
 An `Authorization: Bearer <jwt>` header sets the caller identity. Geolang exchanges it before execution for a role-free token that expires within five minutes and carries only the exact downstream operation scopes that named tool needs. `PTOLEMY_API_TOKEN` is the service account ptolemy falls back on in unauthenticated standalone mode.
 
-With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, `POST /workflow/approve`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`) and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer, reading a share by id and reading a live layer by its token are never gated.
+With `PLATFORM_JWT_SECRET` set, that header is required and must be a live HS256 platform token: signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. The same requirement covers `POST /chat/agui`, `POST /workflow/approve`, the file writers (`/upload`, `/draw`, `/export-pdf`, `/export-png`), the sibyl proxies (`/sessions*`, `/models`, `/model`), the reads (`/datasets`, `/outputs/{file}`, `/download/{file}`, `/geojson/{file}`, `/stats/{file}`), `DELETE /outputs/{file}` and `POST /share`. Without the secret every route is open, which is the standalone dev flow and what the eval harness uses. `/health`, `GET /tools`, the static viewer, reading a share by id and reading a live layer by its token are never gated.
 
 ## MCP
 

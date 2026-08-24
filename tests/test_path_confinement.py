@@ -271,6 +271,54 @@ def test_outputs_refuses_a_symlink_out_of_the_tree(tree):
     assert status_of(server.get_output("escape.txt")) == 404
 
 
+def test_deleting_an_output_stops_it_being_served(client, tree):
+    _, exec_dir, _ = tree
+    (outputs_of() / "report.txt").write_text("hello")
+
+    deleted = client.delete("/outputs/report.txt")
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": "report.txt"}
+    assert client.get("/outputs/report.txt").status_code == 404
+    assert not (outputs_of() / "report.txt").exists()
+
+
+def test_deleting_a_missing_output_is_404(client):
+    assert client.delete("/outputs/never_written.gpkg").status_code == 404
+
+
+def test_delete_refuses_a_traversal(tree):
+    server, exec_dir, outside = tree
+    secret = outside / "secret.txt"
+
+    assert status_of(server.delete_output("../../outside/secret.txt")) == 404
+    assert status_of(server.delete_output("../" * 12 + "etc/passwd")) == 404
+    assert secret.exists()
+
+
+def test_delete_refuses_an_absolute_path(tree):
+    server, _, outside = tree
+
+    assert status_of(server.delete_output(str(outside / "secret.txt"))) == 404
+    assert (outside / "secret.txt").exists()
+
+
+def test_delete_refuses_a_symlink_out_of_the_tree(tree):
+    server, exec_dir, outside = tree
+    (outputs_of() / "escape.txt").symlink_to(outside / "secret.txt")
+
+    assert status_of(server.delete_output("escape.txt")) == 404
+    assert (outside / "secret.txt").exists()
+
+
+def test_delete_refuses_the_directory_itself(tree):
+    server, _, _ = tree
+    (outputs_of() / "nested").mkdir()
+
+    assert status_of(server.delete_output("nested")) == 404
+    assert (outputs_of() / "nested").is_dir()
+
+
 def test_outputs_refuses_encoded_separators_end_to_end(client):
     # belt on top of the direct calls above: whether the encoded form is
     # normalized in transit or decoded into the param, nothing is served
@@ -310,6 +358,30 @@ def test_download_serves_only_the_callers_own_file(client, gated):
     assert client.get("/download/alice.gpkg", headers=as_subject("bob")).status_code == 404
     # the bare name the viewer links to must not find it either
     assert client.get("/download/alice", headers=as_subject("bob")).status_code == 404
+
+
+def test_delete_reaches_only_the_callers_own_file(client, gated):
+    (outputs_of("alice") / "alice.txt").write_text("alice's")
+
+    assert client.delete("/outputs/alice.txt", headers=as_subject("bob")).status_code == 404
+    assert (outputs_of("alice") / "alice.txt").exists()
+    assert client.delete("/outputs/alice.txt", headers=as_subject("alice")).status_code == 200
+    assert not (outputs_of("alice") / "alice.txt").exists()
+
+
+def test_a_caller_cannot_delete_into_another_directory(gated, tree):
+    server, _, _ = tree
+    (outputs_of("alice") / "alice.txt").write_text("alice's")
+    alice_directory = outputs_of("alice").name
+    bob = f"Bearer {token_for('bob')}"
+
+    for attempt in (
+        f"../{alice_directory}/alice.txt",
+        f"../../outputs/{alice_directory}/alice.txt",
+        str(outputs_of("alice") / "alice.txt"),
+    ):
+        assert status_of(server.delete_output(attempt, bob)) == 404, attempt
+        assert (outputs_of("alice") / "alice.txt").exists(), attempt
 
 
 def test_a_caller_cannot_climb_into_another_directory(gated, tree):

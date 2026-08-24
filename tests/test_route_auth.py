@@ -69,6 +69,7 @@ GATED = [
     ("export_pdf", "post", "/export-pdf", {"json": {}}),
     ("export_png", "post", "/export-png", {"json": {}}),
     ("outputs", "get", "/outputs/nope.gpkg", {}),
+    ("output_delete", "delete", "/outputs/nope.gpkg", {}),
     ("download", "get", "/download/nope.gpkg", {}),
     ("geojson", "get", "/geojson/nope.gpkg", {}),
     ("stats", "get", "/stats/nope.gpkg", {}),
