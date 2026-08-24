@@ -90,6 +90,26 @@ docker exec viewtopia-geolang-api-1 sh -c "uv run --with pytest --with respx -- 
 uv run --with pytest --with httpx python -m pytest tests/test_nl_evals.py -v
 ```
 
+## Tool sweep
+
+Every tool in the manifest, one `POST /tools/{name}` each, against a live
+platform stack. viewtopia's `platform-sweep.yml` runs it nightly against the
+nginx origin the viewer uses. A manifest tool with no sample arguments in
+[`tool_sweep/arguments.py`](tool_sweep/arguments.py) fails the run, so a new tool
+cannot ship unswept.
+
+```bash
+# PLATFORM_TOKEN is the bearer; the stack refuses the call without one
+python -m tool_sweep.runner --base-url http://localhost:5174/agent
+
+# leave out the tools that call a third party, and the QGIS ones
+python -m tool_sweep.runner --skip-external --skip-crashing
+```
+
+Each result is appended to the JSONL file as its tool finishes, so a killed run
+still says which tool it died on. `tests/test_tool_sweep.py` runs the `offline`
+entries of the same table through the in-process app on every push.
+
 ## Workflow evals
 
 Measures whether a model builds the right geodukt pipeline, so "model X scores Y
