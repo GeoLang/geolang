@@ -99,11 +99,16 @@ def geopandas_api(
             filtered = gdf.query(filter_query)
             log.append(f"After filter '{filter_query}': {len(filtered)} rows")
 
-            output_path = tool_output_path("output_path", output_path or "filtered.gpkg")
-            filtered.to_file(output_path, driver="GPKG")
-            log.append(f"Saved to {output_path}")
+            output_name = output_path or "filtered.gpkg"
+            filtered.to_file(
+                tool_output_path("output_path", output_name), driver="GPKG"
+            )
+            log.append(f"Saved to outputs/{output_name}")
             log.append("\n=== SUCCESS ===")
-            return "\n".join(log) + f"\n\nRESULT: ✅ Filtered to {len(filtered)} features → {output_path}"
+            return "\n".join(log) + (
+                f"\n\nRESULT: ✅ Filtered to {len(filtered)} features. "
+                f"Saved to outputs/{output_name}"
+            )
         # ─────────────────────────────────────────────────────────────────
 
         if func_name == "proximity_analysis":

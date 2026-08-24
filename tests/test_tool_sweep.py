@@ -28,7 +28,12 @@ from src.api import server
 from src.core import utils
 from src.core.qgis_session import QgisUnavailable, qgis_session
 from src.core.utils import caller_outputs_dir
-from tool_sweep.arguments import STAGED_LAYERS, SWEEP_ARGUMENTS, SWEEP_MANIFEST_TOML
+from tool_sweep.arguments import (
+    POINTS_LAYER,
+    STAGED_LAYERS,
+    SWEEP_ARGUMENTS,
+    SWEEP_MANIFEST_TOML,
+)
 from tool_sweep.runner import (
     ERROR_MARKER,
     approve_manifest,
@@ -111,6 +116,28 @@ def test_output_names_reads_only_what_a_tool_says_it_wrote():
     )
 
     assert output_names(result) == ["sweep_clip.gpkg"]
+
+
+def test_geopandas_filter_announces_the_name_the_cleanup_reads(staged_layers):
+    """The result names `outputs/<name>`, the only form `output_names` reads."""
+    response = client.post(
+        "/tools/geopandas_api",
+        json={
+            "args": {
+                "function_name": "filter",
+                "dataset_path": POINTS_LAYER,
+                "filter_query": "population > 100",
+                "output_path": "sweep_filtered.gpkg",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert ERROR_MARKER not in result, result[:400]
+    assert "Saved to outputs/sweep_filtered.gpkg" in result
+    assert output_names(result) == ["sweep_filtered.gpkg"]
+    assert (Path(caller_outputs_dir()) / "sweep_filtered.gpkg").exists()
 
 
 def test_the_sweep_deletes_the_outputs_it_produced(staged_layers, capsys):

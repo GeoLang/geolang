@@ -54,6 +54,7 @@ from src.api.live_document import (
     LIVE_DATA_TOKEN_PATTERN,
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
+from src.api.outputs_retention import sweep_outputs_periodically
 from src.core.auth import (
     MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
     SECRET_ENV,
@@ -168,8 +169,13 @@ mcp_app, mcp_session_manager = create_mcp_app(tool_manifest, layer_geojson)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Thread(target=preload_geo_stack, daemon=True).start()
-    async with mcp_session_manager.run():
-        yield
+    # not in the executor, which mounts the same volume: one deleter is enough
+    retention = asyncio.create_task(sweep_outputs_periodically())
+    try:
+        async with mcp_session_manager.run():
+            yield
+    finally:
+        retention.cancel()
 
 
 CORS_ORIGINS_ENV = "CORS_ORIGINS"

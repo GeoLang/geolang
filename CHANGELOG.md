@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 2026-08-24: output files are deleted by age. `src/api/outputs_retention.py`
+  walks every caller directory under the outputs root once at API startup and
+  once a day after that, deletes the regular files last written more than
+  `GEOLANG_OUTPUTS_RETENTION_DAYS` ago, default 30, and removes a caller
+  directory the pass emptied. A symlink is neither followed nor deleted, and a
+  caller directory that is itself a symlink is skipped. `0` keeps everything.
+  Each pass logs the files removed and the bytes freed, and a delete that fails
+  is logged and skipped. The task starts in the API server's lifespan and
+  nowhere else: the executor mounts the same volume, and one deleter is enough.
+  `DELETE /outputs/{filename}` only ever reached the caller's own directory, and
+  a file no tool announced was deleted by nothing.
+
+### Fixed
+- 2026-08-24: `geopandas_api` names the file it wrote the way every other tool
+  does, `Saved to outputs/<name>` instead of an absolute path. The sweep's
+  cleanup and any client reading announcements missed its files.
+
+### Added
 - 2026-08-24: `run_workflow` refuses a plan the user never approved. The viewer's
   approve button posts the plan's own manifest to `POST /workflow/approve`
   before it posts the run, that marks the plan record in

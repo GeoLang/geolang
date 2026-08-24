@@ -266,6 +266,15 @@ under the same directory name as their outputs, with their own
 in the flat `user_data/` directory from before the split stay on disk and are
 no longer listed or served.
 
+Output files are deleted by age. The API server sweeps every caller's outputs
+directory once at startup and once a day after that, deletes the files last
+written more than `GEOLANG_OUTPUTS_RETENTION_DAYS` ago, default 30, and removes
+a directory the sweep emptied. Each pass logs how many files it removed and how
+many bytes that freed. Set the variable to `0` to keep everything forever. The
+sweep runs in the API server and not in the executor, so the two processes
+sharing the volume do not both delete from it. A caller can also delete one of
+their own files early with `DELETE /outputs/{filename}`.
+
 A tool argument that names a file is a filename, not a path. It is looked up in
 the caller's own outputs directory, their own `user_data/` directory, and in the
 natural earth reference sets, the same three places `/geojson` serves from. An absolute path

@@ -12,6 +12,8 @@ services:
       # out of the gate. Never set this where the port is reachable.
       GEOLANG_ALLOW_UNAUTHENTICATED: "1"
       TOOL_EXEC_DIR: "/app/geolang"
+      # empty when it is not in .env, which the API reads as the 30-day default
+      GEOLANG_OUTPUTS_RETENTION_DAYS: "${GEOLANG_OUTPUTS_RETENTION_DAYS}"
       SIBYL_URL: "http://sibyl:8090"
       QT_QPA_PLATFORM: "offscreen"
       QGIS_PREFIX_PATH: "/usr"

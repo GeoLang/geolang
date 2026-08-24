@@ -203,6 +203,7 @@ Adding a tool is a single file: drop a module into `src/agents/tools/` exporting
 | `AGORA_URL` | `http://agora:3000` | agora live document service. The websocket follows it, so `https` there means `wss`. |
 | `GEOLANG_PUBLIC_URL` | `/agent` | Where a browser reaches this service, used to build the `/live-data/{token}` URLs published into a document. |
 | `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O. Holds the `outputs/` and `user_data/` roots, each one directory per caller. |
+| `GEOLANG_OUTPUTS_RETENTION_DAYS` | `30` | How long an output file is kept. The API server deletes older files from every caller directory at startup and once a day after that. `0` keeps everything. |
 | `APP_BASE_URL` | `http://localhost:8080` | URL Playwright loads for `/export-pdf` and `/export-png`. |
 | `PTOLEMY_URL` | `http://ptolemy:3000` | Ptolemy geodatabase endpoint (`ptolemy_query`). |
 | `PTOLEMY_API_TOKEN` | — | Optional bearer token when Ptolemy auth is enabled. |
