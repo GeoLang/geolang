@@ -234,7 +234,7 @@ PERSONA = (
     "(3) If download_osm_data fails for a large area, try a smaller bounding box or a nearby city name. "
     "(4) If export_to_gpkg fails with 'No such file', call list_outputs to find the correct path. "
     "(5) Prefer the dedicated GeoPandas-based tools for common operations (buffer, clip, dissolve, "
-    "spatial join) — they are faster than run_qgis_algorithm, which starts a QGIS session per call. "
+    "spatial join) — they are faster than run_qgis_algorithm, whose first call starts QGIS. "
     "Use run_qgis_algorithm for algorithms the dedicated tools do not cover "
     "(call list_qgis_algorithms to discover them, check_qgis_status to diagnose). "
     "(6) After two consecutive failures on the same task, explain to the user what went wrong and suggest alternatives. "

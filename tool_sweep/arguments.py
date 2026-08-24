@@ -20,11 +20,15 @@ uploads them itself.
 `after` names a tool that must run first. `run_workflow` refuses a manifest
 `plan_workflow` did not validate, and both halves must be the same text.
 
-`crashes_executor` marks the three tools that each build their own
-QgsApplication: whichever of them runs second in a process segfaults it, and
-every tool called after that reports an unreachable executor. The nightly still
-runs them, `--skip-crashing` leaves them out of a run that needs the rest of the
-table to mean something.
+`needs_qgis` marks the tools that need the QGIS bindings, which only the
+platform image has. They are offline, so the per-push suite runs them wherever
+QGIS starts and skips them where it does not.
+
+`crashes_executor` marks a tool that takes the process down with it. Nothing is
+marked today: the QGIS four each built their own QgsApplication, and whichever
+ran second segfaulted, until they moved to one session per process. The nightly
+runs marked tools anyway, `--skip-crashing` leaves them out of a run that needs
+the rest of the table to mean something.
 
 Arguments stay small: a few hundred metres of Monaco, five points, buffers under
 a kilometre.
@@ -116,11 +120,11 @@ class ToolSample:
     args: dict = field(default_factory=dict)
     external: bool = False
     offline: bool = False
+    needs_qgis: bool = False
     crashes_executor: bool = False
     after: str | None = None
 
 
-# the QGIS tools come last, so the process they kill takes nothing else with it
 SWEEP_ARGUMENTS: dict[str, ToolSample] = {
     "list_outputs": ToolSample(offline=True),
     "list_user_datasets": ToolSample(offline=True),
@@ -330,20 +334,20 @@ SWEEP_ARGUMENTS: dict[str, ToolSample] = {
         },
         external=True,
     ),
-    "check_qgis_status": ToolSample(crashes_executor=True),
-    "list_qgis_algorithms": ToolSample(crashes_executor=True),
+    "check_qgis_status": ToolSample(offline=True, needs_qgis=True),
+    "list_qgis_algorithms": ToolSample(offline=True, needs_qgis=True),
     "run_qgis_algorithm": ToolSample(
         args={
             "algorithm_id": "native:buffer",
             "parameters": f'{{"INPUT": "{POINTS_LAYER}", "DISTANCE": 0.002}}',
             "output_filename": "sweep_qgis_buffer.gpkg",
         },
-        crashes_executor=True,
+        offline=True,
+        needs_qgis=True,
     ),
-    # never reaches QGIS in the platform image: it is the one QGIS tool that does
-    # not put the system dist-packages on sys.path, and it answers the import
-    # failure as a plain string with no error marker, so the sweep sees a pass
     "pyqgis_api": ToolSample(
-        args={"function_name": "QgsVectorLayer", "uri": POINTS_LAYER}
+        args={"function_name": "QgsVectorLayer", "uri": POINTS_LAYER},
+        offline=True,
+        needs_qgis=True,
     ),
 }

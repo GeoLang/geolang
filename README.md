@@ -102,8 +102,8 @@ cannot ship unswept.
 # PLATFORM_TOKEN is the bearer; the stack refuses the call without one
 python -m tool_sweep.runner --base-url http://localhost:5174/agent
 
-# leave out the tools that call a third party, and the QGIS ones
-python -m tool_sweep.runner --skip-external --skip-crashing
+# leave out the tools that call a third party
+python -m tool_sweep.runner --skip-external
 ```
 
 Each result is appended to the JSONL file as its tool finishes, so a killed run

@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from src.core.qgis_session import QgisUnavailable, qgis_session
+
 
 class CheckQgisStatusArgs(BaseModel):
     pass  # no arguments needed
@@ -7,51 +9,19 @@ class CheckQgisStatusArgs(BaseModel):
 
 def check_qgis_status() -> str:
     """Diagnostic tool — run this FIRST."""
-    import importlib
-    import os
-    import sys
-
-    # the tool venv is isolated; qgis bindings and the processing plugin live
-    # in the system paths, so bridge them onto sys.path
-    for p in (
-        "/usr/lib/python3/dist-packages",
-        "/usr/share/qgis/python",
-        "/usr/share/qgis/python/plugins",
-    ):
-        if os.path.isdir(p) and p not in sys.path:
-            sys.path.append(p)
-
     try:
-        from qgis.core import QgsApplication
-        from qgis.analysis import QgsNativeAlgorithms
+        session = qgis_session()
+    except QgisUnavailable as e:
+        return f"❌ QGIS failed: {e}"
 
-        os.environ["QT_QPA_PLATFORM"] = "offscreen"
-        os.environ["QGIS_PREFIX_PATH"] = "/usr"
-        QgsApplication.setPrefixPath("/usr", True)
-        qgs = QgsApplication([], False)
-        qgs.initQgis()
-        QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())
-        alg_count = len(QgsApplication.processingRegistry().algorithms())
-
-        processing_ok = False
-        try:
-            # a real import, not find_spec: the plugin can be on the path and
-            # still fail to load without its qgis dependencies
-            importlib.import_module("processing")
-            processing_ok = True
-        except ImportError:
-            pass
-        qgs.exitQgis()
-
-        if processing_ok:
-            return f"✅ QGIS is FULLY WORKING!\nTotal algorithms: {alg_count}"
-        else:
-            return (
-                f"⚠️ QGIS core works ({alg_count} algorithms) but processing module is NOT available. "
-                "run_qgis_algorithm will fail. Use GeoPandas-based tools instead."
-            )
-    except Exception as e:
-        return f"❌ QGIS failed: {str(e)}"
+    algorithm_count = len(session.algorithms())
+    if session.processing is not None:
+        return f"✅ QGIS is FULLY WORKING!\nTotal algorithms: {algorithm_count}"
+    return (
+        f"⚠️ QGIS core works ({algorithm_count} algorithms) but processing module is NOT "
+        f"available ({session.processing_error}). run_qgis_algorithm will fail. Use "
+        "GeoPandas-based tools instead."
+    )
 
 
 # Required for auto-registration

@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from src.core.errors import PathRefused
+from src.core.qgis_session import QgisUnavailable, qgis_session
 from src.core.utils import tool_input_path
 
 
@@ -27,24 +28,16 @@ def pyqgis_api(function_name: str, **kwargs) -> str:
     """
     Calls a PyQGIS function for QGIS-specific tasks.
     """
-    import os
-
     if function_name in ("QgsVectorLayer", "QgsRasterLayer") and kwargs.get("uri"):
         try:
             kwargs = {**kwargs, "uri": confined_uri(kwargs["uri"])}
         except PathRefused as e:
-            return f"Error executing '{function_name}': {e}"
+            return f"❌ '{function_name}' refused a parameter: {e}"
 
     try:
-        from qgis.core import QgsApplication
-
-        os.environ["QT_QPA_PLATFORM"] = "offscreen"
-        os.environ["QGIS_PREFIX_PATH"] = "/usr"
-        QgsApplication.setPrefixPath("/usr", True)
-        qgs = QgsApplication([], False)
-        qgs.initQgis()
-    except Exception as e:
-        return f"QGIS init failed: {str(e)}"
+        session = qgis_session()
+    except QgisUnavailable as e:
+        return f"❌ QGIS init failed: {e}"
 
     from qgis.core import QgsVectorLayer, QgsRasterLayer
     import logging
@@ -54,9 +47,12 @@ def pyqgis_api(function_name: str, **kwargs) -> str:
 
     try:
         if function_name.startswith("native:") or function_name.startswith("qgis:"):
-            from qgis import processing
-
-            result = processing.run(function_name, kwargs)
+            if session.processing is None:
+                return (
+                    f"❌ '{function_name}' needs the QGIS processing module, which is "
+                    f"not available ({session.processing_error})."
+                )
+            result = session.processing.run(function_name, kwargs)
             return str(result)
         elif function_name == "QgsVectorLayer":
             layer = QgsVectorLayer(
@@ -64,17 +60,17 @@ def pyqgis_api(function_name: str, **kwargs) -> str:
             )
             if layer.isValid():
                 return f"Vector layer loaded: {layer.name()}"
-            return f"Error: Invalid vector layer at {kwargs.get('uri')}"
+            return f"❌ Invalid vector layer at {kwargs.get('uri')}"
         elif function_name == "QgsRasterLayer":
             layer = QgsRasterLayer(kwargs.get("uri"), kwargs.get("layer_name", "layer"))
             if layer.isValid():
                 return f"Raster layer loaded: {layer.name()}"
-            return f"Error: Invalid raster layer at {kwargs.get('uri')}"
+            return f"❌ Invalid raster layer at {kwargs.get('uri')}"
         else:
-            return f"Error: PyQGIS function '{function_name}' not supported."
+            return f"❌ PyQGIS function '{function_name}' not supported."
     except Exception as e:
         logger.error(f"PyQGIS error: {str(e)}")
-        return f"Error executing '{function_name}': {str(e)}"
+        return f"❌ Error executing '{function_name}': {str(e)}"
 
 
 # Required for auto-registration

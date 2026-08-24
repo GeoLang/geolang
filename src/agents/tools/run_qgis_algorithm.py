@@ -1,17 +1,9 @@
 import os
 import json
-import sys
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.qgis_session import QgisUnavailable, qgis_session
 from src.core.utils import PathRefused, tool_input_path, tool_output_path
-
-# the tool venv is isolated; the qgis bindings and the processing plugin live in
-# the system paths, so bridge them onto sys.path
-QGIS_SYSTEM_PATHS = (
-    "/usr/lib/python3/dist-packages",
-    "/usr/share/qgis/python",
-    "/usr/share/qgis/python/plugins",
-)
 
 # the QGIS parameter types whose value names a file to read
 INPUT_FILE_TYPES = frozenset(
@@ -49,12 +41,6 @@ TEMPORARY_OUTPUT = "TEMPORARY_OUTPUT"
 # names on a native algorithm go to the raster writer and are left alone.
 GDAL_PROVIDER = "gdal"
 COMMAND_LINE_PARAMETERS = frozenset({"CREATION_OPTIONS", "EXTRA", "OPTIONS"})
-
-
-def bridge_qgis_onto_path():
-    for path in QGIS_SYSTEM_PATHS:
-        if os.path.isdir(path) and path not in sys.path:
-            sys.path.append(path)
 
 
 def confined_parameter(key, value, parameter_type):
@@ -148,8 +134,6 @@ def run_qgis_algorithm(
     buffer, then reproject back to EPSG:4326 for display."""
     import traceback
 
-    bridge_qgis_onto_path()
-
     try:
         params = json.loads(parameters)
     except Exception as e:
@@ -161,33 +145,23 @@ def run_qgis_algorithm(
     given_output = params.pop("OUTPUT", None)
 
     try:
-        from qgis.core import QgsApplication
-        from qgis.analysis import QgsNativeAlgorithms
+        session = qgis_session()
+    except QgisUnavailable as e:
+        return f"❌ '{algorithm_id}' failed: {e}"
 
-        os.environ["QT_QPA_PLATFORM"] = "offscreen"
-        os.environ["QGIS_PREFIX_PATH"] = "/usr"
-        QgsApplication.setPrefixPath("/usr", True)
-        qgs = QgsApplication([], False)
-        qgs.initQgis()
-        QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())
+    if session.processing is None:
+        return (
+            f"❌ '{algorithm_id}' failed: QGIS processing module is not available "
+            f"({session.processing_error}). Use GeoPandas-based tools instead "
+            "(e.g. geopandas_api, spatial_join, clip_layer, buffer_clip_dissolve)."
+        )
+    processing = session.processing
 
-        try:
-            import processing
-            from processing.core.Processing import Processing
-
-            Processing.initialize()
-        except ImportError:
-            qgs.exitQgis()
-            return (
-                f"❌ '{algorithm_id}' failed: QGIS processing module is not available. "
-                "Use GeoPandas-based tools instead (e.g. geopandas_api, spatial_join, clip_layer, buffer_clip_dissolve)."
-            )
-
+    try:
         # confinement needs the algorithm's parameter definitions, so it cannot
         # run before this point
-        algorithm = QgsApplication.processingRegistry().algorithmById(algorithm_id)
+        algorithm = session.algorithm_by_id(algorithm_id)
         if algorithm is None:
-            qgs.exitQgis()
             return (
                 f"❌ '{algorithm_id}' is not a QGIS algorithm ID. Give a provider "
                 "and a name, e.g. 'native:buffer'."

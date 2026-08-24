@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- 2026-08-24: the QGIS tools work more than once per process. Each of
+  `check_qgis_status`, `list_qgis_algorithms`, `run_qgis_algorithm` and
+  `pyqgis_api` built its own `QgsApplication` and, for two of them, called
+  `exitQgis()` after; a second `QgsApplication` in the same process dies with
+  SIGSEGV, so whichever QGIS tool ran second killed the executor and every tool
+  called after that reported it unreachable. `src/core/qgis_session.py` now owns
+  one session per process: it bridges the system QGIS python paths onto
+  `sys.path`, builds the application on first use, adds `QgsNativeAlgorithms`,
+  initialises the processing plugin, and never calls `exitQgis`. A failed start
+  is remembered and re-raised rather than retried, because the retry is the
+  crash. `pyqgis_api` also gained the paths, so it reaches QGIS in the platform
+  image at all, and returns every failure behind the ❌ marker instead of a
+  plain string the sweep read as a pass. The four tools lost their
+  `crashes_executor` marks in `tool_sweep/arguments.py` and are now `offline`,
+  so the per-push suite runs them wherever the QGIS bindings are importable and
+  skips them where they are not.
+
 ### Added
 - 2026-08-24: every advertised tool is run through the real HTTP path by a
   nightly sweep. `python -m tool_sweep.runner` reads `GET /tools`, uploads the

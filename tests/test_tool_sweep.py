@@ -9,10 +9,15 @@ differs by the stack, not by the arguments.
 
 The sample layers are uploaded through `POST /upload` exactly as the nightly
 stages them, into a tmp_path tree rather than the checkout.
+
+The QGIS tools are offline too, and run here wherever the QGIS bindings are
+importable: the platform image, which is where the README runs this suite. On a
+checkout without them the test skips rather than passes.
 """
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -20,6 +25,7 @@ from fastapi.testclient import TestClient
 
 from src.api import server
 from src.core import utils
+from src.core.qgis_session import QgisUnavailable, qgis_session
 from tool_sweep.arguments import STAGED_LAYERS, SWEEP_ARGUMENTS
 from tool_sweep.runner import ERROR_MARKER
 
@@ -27,6 +33,16 @@ client = TestClient(server.app)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OFFLINE_TOOLS = [name for name, sample in SWEEP_ARGUMENTS.items() if sample.offline]
+
+
+@lru_cache(maxsize=1)
+def qgis_starts_here() -> bool:
+    """Whether QGIS runs in this process, asked the way the tools ask."""
+    try:
+        qgis_session()
+    except QgisUnavailable:
+        return False
+    return True
 
 
 @pytest.fixture
@@ -58,6 +74,9 @@ def test_every_manifest_tool_has_sweep_arguments():
 
 @pytest.mark.parametrize("name", OFFLINE_TOOLS)
 def test_offline_tool_runs_through_the_route(staged_layers, name):
+    if SWEEP_ARGUMENTS[name].needs_qgis and not qgis_starts_here():
+        pytest.skip("no QGIS bindings here; the nightly runs this in the platform image")
+
     response = client.post(f"/tools/{name}", json={"args": SWEEP_ARGUMENTS[name].args})
 
     assert response.status_code == 200

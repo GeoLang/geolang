@@ -99,7 +99,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-crashing",
         action="store_true",
-        help="leave out the tools that segfault the executor (the QGIS four)",
+        help="leave out the tools marked as taking the executor down with them",
     )
     parser.add_argument("--only", help="comma-separated tool names")
     parser.add_argument("--timeout", type=float, default=300.0)
