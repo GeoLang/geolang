@@ -21,9 +21,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a file no tool announced was deleted by nothing.
 
 ### Fixed
+- 2026-08-24: a note about an upload, a drawn shape or a viewer-run tool goes
+  only to the sibyl session the caller names (`thread_id` on `POST /upload`,
+  `POST /draw` and `POST /tools/{name}`), and to nowhere without one. It used
+  to go to sibyl's process-wide active session, so the tool sweep's fixture
+  uploads under their own token put 351 "Filename for tools:
+  sweep_polygons.geojson" notes into a person's chat session, whose model then
+  named a file it could not reach five times in one run. The viewer sends its
+  chat session's id on `run_workflow`. Sessions still carry no owner, recorded
+  in viewtopia's DESIGN_TODO.
+- 2026-08-24: `buffer_clip_dissolve` buffers in an azimuthal equidistant
+  projection centred on the point instead of EPSG:3857, so `buffer_km` is the
+  distance on the ground. At Athens a 3 km buffer came out 2.4 km wide.
+- 2026-08-24: `geopandas_api` no longer advertises `buffer` and `to_file`.
+  Both resolved through `getattr(geopandas, name)`, which has neither, so
+  every call failed with "GeoPandas has no 'buffer'". The `distance` and
+  `driver` arguments that only they read are gone with them, and a test keeps
+  every advertised name backed by a branch or a real geopandas function.
 - 2026-08-24: `geopandas_api` names the file it wrote the way every other tool
   does, `Saved to outputs/<name>` instead of an absolute path. The sweep's
   cleanup and any client reading announcements missed its files.
+
+### Changed
+- 2026-08-24: `buffer_clip_dissolve` takes no `input_path` to mean "save the
+  buffer polygon itself": one EPSG:4326 polygon with `center_lon`,
+  `center_lat` and `buffer_km` as properties. Before this no tool could answer
+  "show me Athens with a 3 km buffer": the model clipped its own geocoded
+  point to the circle and presented that point as the buffer. The success text
+  now says `Saved to outputs/<name>` rather than the absolute container path,
+  which the model had failed to hand on to `emit_ui_spec`.
 
 ### Added
 - 2026-08-24: `run_workflow` refuses a plan the user never approved. The viewer's
