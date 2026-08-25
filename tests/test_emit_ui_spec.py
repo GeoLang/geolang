@@ -1,6 +1,7 @@
-"""emit_ui_spec must never return a success-shaped result for a blank map:
-models retry-loop on silent no-ops (observed with grok), so bad layer input
-and missing files have to come back as actionable errors."""
+"""Bad layer input and missing files come back as actionable errors, because
+models retry-loop on silent no-ops (observed with grok). A call that gives no
+layers at all is the exception: it emits an empty map with a note, because
+grok looped on that error too and the run was aborted with no map at all."""
 
 import json
 import pathlib
@@ -62,7 +63,7 @@ def test_no_layers_takes_the_layers_just_written(outputs):
     assert spec["center"] == [-9.15, 38.74]
 
 
-def test_no_layers_and_nothing_recent_is_an_error(outputs):
+def test_no_layers_and_nothing_recent_emits_an_empty_map(outputs):
     import os
     import time
 
@@ -71,8 +72,13 @@ def test_no_layers_and_nothing_recent_is_an_error(outputs):
     stale = time.time() - a2ui.RECENT_LAYER_WINDOW_SECONDS - 1
     os.utime(outputs / "buffer.gpkg", (stale, stale))
     res = emit_ui_spec("map", center_lon=-9.15, center_lat=38.74)
-    assert res.startswith("ERROR")
-    assert "viewer_control" in res
+    assert not res.startswith("ERROR")
+    note, marker, payload = res.partition("__UI_SPEC__:")
+    assert marker, res
+    spec = json.loads(payload)
+    assert spec["layers"] == []
+    assert spec["center"] == [-9.15, 38.74]
+    assert "empty map" in note
 
 
 def test_shade_by_rides_on_a_fourth_part(outputs):

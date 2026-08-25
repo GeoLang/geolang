@@ -17,6 +17,14 @@ DEFAULT_LAYER_COLOR = "#3388ff"
 RECENT_LAYER_WINDOW_SECONDS = 15 * 60
 RECENT_LAYER_LIMIT = 6
 RECENT_LAYER_COLORS = ("#3388ff", "#ff6b35", "#2f9e44", "#9c36b5", "#e8590c", "#0c8599")
+# grok repeats a refused map call unchanged until sibyl aborts the run
+EMPTY_MAP_NOTE = (
+    "Emitted a map with no layers: none were given and nothing was written in "
+    f"the last {RECENT_LAYER_WINDOW_SECONDS // 60} minutes, so the user is "
+    "looking at an empty map. Run the analysis tools to write layer files and "
+    "call emit_ui_spec again with 'name|file|color' entries, or answer without "
+    "a map. Do not repeat this call unchanged."
+)
 
 
 def recent_output_layers() -> list[tuple[str, str, str, str]]:
@@ -133,7 +141,8 @@ def emit_ui_spec(
                         if len(parts) >= 2:
                             parts += [""] * (4 - len(parts))
                             entries.append((parts[0], parts[1], parts[2] or DEFAULT_LAYER_COLOR, parts[3]))
-            if not entries and not (layers or "").strip():
+            layers_given = bool((layers or "").strip())
+            if not entries and not layers_given:
                 entries = recent_output_layers()
             unusable = [
                 shade_by
@@ -157,9 +166,9 @@ def emit_ui_spec(
                 if shade_by:
                     layer["shade_by"] = shade_by
                 layer_list.append(layer)
-            # an empty-layer "success" lets the model declare victory over a
-            # blank map (grok looped on exactly that), so fail with instructions
-            if not layer_list:
+            # layers the model wrote out itself and none of them usable: it has
+            # something to correct, so say what the format is
+            if not layer_list and layers_given:
                 return (
                     "ERROR: a map spec needs at least one layer, given as "
                     "'name|file|color' entries separated by ';' "
@@ -183,7 +192,10 @@ def emit_ui_spec(
             if center_lon is not None and center_lat is not None:
                 spec["center"] = [center_lon, center_lat]
                 spec["zoom"] = zoom or 13
-            return f"__UI_SPEC__:{json.dumps(spec)}"
+            rendered = f"__UI_SPEC__:{json.dumps(spec)}"
+            if not layer_list:
+                return f"{EMPTY_MAP_NOTE}\n{rendered}"
+            return rendered
 
         elif ui_type == "image":
             spec = {"type": "image", "path": image_path or "", "title": title or ""}

@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a file no tool announced was deleted by nothing.
 
 ### Fixed
+- 2026-08-25: `emit_ui_spec` called with no `layers` and nothing written in the
+  last 15 minutes returns a map spec with an empty layer list, prefixed by a
+  note saying the map has no data and what to do about it, instead of an error.
+  grok omits the argument, and the error made it repeat the same call until
+  sibyl aborted the run after three identical failures, so the user got
+  RUN_ERROR and no map at all. A `layers` string that parses to no usable entry
+  is still an error.
 - 2026-08-24: a note about an upload, a drawn shape or a viewer-run tool goes
   only to the sibyl session the caller names (`thread_id` on `POST /upload`,
   `POST /draw` and `POST /tools/{name}`), and to nowhere without one. It used

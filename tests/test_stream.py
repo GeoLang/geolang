@@ -5,6 +5,7 @@ import json
 import respx
 
 from src.agents.agent_manager import PERSONA
+from src.agents.tools import a2ui
 from src.api import server
 
 
@@ -53,3 +54,20 @@ def test_error_event_ends_the_stream():
         events = _collect()
 
     assert events == [("error", "model exploded")]
+
+
+def test_empty_map_note_still_yields_a_ui_spec():
+    body = _ndjson(
+        {"kind": "tool_return", "name": "emit_ui_spec",
+         "content": a2ui.EMPTY_MAP_NOTE + '\n__UI_SPEC__:{"type": "map", "layers": []}'},
+        {"kind": "text", "content": "Nothing to draw yet."},
+        {"kind": "done"},
+    )
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        events = _collect()
+
+    assert events == [
+        ("text", "Nothing to draw yet."),
+        ("ui_spec", {"type": "map", "layers": []}),
+    ]
