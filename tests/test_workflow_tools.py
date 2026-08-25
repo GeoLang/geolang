@@ -742,7 +742,7 @@ def test_a_viewer_run_is_reported_back_into_the_session(geodukt, monkeypatch):
     geodukt(run=(200, RUN_RECORD))
     sent = []
 
-    async def fake_notify(text, thread_id):
+    async def fake_notify(text, thread_id, authorization):
         sent.append((text, thread_id))
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
@@ -832,7 +832,7 @@ def test_the_models_own_run_is_not_reported_twice(geodukt, monkeypatch):
     geodukt(run=(200, RUN_RECORD))
     sent = []
 
-    async def fake_notify(text, thread_id):
+    async def fake_notify(text, thread_id, authorization):
         sent.append((text, thread_id))
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
@@ -852,7 +852,7 @@ def test_a_failed_viewer_run_is_still_reported(geodukt, monkeypatch):
     geodukt(run=(422, {"kind": "sink", "message": "sink 'out' has no path"}))
     sent = []
 
-    async def fake_notify(text, thread_id):
+    async def fake_notify(text, thread_id, authorization):
         sent.append((text, thread_id))
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)

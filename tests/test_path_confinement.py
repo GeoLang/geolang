@@ -496,7 +496,7 @@ def test_an_anonymous_caller_cannot_read_a_subjects_file(client, gated):
 def quiet_agent(monkeypatch):
     """The upload route tells the agent about the file, and there is none here."""
 
-    async def no_notify(text, thread_id):
+    async def no_notify(text, thread_id, authorization):
         return None
 
     monkeypatch.setattr(importlib.import_module("src.api.server"), "notify_agent", no_notify)

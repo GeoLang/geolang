@@ -228,35 +228,43 @@ app.add_middleware(
 app.router.routes.append(Route(MCP_PATH, endpoint=mcp_app))
 
 
-async def sibyl_request(method: str, path: str, **kwargs) -> httpx.Response:
-    """Call sibyl, turning an unreachable service into a 503."""
+async def sibyl_request(
+    method: str, path: str, authorization: str | None = None, **kwargs
+) -> httpx.Response:
+    """Call sibyl as the caller, turning an unreachable service into a 503.
+
+    The bearer decides which sessions the call can reach, so a route that does
+    not pass one along reaches none of them.
+    """
+    headers = {"Authorization": authorization} if authorization else None
     try:
         async with httpx.AsyncClient(
             base_url=SIBYL_URL, timeout=SIBYL_TIMEOUT
         ) as client:
-            return await client.request(method, path, **kwargs)
+            return await client.request(method, path, headers=headers, **kwargs)
     except httpx.HTTPError as e:
         raise HTTPException(
             status_code=503, detail=f"Agent service unreachable: {e}"
         )
 
 
-async def notify_agent(text: str, thread_id: str | None) -> None:
+async def notify_agent(
+    text: str, thread_id: str | None, authorization: str | None
+) -> None:
     """Append a message to one named sibyl session without running the model.
 
-    A caller that names no session gets no note: sibyl's active session is
-    process-wide, so appending there puts one caller's file names in whichever
-    session another person is reading.
+    A caller that names no session gets no note. The note carries the caller's
+    own bearer, so naming someone else's session appends nothing.
     """
     if not thread_id:
         return
     try:
-        async with httpx.AsyncClient(
-            base_url=SIBYL_URL, timeout=SIBYL_TIMEOUT
-        ) as client:
-            await client.post(
-                f"/sessions/{thread_id}/messages", json={"content": text}
-            )
+        await sibyl_request(
+            "POST",
+            f"/sessions/{thread_id}/messages",
+            authorization,
+            json={"content": text},
+        )
     except Exception as e:
         logger.warning(f"Could not notify agent: {e}")
 
@@ -369,7 +377,9 @@ def run_tool(
         # this route is sync, so it runs in a worker thread with no event loop
         asyncio.run(
             notify_agent(
-                f"[{name} run from the viewer] {prose[:800]}", request.thread_id
+                f"[{name} run from the viewer] {prose[:800]}",
+                request.thread_id,
+                authorization,
             )
         )
 
@@ -436,9 +446,9 @@ async def agent_event_stream(
     "keepalive".
     /chat/agui renders these as AG-UI events.
 
-    `user_token` is the caller's bearer. sibyl holds it for the run and sends it
-    back on every tool call, so the tools act as this user. Without one the run
-    is anonymous.
+    `user_token` is the caller's bearer. It names the session the run appends to
+    and comes back on every tool call, so the tools act as this user. Without one
+    sibyl refuses the run unless it was started with no gate.
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
@@ -900,6 +910,7 @@ async def upload_dataset(
             f"{metadata['row_count']} features, CRS: EPSG:4326, columns: {col_preview}. "
             f"Filename for tools: {metadata['filename']}",
             thread_id,
+            authorization,
         )
 
         return metadata
@@ -1101,6 +1112,7 @@ async def save_drawn_area(
             f"center lon={center_lon}, lat={center_lat}. "
             f"Filename for tools: {gpkg_path.name}",
             request.thread_id,
+            authorization,
         )
 
         return metadata
@@ -1228,25 +1240,32 @@ class SwitchSessionRequest(BaseModel):
 
 
 @app.get("/sessions", dependencies=[Depends(platform_auth)])
-async def list_sessions():
-    response = await sibyl_request("GET", "/sessions")
+async def list_sessions(authorization: Annotated[str | None, Header()] = None):
+    response = await sibyl_request("GET", "/sessions", authorization)
     return response.json()
 
 
 @app.post("/sessions/new", dependencies=[Depends(platform_auth)])
-async def create_session():
-    """Create a new session and make it the active one."""
-    existing = (await sibyl_request("GET", "/sessions")).json()
+async def create_session(authorization: Annotated[str | None, Header()] = None):
+    """Create a new session and make it the caller's active one."""
+    existing = (await sibyl_request("GET", "/sessions", authorization)).json()
     name = f"Session {len(existing) + 1}"
-    created = (await sibyl_request("POST", "/sessions", json={"name": name})).json()
+    created = (
+        await sibyl_request(
+            "POST", "/sessions", authorization, json={"name": name}
+        )
+    ).json()
     return {"id": created["id"], "name": created["name"]}
 
 
 @app.post("/sessions/switch", dependencies=[Depends(platform_auth)])
-async def switch_session(request: SwitchSessionRequest):
-    """Switch to an existing session."""
+async def switch_session(
+    request: SwitchSessionRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Switch to an existing session of the caller's own."""
     response = await sibyl_request(
-        "POST", f"/sessions/{request.session_id}/activate"
+        "POST", f"/sessions/{request.session_id}/activate", authorization
     )
     if response.status_code == 404:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -1254,9 +1273,16 @@ async def switch_session(request: SwitchSessionRequest):
 
 
 @app.put("/sessions/{session_id}/rename", dependencies=[Depends(platform_auth)])
-async def rename_session(session_id: str, request: RenameSessionRequest):
+async def rename_session(
+    session_id: str,
+    request: RenameSessionRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
     response = await sibyl_request(
-        "PATCH", f"/sessions/{session_id}", json={"name": request.name}
+        "PATCH",
+        f"/sessions/{session_id}",
+        authorization,
+        json={"name": request.name},
     )
     if response.status_code == 404:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -1264,8 +1290,12 @@ async def rename_session(session_id: str, request: RenameSessionRequest):
 
 
 @app.delete("/sessions/{session_id}", dependencies=[Depends(platform_auth)])
-async def delete_session(session_id: str):
-    response = await sibyl_request("DELETE", f"/sessions/{session_id}")
+async def delete_session(
+    session_id: str, authorization: Annotated[str | None, Header()] = None
+):
+    response = await sibyl_request(
+        "DELETE", f"/sessions/{session_id}", authorization
+    )
     if response.status_code == 400:
         raise HTTPException(
             status_code=400,

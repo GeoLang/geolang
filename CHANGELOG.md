@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 2026-08-25: the caller's bearer reaches sibyl on every session call. sibyl now
+  decides session ownership from that token, so `sibyl_request` sends the
+  `Authorization` header it is given and the five `/sessions` routes pass the
+  caller's own along. `notify_agent` takes the token too and its three callers,
+  the `notify` branch of `POST /tools/{name}`, `/upload` and `/draw`, hand theirs
+  over, so a `thread_id` naming someone else's session appends nothing to it.
+  Before this, any platform-authenticated caller could list, rename, delete or
+  write text into another user's session, and appended text landed in that
+  session's model context.
 - 2026-08-24: output files are deleted by age. `src/api/outputs_retention.py`
   walks every caller directory under the outputs root once at API startup and
   once a day after that, deletes the regular files last written more than
