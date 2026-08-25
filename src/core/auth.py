@@ -48,8 +48,8 @@ SECRET_ENV = "PLATFORM_JWT_SECRET"
 UNAUTHENTICATED_ENV = "GEOLANG_ALLOW_UNAUTHENTICATED"
 TRUTHY = {"1", "true", "yes", "on"}
 
-# which of geolang's doors a token is for. A private claim, so it is ignored by
-# every other service rather than rejected the way an `aud` would be.
+# which of geolang's doors a token is for. A private claim, because every
+# platform service rejects a token carrying an `aud`.
 MCP_CLAIM = "geolang_use"
 MCP_CLAIM_VALUE = "mcp"
 MCP_SOURCE_ROLE_CLAIM = "source_role"
@@ -59,6 +59,10 @@ TOOL_TOKEN_USE_CLAIM = "token_use"
 TOOL_TOKEN_USE = "tool"
 TOOL_SCOPE_CLAIM = "scope"
 TOOL_TOKEN_LIFETIME_SECONDS = 5 * 60
+
+# agora's marker for a token scoped to one of its own sockets, refused here
+# because a sensor feed is not a caller
+AGORA_USE_CLAIM = "agora_use"
 
 
 def platform_secret() -> str | None:
@@ -109,7 +113,7 @@ def platform_token_error(token: str | None) -> str | None:
         # signature" helps an attacker more than a caller
         return "invalid or expired token"
 
-    if TOOL_TOKEN_USE_CLAIM in claims:
+    if TOOL_TOKEN_USE_CLAIM in claims or AGORA_USE_CLAIM in claims:
         return "invalid or expired token"
 
     return None
@@ -147,7 +151,7 @@ def platform_claims(token: str | None) -> dict | None:
 def source_token_role(token: str | None) -> str | None:
     """The verified platform role from which a tool token would derive."""
     claims = platform_claims(token)
-    if claims is None or TOOL_TOKEN_USE_CLAIM in claims:
+    if claims is None or TOOL_TOKEN_USE_CLAIM in claims or AGORA_USE_CLAIM in claims:
         return None
     claim = (
         MCP_SOURCE_ROLE_CLAIM
@@ -202,7 +206,7 @@ def exchange_tool_token(
 ) -> str | None:
     """Exchange a verified user or MCP token for one short tool credential."""
     claims = platform_claims(source_token)
-    if claims is None or TOOL_TOKEN_USE_CLAIM in claims:
+    if claims is None or TOOL_TOKEN_USE_CLAIM in claims or AGORA_USE_CLAIM in claims:
         return None
 
     subject = str(claims.get("sub") or "")

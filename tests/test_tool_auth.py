@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from src.api import server
 from src.core import utils
 from src.core.auth import (
+    AGORA_USE_CLAIM,
     SECRET_ENV,
     TOOL_SCOPE_CLAIM,
     TOOL_TOKEN_LIFETIME_SECONDS,
@@ -195,6 +196,23 @@ def test_the_tool_receives_a_short_role_free_token(gated, monkeypatch):
 )
 def test_a_downstream_tool_token_cannot_open_the_tool_route(gated, probe, claims):
     assert call(mint(**claims)).status_code == 401
+    assert probe == []
+
+
+def test_an_agora_feed_token_cannot_open_the_tool_route(gated, probe):
+    # agora signs these with the same secret and puts no role on them
+    feed = jwt.encode(
+        {
+            "sub": "3f2a6c1e-0b7d-4c3a-9a1f-2d5e8b4c7a90",
+            "exp": datetime.now(timezone.utc) + timedelta(days=365),
+            "doc": "9c4b1d7e-5a2f-4e8b-b3c6-1f0a7d9e2c48",
+            AGORA_USE_CLAIM: "feed",
+        },
+        SECRET,
+        algorithm="HS256",
+    )
+
+    assert call(feed).status_code == 401
     assert probe == []
 
 

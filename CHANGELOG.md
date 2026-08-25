@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a file no tool announced was deleted by nothing.
 
 ### Fixed
+- 2026-08-25: a token carrying agora's `agora_use` claim is refused wherever a
+  platform token is required. `platform_token_error` rejected only `token_use`,
+  so agora's long lived sensor feed token, signed with the same
+  `PLATFORM_JWT_SECRET` and carrying no `role`, passed `require_platform_token`
+  and opened every route behind `platform_auth` as the feed's uuid.
+  `source_token_role` and `exchange_tool_token` reject it too, so a tool that
+  needs no downstream scope cannot mint a tool token for a feed.
 - 2026-08-25: `emit_ui_spec` called with no `layers` and nothing written in the
   last 15 minutes returns a map spec with an empty layer list, prefixed by a
   note saying the map has no data and what to do about it, instead of an error.
