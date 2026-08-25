@@ -86,6 +86,7 @@ from src.core.utils import (
     resolve_under,
     save_catalogue,
     save_shares,
+    tool_input_path_or_none,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -473,6 +474,9 @@ async def agent_event_stream(
     assistant_texts = []
     ui_spec = None
     planned = False
+    # RUN_ERROR is terminal for the client, so an aborted run still gets the
+    # map its tools wrote before the error goes out
+    run_error = None
 
     while True:
         try:
@@ -485,7 +489,7 @@ async def agent_event_stream(
             break
 
         if "__error__" in event:
-            yield ("error", event["__error__"])
+            run_error = event["__error__"]
             break
 
         kind = event.get("kind")
@@ -535,7 +539,7 @@ async def agent_event_stream(
             continue
 
         if kind == "error":
-            yield ("error", event.get("message", ""))
+            run_error = event.get("message", "")
             break
 
         if kind == "done":
@@ -567,12 +571,16 @@ async def agent_event_stream(
             )
             if saved:
                 seen = {}
-                for fname in saved:
-                    seen[fname] = {
-                        "name": fname.replace("_", " ").replace(".gpkg", ""),
-                        "file": f"outputs/{fname}",
-                    }
+                # a tool can say "saved" about a file it then failed to write,
+                # and the viewer reports every layer it cannot fetch
                 with user_token_scope(user_token):
+                    for fname in saved:
+                        if not tool_input_path_or_none("layers", f"outputs/{fname}"):
+                            continue
+                        seen[fname] = {
+                            "name": fname.replace("_", " ").replace(".gpkg", ""),
+                            "file": f"outputs/{fname}",
+                        }
                     coord_spec = infer_ui_spec_from_text(" ".join(assistant_texts))
                 center = coord_spec.get("center") if coord_spec else None
                 ui_spec = {"type": "map", "layers": list(seen.values())}
@@ -581,6 +589,8 @@ async def agent_event_stream(
                     ui_spec["zoom"] = 13
     if ui_spec:
         yield ("ui_spec", ui_spec)
+    if run_error is not None:
+        yield ("error", run_error)
 
 
 def render_agui_event(encoder: EventEncoder, kind: str, payload) -> str:
