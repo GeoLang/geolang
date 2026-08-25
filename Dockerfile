@@ -8,10 +8,11 @@ ENV PYTHONUNBUFFERED=1 \
     QGIS_PREFIX_PATH=/usr \
     PATH=/opt/venv/bin:$PATH
 
-# Build tools for the geo stack's C extensions, QGIS, locales, curl for healthchecks
-# download.qgis.org and qgis.org answer 503 now and then
+# Build tools for the geo stack's C extensions, QGIS, locales, curl for healthchecks.
+# The QGIS apt keyring is vendored: download.qgis.org goes 503 for hours at a time.
+# qgis.org answers 503 now and then too.
+COPY qgis-archive-keyring.gpg /etc/apt/keyrings/qgis-archive-keyring.gpg
 RUN apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y \
-    wget \
     curl \
     gnupg \
     ca-certificates \
@@ -25,8 +26,6 @@ RUN apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 instal
     && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
     && locale-gen en_US.UTF-8 \
     && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
-    && mkdir -p /etc/apt/keyrings \
-    && wget --tries=10 --waitretry=15 --retry-on-http-error=500,502,503,504 -O /etc/apt/keyrings/qgis-archive-keyring.gpg https://download.qgis.org/downloads/qgis-archive-keyring.gpg \
     && chmod a+r /etc/apt/keyrings/qgis-archive-keyring.gpg \
     && printf 'Types: deb deb-src\nURIs: https://qgis.org/debian\nSuites: bookworm\nArchitectures: amd64\nComponents: main\nSigned-By: /etc/apt/keyrings/qgis-archive-keyring.gpg\n' > /etc/apt/sources.list.d/qgis.sources \
     && apt-get -o Acquire::Retries=5 update \

@@ -1,6 +1,7 @@
 **
 !requirements_client.txt
 !requirements.txt
+!qgis-archive-keyring.gpg
 !src/
 !src/**
 
