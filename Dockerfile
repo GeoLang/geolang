@@ -9,7 +9,8 @@ ENV PYTHONUNBUFFERED=1 \
     PATH=/opt/venv/bin:$PATH
 
 # Build tools for the geo stack's C extensions, QGIS, locales, curl for healthchecks
-RUN apt-get update && apt-get install -y \
+# download.qgis.org and qgis.org answer 503 now and then
+RUN apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y \
     wget \
     curl \
     gnupg \
@@ -25,11 +26,11 @@ RUN apt-get update && apt-get install -y \
     && locale-gen en_US.UTF-8 \
     && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
     && mkdir -p /etc/apt/keyrings \
-    && wget -O /etc/apt/keyrings/qgis-archive-keyring.gpg https://download.qgis.org/downloads/qgis-archive-keyring.gpg \
+    && wget --tries=10 --waitretry=15 --retry-on-http-error=500,502,503,504 -O /etc/apt/keyrings/qgis-archive-keyring.gpg https://download.qgis.org/downloads/qgis-archive-keyring.gpg \
     && chmod a+r /etc/apt/keyrings/qgis-archive-keyring.gpg \
     && printf 'Types: deb deb-src\nURIs: https://qgis.org/debian\nSuites: bookworm\nArchitectures: amd64\nComponents: main\nSigned-By: /etc/apt/keyrings/qgis-archive-keyring.gpg\n' > /etc/apt/sources.list.d/qgis.sources \
-    && apt-get update \
-    && apt-get install -y \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y \
         qgis \
         python3-qgis \
         qgis-plugin-grass \
