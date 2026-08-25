@@ -2,11 +2,16 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from src.core.utils import tool_input_path, tool_output_path
 
+# filter and proximity_analysis are branches below, read_file and sjoin are
+# looked up on the geopandas module. A name that is neither answers every call
+# with "Function not found".
+ALLOWED_FUNCTIONS = {"read_file", "sjoin", "proximity_analysis", "filter"}
+
 
 class GeopandasArgs(BaseModel):
     function_name: str = Field(
         ...,
-        description="One of: read_file, sjoin, buffer, to_file, proximity_analysis, filter",
+        description="One of: read_file, sjoin, proximity_analysis, filter",
     )
     filter_query: Optional[str] = Field(
         None,
@@ -24,10 +29,8 @@ class GeopandasArgs(BaseModel):
     predicate: Optional[str] = Field(
         None, description="For sjoin (e.g., 'intersects', 'within')"
     )
-    distance: Optional[float] = Field(None, description="For buffer in CRS units")
-    output_path: Optional[str] = Field(None, description="For to_file")
-    driver: Optional[str] = Field(
-        None, description="For to_file (e.g., 'ESRI Shapefile')"
+    output_path: Optional[str] = Field(
+        None, description="Output filename for the filter function"
     )
 
 
@@ -38,9 +41,7 @@ def geopandas_api(
     distance_m: Optional[float] = 5000,
     how: Optional[str] = None,
     predicate: Optional[str] = None,
-    distance: Optional[float] = None,
     output_path: Optional[str] = None,
-    driver: Optional[str] = None,
     filter_query: Optional[str] = None,
 ) -> str:
     """
@@ -63,12 +64,11 @@ def geopandas_api(
     log.append(f"TOOL_EXEC_DIR: {os.environ.get('TOOL_EXEC_DIR', '/app/geolang')}")
 
     try:
-        allowed = {"read_file", "sjoin", "buffer", "to_file", "proximity_analysis", "filter"}
         func_name = function_name.strip().split()[0]
 
-        if func_name not in allowed:
+        if func_name not in ALLOWED_FUNCTIONS:
             log.append(f"Error: '{func_name}' not supported")
-            log.append(f"Allowed: {allowed}")
+            log.append(f"Allowed: {ALLOWED_FUNCTIONS}")
             log.append("\n=== FAILURE ===")
             return "\n".join(log) + "\n\nRESULT: Error: Unsupported function"
 
@@ -77,12 +77,7 @@ def geopandas_api(
             log.append(f"Default dataset_path: {dataset_path}")
 
         if dataset_path:
-            # to_file writes under this name, so it is checked as an output
-            dataset_path = (
-                tool_output_path("dataset_path", dataset_path)
-                if func_name == "to_file"
-                else tool_input_path("dataset_path", dataset_path)
-            )
+            dataset_path = tool_input_path("dataset_path", dataset_path)
             kwargs["dataset_path"] = dataset_path
 
         # ─── filter: read → .query() → write ─────────────────────────────
@@ -157,7 +152,7 @@ def geopandas_api(
             log.append("\n=== FAILURE ===")
             return "\n".join(log) + "\n\nRESULT: Error: Function not found"
 
-        if func_name in {"read_file", "to_file"} and not dataset_path:
+        if func_name == "read_file" and not dataset_path:
             log.append("Error: Missing dataset_path")
             log.append("\n=== FAILURE ===")
             return "\n".join(log) + "\n\nRESULT: Error: Missing dataset_path"
@@ -165,8 +160,6 @@ def geopandas_api(
         # Map dataset_path → correct parameter name for each function
         call_kwargs = dict(kwargs)
         if func_name == "read_file" and "dataset_path" in call_kwargs:
-            call_kwargs["filename"] = call_kwargs.pop("dataset_path")
-        elif func_name == "to_file" and "dataset_path" in call_kwargs:
             call_kwargs["filename"] = call_kwargs.pop("dataset_path")
 
         result = func(**call_kwargs)
