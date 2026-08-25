@@ -49,7 +49,27 @@ def test_unparseable_layers_is_an_error(outputs):
     assert "name|file|color" in res
 
 
-def test_no_layers_is_an_error(outputs):
+def test_no_layers_takes_the_layers_just_written(outputs):
+    (outputs / "cafes_1km.gpkg").write_bytes(b"stub")
+    res = emit_ui_spec("map", center_lon=-9.15, center_lat=38.74)
+    spec = spec_of(res)
+    assert [layer["file"] for layer in spec["layers"]] == [
+        "outputs/buffer.gpkg",
+        "outputs/cafes_1km.gpkg",
+    ]
+    assert spec["layers"][0]["name"] == "buffer"
+    assert spec["layers"][0]["color"] != spec["layers"][1]["color"]
+    assert spec["center"] == [-9.15, 38.74]
+
+
+def test_no_layers_and_nothing_recent_is_an_error(outputs):
+    import os
+    import time
+
+    from src.agents.tools import a2ui
+
+    stale = time.time() - a2ui.RECENT_LAYER_WINDOW_SECONDS - 1
+    os.utime(outputs / "buffer.gpkg", (stale, stale))
     res = emit_ui_spec("map", center_lon=-9.15, center_lat=38.74)
     assert res.startswith("ERROR")
     assert "viewer_control" in res

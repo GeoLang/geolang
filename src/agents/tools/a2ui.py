@@ -1,13 +1,46 @@
 import json
+import os
 import re
+import time
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from src.core.utils import tool_input_path_or_none
+from src.core.utils import caller_outputs_dir, tool_input_path_or_none
 
 # a shade-by part has to be one column name, or the viewer has nothing to look
 # up in the file's properties
 SHADE_FIELD_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+DEFAULT_LAYER_COLOR = "#3388ff"
+# a map call with no layers takes the layers the run just wrote: grok omits
+# the argument and then repeats the same call until the run is aborted
+RECENT_LAYER_WINDOW_SECONDS = 15 * 60
+RECENT_LAYER_LIMIT = 6
+RECENT_LAYER_COLORS = ("#3388ff", "#ff6b35", "#2f9e44", "#9c36b5", "#e8590c", "#0c8599")
+
+
+def recent_output_layers() -> list[tuple[str, str, str, str]]:
+    """The caller's freshly written layers, oldest first, as layer entries."""
+    directory = caller_outputs_dir()
+    now = time.time()
+    fresh = []
+    for name in os.listdir(directory):
+        if not name.endswith(".gpkg"):
+            continue
+        written = os.path.getmtime(os.path.join(directory, name))
+        if now - written > RECENT_LAYER_WINDOW_SECONDS:
+            continue
+        fresh.append((written, name))
+    fresh.sort()
+    return [
+        (
+            name[: -len(".gpkg")].replace("_", " "),
+            f"outputs/{name}",
+            RECENT_LAYER_COLORS[index % len(RECENT_LAYER_COLORS)],
+            "",
+        )
+        for index, (_, name) in enumerate(fresh[-RECENT_LAYER_LIMIT:])
+    ]
 
 
 class EmitUISpecArgs(BaseModel):
@@ -89,7 +122,7 @@ def emit_ui_spec(
                                 entries.append((
                                     str(item.get("name", "")),
                                     str(item.get("file") or item.get("file_path") or item.get("path") or ""),
-                                    str(item.get("color") or "#3388ff"),
+                                    str(item.get("color") or DEFAULT_LAYER_COLOR),
                                     str(item.get("shade_by") or "").strip(),
                                 ))
                     except json.JSONDecodeError:
@@ -99,7 +132,9 @@ def emit_ui_spec(
                         parts = [p.strip() for p in layer_str.split("|")]
                         if len(parts) >= 2:
                             parts += [""] * (4 - len(parts))
-                            entries.append((parts[0], parts[1], parts[2] or "#3388ff", parts[3]))
+                            entries.append((parts[0], parts[1], parts[2] or DEFAULT_LAYER_COLOR, parts[3]))
+            if not entries and not (layers or "").strip():
+                entries = recent_output_layers()
             unusable = [
                 shade_by
                 for _, _, _, shade_by in entries
