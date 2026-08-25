@@ -29,6 +29,7 @@ from src.core.auth import (
     sign_mcp_token,
 )
 from src.core.tool_executor import (
+    AGORA_READ_SCOPE,
     EXECUTOR_SECRET_ENV,
     EXECUTOR_SECRET_HEADER,
     EXECUTOR_URL_ENV,
@@ -37,6 +38,7 @@ from src.core.tool_executor import (
     TILETOPIA_READ_SCOPE,
     execute_tool,
 )
+from src.core.bound_document import bound_document_scope, current_bound_document
 from src.core.user_token import current_user_token
 from src.core.utils import (
     caller_directory_name,
@@ -48,6 +50,7 @@ SECRET = "test-executor-secret"
 PLATFORM_SECRET = "test-platform-secret-0123456789ab"
 EXECUTOR_URL = "http://executor:8081"
 TOKEN = "header.payload.signature"
+DOCUMENT_ID = "0f8b1c2d-3e4f-4a5b-8c7d-9e0f1a2b3c4d"
 
 client = TestClient(executor.app)
 
@@ -64,6 +67,11 @@ def tool_that_reports_its_caller():
 def tool_that_reports_its_directory():
     """Answer with the directory this call's files go to."""
     return caller_outputs_dir()
+
+
+def tool_that_reports_the_bound_map():
+    """Answer with the live document this call is bound to."""
+    return str(current_bound_document())
 
 
 def tool_that_raises():
@@ -320,12 +328,64 @@ def test_the_forwarded_call_names_the_verified_directory(monkeypatch, remote):
     assert "outputs_directory" not in body["args"]
 
 
+# ── which live map the call is bound to ──────────────────────────────────
+
+
+def test_the_forwarded_call_names_the_bound_map(monkeypatch, remote):
+    monkeypatch.setenv(SECRET_ENV, PLATFORM_SECRET)
+
+    with bound_document_scope(DOCUMENT_ID):
+        execute_tool(
+            "asset_readings",
+            tool_that_reports_the_bound_map,
+            {},
+            platform_token("alice", role="viewer"),
+        )
+
+    assert remote[-1]["json"]["document_id"] == DOCUMENT_ID
+
+
+def test_the_executor_binds_the_map_the_call_names(monkeypatch):
+    monkeypatch.setattr(
+        executor,
+        "load_external_tools",
+        lambda: [(tool_that_reports_the_bound_map, NoArgs)],
+    )
+    monkeypatch.delenv(SECRET_ENV, raising=False)
+
+    response = client.post(
+        "/run/tool_that_reports_the_bound_map",
+        json={"args": {}, "document_id": DOCUMENT_ID},
+        headers={EXECUTOR_SECRET_HEADER: SECRET},
+    )
+
+    assert response.json() == {"result": DOCUMENT_ID}
+
+
+def test_a_call_naming_no_map_binds_none(monkeypatch):
+    monkeypatch.setattr(
+        executor,
+        "load_external_tools",
+        lambda: [(tool_that_reports_the_bound_map, NoArgs)],
+    )
+    monkeypatch.delenv(SECRET_ENV, raising=False)
+
+    response = client.post(
+        "/run/tool_that_reports_the_bound_map",
+        json={"args": {}},
+        headers={EXECUTOR_SECRET_HEADER: SECRET},
+    )
+
+    assert response.json() == {"result": "None"}
+
+
 @pytest.mark.parametrize(
     "name, expected_scopes",
     [
         ("ptolemy_query", [PTOLEMY_READ_SCOPE]),
         ("list_tilesets", [TILETOPIA_READ_SCOPE]),
         ("run_workflow", [GEODUKT_RUN_SCOPE]),
+        ("asset_readings", [AGORA_READ_SCOPE]),
         ("probe", []),
     ],
 )

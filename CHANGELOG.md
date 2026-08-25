@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 2026-08-25: `asset_readings`, a tool that answers what the sensors on a live
+  map are reporting. It reads agora's `GET /documents/{id}/assets` as the caller,
+  or `/assets/at?t=` for a moment in the past, and filters by reading kind, one
+  asset, a value above or below a threshold, or the assets that have gone
+  offline. The answer carries each asset's latest value per kind, how many assets
+  the map has, how many are offline, and a summary line, capped at 200 assets.
+  Agora refusing the read comes back as the tool's error text rather than an
+  exception. The tool exchanges for an `agora:read` token, which agora requires
+  on every GET a tool token makes.
+- 2026-08-25: `X-Agora-Document` also names the map a tool call reads. The
+  document id travels in a context variable beside the caller's bearer, set by
+  `POST /tools/{name}`, the MCP tool call and the isolated executor, so a tool
+  can ask which map it was called from. Only a document id binds: agora answers
+  its asset routes to members, and a share link guest is not one.
 - 2026-08-25: the caller's bearer reaches sibyl on every session call. sibyl now
   decides session ownership from that token, so `sibyl_request` sends the
   `Authorization` header it is given and the five `/sessions` routes pass the

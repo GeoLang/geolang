@@ -26,6 +26,7 @@ import os
 import httpx
 
 from src.core.auth import exchange_tool_token, platform_secret, source_token_role
+from src.core.bound_document import current_bound_document
 from src.core.user_token import user_token_scope
 from src.core.utils import current_caller_directory
 
@@ -41,6 +42,7 @@ EXECUTOR_TIMEOUT_SECONDS = 900.0
 PTOLEMY_READ_SCOPE = "ptolemy:read"
 TILETOPIA_READ_SCOPE = "tiletopia:read"
 GEODUKT_RUN_SCOPE = "geodukt:run"
+AGORA_READ_SCOPE = "agora:read"
 AGORA_WRITE_SCOPE = "agora:write"
 
 ADMIN_ROLE = "admin"
@@ -53,6 +55,7 @@ SCOPE_SOURCE_ROLES = {
     PTOLEMY_READ_SCOPE: ALL_PLATFORM_ROLES,
     TILETOPIA_READ_SCOPE: ALL_PLATFORM_ROLES,
     GEODUKT_RUN_SCOPE: WRITE_PLATFORM_ROLES,
+    AGORA_READ_SCOPE: ALL_PLATFORM_ROLES,
     AGORA_WRITE_SCOPE: ALL_PLATFORM_ROLES,
 }
 
@@ -60,6 +63,7 @@ TOOL_SCOPES = {
     "ptolemy_query": (PTOLEMY_READ_SCOPE,),
     "list_tilesets": (TILETOPIA_READ_SCOPE,),
     "run_workflow": (GEODUKT_RUN_SCOPE,),
+    "asset_readings": (AGORA_READ_SCOPE,),
 }
 
 
@@ -140,8 +144,12 @@ def _execute_remotely(url: str, name: str, args: dict, token: str | None) -> str
     try:
         response = httpx.post(
             f"{url}/run/{name}",
-            # its own field, not one of the args: args are the caller's to write
-            json={"args": args, "outputs_directory": outputs_directory},
+            # own fields, not args: args are the caller's to write
+            json={
+                "args": args,
+                "outputs_directory": outputs_directory,
+                "document_id": current_bound_document(),
+            },
             headers=headers,
             timeout=EXECUTOR_TIMEOUT_SECONDS,
         )

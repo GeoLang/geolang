@@ -46,6 +46,11 @@ POLYGONS_LAYER = "sweep_polygons.geojson"
 # somewhere every platform service has data for: itinera and geokode are built
 # from the monaco extract in CI
 SWEEP_PLACE = "Monaco"
+
+# no stack the sweep runs against has a map with sensor feeds on it, so
+# asset_readings is exercised as far as agora's answer about a document that is
+# not there
+SWEEP_DOCUMENT_ID = "00000000-0000-4000-8000-000000000000"
 SWEEP_CENTER_LON = 7.4225
 SWEEP_CENTER_LAT = 43.7345
 
@@ -255,6 +260,7 @@ SWEEP_ARGUMENTS: dict[str, ToolSample] = {
     ),
     "list_tilesets": ToolSample(args={"category": "terrain"}),
     "ptolemy_query": ToolSample(args={"action": "list_datasets"}),
+    "asset_readings": ToolSample(args={"document_id": SWEEP_DOCUMENT_ID}),
     "list_workflow_operations": ToolSample(),
     "plan_workflow": ToolSample(args={"manifest_toml": SWEEP_MANIFEST_TOML}),
     "run_workflow": ToolSample(

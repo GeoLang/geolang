@@ -37,6 +37,7 @@ from src.core.auth import (
     TOOL_TOKEN_USE_CLAIM,
     sign_tool_token,
 )
+from src.core.bound_document import current_bound_document
 from src.core.tool_executor import AGORA_WRITE_SCOPE
 from src.core.user_token import current_user_token
 from tests.test_agora import FakeAgora
@@ -252,6 +253,44 @@ def test_the_tool_acts_with_a_reduced_bearer(gated, client, monkeypatch):
     assert "role" not in claims
     # and the scope is not left behind for the next caller
     assert current_user_token() is None
+
+
+LINK_TOKEN = "sharelinktoken123"
+
+
+@pytest.mark.parametrize(
+    "header, bound",
+    [
+        (DOCUMENT_ID, DOCUMENT_ID),
+        # agora answers its asset routes to members, and a link guest is not one
+        (LINK_TOKEN, "None"),
+        (None, "None"),
+    ],
+)
+def test_the_document_header_reaches_the_tool(
+    header, bound, gated, client, monkeypatch
+):
+    class NoArgs(BaseModel):
+        pass
+
+    def report_the_bound_map():
+        """Answer with the live document this call is bound to."""
+        return str(current_bound_document())
+
+    monkeypatch.setattr(
+        mcp_server, "load_external_tools", lambda: [(report_the_bound_map, NoArgs)]
+    )
+
+    response = call(
+        client,
+        "tools/call",
+        {"name": "report_the_bound_map", "arguments": {}},
+        token=mcp_mint(),
+        document=header,
+    )
+
+    assert text_of(response) == bound
+    assert current_bound_document() is None
 
 
 def test_a_viewer_cannot_exchange_mcp_access_for_a_workflow_run(

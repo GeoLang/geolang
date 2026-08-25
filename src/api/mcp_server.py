@@ -36,6 +36,7 @@ from src.agents.agent_manager import (
 )
 from src.api.live_document import document_binding, publish
 from src.core.auth import mcp_token_error
+from src.core.bound_document import bound_document_scope, document_id_of
 from src.core.tool_executor import (
     AGORA_WRITE_SCOPE,
     downstream_token,
@@ -217,7 +218,8 @@ def create_mcp_app(
         binding = document_binding(ctx.request.headers) if ctx.request else None
 
         def run_tool():
-            return execute_tool(params.name, func, args, token)
+            with bound_document_scope(document_id_of(binding)):
+                return execute_tool(params.name, func, args, token)
 
         try:
             # a tool call blocks for minutes, so it must not run on the event

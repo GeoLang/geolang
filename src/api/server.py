@@ -50,6 +50,7 @@ import httpx
 from src.agents.agent_manager import PERSONA, approval_route_only, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
 from src.api.live_document import (
+    DOCUMENT_HEADER,
     LAYER_DATA_SUFFIX,
     LIVE_DATA_PATH,
     LIVE_DATA_TOKEN_PATTERN,
@@ -66,6 +67,7 @@ from src.core.auth import (
     require_platform_token,
     sign_mcp_token,
 )
+from src.core.bound_document import bound_document_scope, document_id_of
 from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
 from src.core.tool_executor import execute_tool, report_configuration
 from src.core.user_token import bearer_token, user_token_scope
@@ -332,6 +334,7 @@ def run_tool(
     name: str,
     request: ToolCallRequest,
     authorization: Annotated[str | None, Header()] = None,
+    document: Annotated[str | None, Header(alias=DOCUMENT_HEADER)] = None,
 ):
     """Run a tool and return its string result.
 
@@ -342,6 +345,10 @@ def run_tool(
     sibyl passes the caller's bearer through on every tool call of a run, and the
     viewer sends its own on the plan-approval path. Before execution it is
     exchanged for a short role-free token carrying only this tool's scopes.
+
+    `X-Agora-Document` names the live map the call is bound to, which is what a
+    tool reading that map's sensor state answers about. A share link token binds
+    nothing here: agora answers its asset routes to members.
 
     With `PLATFORM_JWT_SECRET` set the bearer must be a live platform token.
     Without the secret the route is open, which is the standalone dev flow.
@@ -365,7 +372,8 @@ def run_tool(
         return {"result": f"❌ Invalid arguments: {e}"}
 
     try:
-        result = execute_tool(name, func, args, token)
+        with bound_document_scope(document_id_of(document)):
+            result = execute_tool(name, func, args, token)
     except Exception as e:
         logger.exception(f"Tool {name} failed")
         result = f"❌ Tool execution failed: {e}"

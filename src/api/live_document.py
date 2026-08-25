@@ -25,7 +25,6 @@ import os
 import re
 import secrets
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +32,7 @@ import anyio.to_thread
 
 from src.core import agora, utils
 from src.core.auth import SECRET_ENV, platform_claims, sign_tool_token
+from src.core.bound_document import document_id_of
 from src.core.markers import UI_SPEC_MARKER, VIEWER_COMMAND_MARKER, marker_payloads
 from src.core.tool_executor import AGORA_WRITE_SCOPE
 
@@ -563,14 +563,6 @@ def agent_identity(caller_token: str | None) -> tuple[str, str] | None:
         return None
     name = str(claims.get("name") or "").strip()
     return AGENT_SUBJECT_PREFIX + subject, f"{AGENT_NAME} ({name})" if name else AGENT_NAME
-
-
-def document_id_of(binding: str) -> str | None:
-    """`binding` as a document id, or None when it is a share link token."""
-    try:
-        return str(uuid.UUID(binding))
-    except ValueError:
-        return None
 
 
 async def open_binding(binding: str, caller_token: str | None) -> Binding:

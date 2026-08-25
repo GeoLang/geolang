@@ -32,6 +32,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from src.agents.agent_manager import load_external_tools
+from src.core.bound_document import bound_document_scope, document_id_of
 from src.core.tool_executor import EXECUTOR_SECRET_ENV, executor_secret
 from src.core.user_token import bearer_token, user_token_scope
 from src.core.utils import (
@@ -77,6 +78,8 @@ app = FastAPI(title="GeoLang tool executor", lifespan=lifespan)
 class ToolCallRequest(BaseModel):
     args: dict = {}
     outputs_directory: str | None = None
+    # the live map the call is bound to, for a tool that reads it
+    document_id: str | None = None
 
 
 # sync so FastAPI runs it in the threadpool: tools block for minutes
@@ -105,7 +108,11 @@ def run_tool(
 
     token = bearer_token(authorization)
     try:
-        with user_token_scope(token), caller_directory_scope(directory):
+        with (
+            user_token_scope(token),
+            caller_directory_scope(directory),
+            bound_document_scope(document_id_of(request.document_id)),
+        ):
             return {"result": str(func(**args))}
     except Exception as e:
         logger.exception(f"Tool {name} failed")

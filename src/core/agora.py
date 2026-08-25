@@ -298,6 +298,23 @@ async def grant_edit_role(document_id: str, user_id: str, caller_token: str) -> 
     )
 
 
+async def document_assets(
+    document_id: str, token: str | None, at: str | None = None
+) -> list[dict]:
+    """What every asset the document's feeds report is doing, now or as of `at`.
+
+    `at` is RFC 3339 and agora parses it: an unparsable one comes back as a
+    refusal rather than being checked twice.
+    """
+    path = f"/documents/{quote(document_id, safe='')}/assets"
+    if at is None:
+        payload = await _request("GET", path, token)
+    else:
+        payload = await _request("GET", f"{path}/at", token, params={"t": at})
+    assets = payload.get("assets")
+    return assets if isinstance(assets, list) else []
+
+
 async def resolve_share_link(link_token: str) -> dict:
     """`{doc, role, sessionToken}` for a share link. Open, by agora's design."""
     return await _request(

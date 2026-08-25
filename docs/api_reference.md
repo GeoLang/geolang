@@ -160,6 +160,10 @@ The tool's own result text is never changed by any of this. A document write is 
 
 The agent joins as `agent:<caller sub>` using a short-lived `agora:write` token signed with `PLATFORM_JWT_SECRET`. It is put on the document by a membership grant made with a separate `agora:write` token for the caller's subject. Agora still applies the caller's document membership, so the agent cannot reach a document its caller could not edit. Binding to a document id therefore needs that secret set and a live platform token. A share link binding writes as the link's own session instead and is refused unless the link grants edit.
 
+### Reading a live map
+
+The same header names the map `asset_readings` answers about, so a question about what the sensors are doing needs no argument. `POST /tools/{name}` takes it too, and it is the only thing the header does there. Only a document id binds a map for a read: agora answers its asset routes to members, and a share link guest is not one. Whichever is bound, `document_id` on the call still wins.
+
 ## Debug
 
 | Method | Path | Purpose |
@@ -169,7 +173,7 @@ The agent joins as `agent:<caller sub>` using a short-lived `agora:write` token 
 
 ## Tool catalogue
 
-39 tools live under [`src/agents/tools/`](../src/agents/tools/). They are loaded from disk on every manifest or execution request. Categories:
+40 tools live under [`src/agents/tools/`](../src/agents/tools/). They are loaded from disk on every manifest or execution request. Categories:
 
 **Data acquisition** — `geocode_place` (geokode-first, Natural Earth fallback), `batch_geocode`, `get_admin_boundary`, `download_natural_earth_dataset`, `download_osm_data`, `download_population_grid`, `query_elevation`.
 
@@ -179,7 +183,7 @@ The agent joins as `agent:<caller sub>` using a short-lived `agora:write` token 
 
 **Terrain & raster** — `terrain_profile`, `query_zonal_population`, `assess_environmental_risk`, `generate_heatmap`.
 
-**Platform services** — `ptolemy_query` (geodatabase datasets/branches/features), `list_tilesets` (TileTopia assets + catalog), `sql_query` (in-browser DuckDB Spatial via viewer command).
+**Platform services** — `ptolemy_query` (geodatabase datasets/branches/features), `list_tilesets` (TileTopia assets + catalog), `sql_query` (in-browser DuckDB Spatial via viewer command), `asset_readings` (what the sensors on the live map are reporting, now or as of a time, from agora).
 
 **Workflows**: `list_workflow_operations` (geodukt transform catalog), `plan_workflow` (validate a geodukt TOML manifest, emit the plan as a `__PLAN__` marker for approval), `run_workflow` (execute the approved manifest). Shared client code sits in `_geodukt.py`, which the loader skips because of the leading underscore. `approve_workflow.py` is loaded but is not one of the tools counted above: it records the user pressing approve and only `POST /workflow/approve` dispatches it.
 
@@ -200,7 +204,7 @@ Adding a tool is a single file: drop a module into `src/agents/tools/` exporting
 | `CORS_ORIGINS` | — | Comma-separated browser origins allowed to call the API. Required when the gate is on, where `*` is refused. |
 | `SIBYL_URL` | `http://localhost:8090` | sibyl agent service endpoint. |
 | `MCP_ALLOWED_HOSTS` | localhost only | Comma-separated `Host` values `/mcp` answers on, read at startup. A `host:*` entry matches any port. |
-| `AGORA_URL` | `http://agora:3000` | agora live document service. The websocket follows it, so `https` there means `wss`. |
+| `AGORA_URL` | `http://agora:3000` | agora live document service, for the live-map writes and for `asset_readings`. The websocket follows it, so `https` there means `wss`. |
 | `GEOLANG_PUBLIC_URL` | `/agent` | Where a browser reaches this service, used to build the `/live-data/{token}` URLs published into a document. |
 | `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O. Holds the `outputs/` and `user_data/` roots, each one directory per caller. |
 | `GEOLANG_OUTPUTS_RETENTION_DAYS` | `30` | How long an output file is kept. The API server deletes older files from every caller directory at startup and once a day after that. `0` keeps everything. |

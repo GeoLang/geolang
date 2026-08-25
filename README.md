@@ -10,7 +10,7 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 39 geospatial tools served to sibyl over HTTP, and 37 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
+- 40 geospatial tools served to sibyl over HTTP, and 38 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
 - Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan, the user presses approve in the viewer, and `run_workflow` executes it. Both halves are checked rather than trusted to the persona: `run_workflow` refuses a manifest `plan_workflow` never validated, and one the approve button never posted to `POST /workflow/approve`
 - AG-UI event stream for ViewTopia
 
@@ -63,7 +63,7 @@ uv run --with-requirements requirements.txt \
 
 Both files are needed. `requirements_client.txt` names none of the geospatial
 libraries, and tools import lazily, so with it alone the server starts and `GET
-/tools` still advertises 39 while roughly 25 of them fail at call time. `requests`
+/tools` still advertises 40 while roughly 25 of them fail at call time. `requests`
 is declared in neither file and arrives transitively through osmnx.
 
 `TOOL_EXEC_DIR` auto-detects the geolang repo root from `src/core/utils.py`, so
@@ -170,7 +170,7 @@ runs code, writes a file, or reads back a session or a user's data requires an
 `{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts. Signature
 and `exp` are checked. At the tool boundary, geolang exchanges that token for a
 role-free token that expires within five minutes and carries only the downstream
-operation scopes mapped to that tool. Only 3 of the 39 tools have any scopes
+operation scopes mapped to that tool. Only 4 of the 40 tools have any scopes
 mapped today; the other 36 exchange to an empty scope list, so for them the
 exchange shortens the expiry and drops the role but narrows no operation.
 
