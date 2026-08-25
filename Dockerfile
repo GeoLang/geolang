@@ -45,9 +45,10 @@ RUN python -m venv /opt/venv \
     && rm /tmp/requirements_client.txt /tmp/requirements.txt
 
 # SELinux-friendly outputs and writable runtime mount targets
-RUN mkdir -p /app/geolang/outputs /app/geolang/user_data /app/geolang/live_data /app/geolang/natural_earth \
-    && chown 1000:1000 /app/geolang/outputs /app/geolang/user_data /app/geolang/live_data /app/geolang/natural_earth \
-    && chmod 777 /app/geolang/outputs
+# cache is osmnx's download cache, written relative to the working directory
+RUN mkdir -p /app/geolang/outputs /app/geolang/user_data /app/geolang/live_data /app/geolang/natural_earth /app/geolang/cache \
+    && chown 1000:1000 /app/geolang/outputs /app/geolang/user_data /app/geolang/live_data /app/geolang/natural_earth /app/geolang/cache \
+    && chmod 777 /app/geolang/outputs /app/geolang/cache
 
 WORKDIR /app/geolang
 COPY src/ ./src/

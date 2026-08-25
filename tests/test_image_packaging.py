@@ -7,11 +7,13 @@ DOCKERFILE = REPOSITORY_ROOT / "Dockerfile"
 DOCKERIGNORE = REPOSITORY_ROOT / ".dockerignore"
 
 EXPECTED_COPY_SOURCES = {
+    "qgis-archive-keyring.gpg",
     "requirements_client.txt",
     "requirements.txt",
     "src/",
 }
 EXPECTED_CONTEXT_INCLUDES = {
+    "!qgis-archive-keyring.gpg",
     "!requirements_client.txt",
     "!requirements.txt",
     "!src/",
@@ -50,6 +52,7 @@ RUNTIME_MOUNT_TARGETS = (
     "/app/geolang/user_data",
     "/app/geolang/live_data",
     "/app/geolang/natural_earth",
+    "/app/geolang/cache",
 )
 
 
