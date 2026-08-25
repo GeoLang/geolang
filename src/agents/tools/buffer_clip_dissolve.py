@@ -3,8 +3,17 @@ from typing import Optional
 from src.core.utils import tool_input_path, tool_output_path
 
 WGS84 = "EPSG:4326"
-METRIC_CRS = "EPSG:3857"
+AZIMUTHAL_EQUIDISTANT = "+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m"
 METRES_PER_KILOMETRE = 1000
+
+
+def metric_crs_centred_on(center_lon: float, center_lat: float) -> str:
+    """A projection whose metres are true distances from this point.
+
+    In web mercator the same buffer comes out short by cos(latitude), a fifth
+    of it at Athens.
+    """
+    return AZIMUTHAL_EQUIDISTANT.format(lat=center_lat, lon=center_lon)
 
 
 class BufferClipDissolveArgs(BaseModel):
@@ -50,10 +59,11 @@ def buffer_clip_dissolve(
     input_full = tool_input_path("input_path", input_path) if input_path else None
 
     try:
-        # Build buffer polygon in metric CRS (EPSG:3857)
+        # Build buffer polygon in metres around the centre
+        metric_crs = metric_crs_centred_on(center_lon, center_lat)
         point = gpd.GeoDataFrame(
             geometry=[Point(center_lon, center_lat)], crs=WGS84
-        ).to_crs(METRIC_CRS)
+        ).to_crs(metric_crs)
         buffer_geom = point.geometry.iloc[0].buffer(buffer_km * METRES_PER_KILOMETRE)
         buffer_gdf = gpd.GeoDataFrame(
             {
@@ -62,7 +72,7 @@ def buffer_clip_dissolve(
                 "buffer_km": [buffer_km],
             },
             geometry=[buffer_geom],
-            crs=METRIC_CRS,
+            crs=metric_crs,
         )
 
         if input_full is None:
@@ -80,7 +90,7 @@ def buffer_clip_dissolve(
         gdf = gpd.read_file(input_full)
         if gdf.crs is None:
             gdf = gdf.set_crs(WGS84)
-        gdf = gdf.to_crs(METRIC_CRS)
+        gdf = gdf.to_crs(metric_crs)
 
         # Clip
         clipped = gpd.clip(gdf, buffer_gdf)
