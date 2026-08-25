@@ -742,25 +742,73 @@ def test_a_viewer_run_is_reported_back_into_the_session(geodukt, monkeypatch):
     geodukt(run=(200, RUN_RECORD))
     sent = []
 
-    async def fake_notify(text):
-        sent.append(text)
+    async def fake_notify(text, thread_id):
+        sent.append((text, thread_id))
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
     approve(MANIFEST)
 
     body = server.run_tool(
         "run_workflow",
-        server.ToolCallRequest(args={"manifest_toml": MANIFEST}, notify=True),
+        server.ToolCallRequest(
+            args={"manifest_toml": MANIFEST}, notify=True, thread_id="thread-7"
+        ),
     )
 
     assert "catchment: 12 features" in body["result"]
     assert len(sent) == 1
-    assert sent[0].startswith("[run_workflow run from the viewer]")
+    text, thread_id = sent[0]
+    assert text.startswith("[run_workflow run from the viewer]")
+    # the session named by the caller, not whichever one sibyl has open
+    assert thread_id == "thread-7"
     # the counts have to survive into the session or a follow-up question cannot use them
-    assert "catchment: 12 features" in sent[0]
+    assert "catchment: 12 features" in text
     # the viewer parses the marker itself: truncating it into the session would
     # leave the model half a JSON blob
-    assert "__RUN__" not in sent[0]
+    assert "__RUN__" not in text
+
+
+def test_a_viewer_run_that_names_no_session_is_reported_nowhere(geodukt):
+    """sibyl's active session is process-wide: a note with no thread id would
+    land in whichever session another person has open."""
+    geodukt(run=(200, RUN_RECORD))
+    approve(MANIFEST)
+
+    with respx.mock(base_url=server.SIBYL_URL, assert_all_called=False) as sibyl:
+        messages = sibyl.post(path__regex=r"^/sessions/[^/]+/messages$").respond(
+            200, json={}
+        )
+        sibyl.get("/sessions").respond(200, json=[{"id": "someone-elses", "active": True}])
+        sibyl.post("/sessions").respond(200, json={"id": "someone-elses"})
+
+        body = server.run_tool(
+            "run_workflow",
+            server.ToolCallRequest(args={"manifest_toml": MANIFEST}, notify=True),
+        )
+
+        assert "catchment: 12 features" in body["result"]
+        assert messages.call_count == 0
+
+
+def test_a_viewer_run_reaches_the_session_the_caller_named(geodukt):
+    geodukt(run=(200, RUN_RECORD))
+    approve(MANIFEST)
+
+    with respx.mock(base_url=server.SIBYL_URL, assert_all_called=False) as sibyl:
+        messages = sibyl.post(path__regex=r"^/sessions/[^/]+/messages$").respond(
+            200, json={}
+        )
+
+        server.run_tool(
+            "run_workflow",
+            server.ToolCallRequest(
+                args={"manifest_toml": MANIFEST}, notify=True, thread_id="thread-7"
+            ),
+        )
+
+        assert messages.call_count == 1
+        assert messages.calls[0].request.url.path == "/sessions/thread-7/messages"
+        assert "catchment: 12 features" in messages.calls[0].request.content.decode()
 
 
 def test_an_approved_run_reaches_geodukt_as_the_approving_user(geodukt):
@@ -784,8 +832,8 @@ def test_the_models_own_run_is_not_reported_twice(geodukt, monkeypatch):
     geodukt(run=(200, RUN_RECORD))
     sent = []
 
-    async def fake_notify(text):
-        sent.append(text)
+    async def fake_notify(text, thread_id):
+        sent.append((text, thread_id))
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
 
@@ -804,19 +852,22 @@ def test_a_failed_viewer_run_is_still_reported(geodukt, monkeypatch):
     geodukt(run=(422, {"kind": "sink", "message": "sink 'out' has no path"}))
     sent = []
 
-    async def fake_notify(text):
-        sent.append(text)
+    async def fake_notify(text, thread_id):
+        sent.append((text, thread_id))
 
     monkeypatch.setattr(server, "notify_agent", fake_notify)
     approve(MANIFEST)
 
     server.run_tool(
         "run_workflow",
-        server.ToolCallRequest(args={"manifest_toml": MANIFEST}, notify=True),
+        server.ToolCallRequest(
+            args={"manifest_toml": MANIFEST}, notify=True, thread_id="thread-7"
+        ),
     )
 
     assert len(sent) == 1
-    assert "sink 'out' has no path" in sent[0]
+    assert "sink 'out' has no path" in sent[0][0]
+    assert sent[0][1] == "thread-7"
 
 
 def test_plan_event_renders_as_an_agui_custom_event():

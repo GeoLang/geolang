@@ -22,6 +22,7 @@ from pathlib import Path
 
 import jwt
 import pytest
+import respx
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -495,13 +496,13 @@ def test_an_anonymous_caller_cannot_read_a_subjects_file(client, gated):
 def quiet_agent(monkeypatch):
     """The upload route tells the agent about the file, and there is none here."""
 
-    async def no_notify(text):
+    async def no_notify(text, thread_id):
         return None
 
     monkeypatch.setattr(importlib.import_module("src.api.server"), "notify_agent", no_notify)
 
 
-def upload(client, subject, name):
+def upload(client, subject, name, thread_id=None):
     body = (
         '{"type":"FeatureCollection","features":[{"type":"Feature",'
         '"properties":{"name":"%s"},'
@@ -510,8 +511,40 @@ def upload(client, subject, name):
     return client.post(
         "/upload",
         files={"file": (f"{name}.geojson", body.encode(), "application/geo+json")},
+        data={"thread_id": thread_id} if thread_id else None,
         headers=as_subject(subject),
     )
+
+
+SIBYL_MESSAGES_PATH = r"^/sessions/[^/]+/messages$"
+
+
+def test_an_upload_that_names_no_session_tells_sibyl_nothing(client, gated, tree):
+    """The tool sweep uploads its fixtures through this route under its own
+    token, and its notes used to land in whatever session a person had open."""
+    server, _, _ = tree
+
+    with respx.mock(base_url=server.SIBYL_URL, assert_all_called=False) as sibyl:
+        messages = sibyl.post(path__regex=SIBYL_MESSAGES_PATH).respond(200, json={})
+        sibyl.get("/sessions").respond(200, json=[{"id": "someone-elses", "active": True}])
+        sibyl.post("/sessions").respond(200, json={"id": "someone-elses"})
+
+        assert upload(client, "alice", "parcels").status_code == 200
+
+        assert messages.call_count == 0
+
+
+def test_an_upload_notes_the_session_it_names(client, gated, tree):
+    server, _, _ = tree
+
+    with respx.mock(base_url=server.SIBYL_URL, assert_all_called=False) as sibyl:
+        messages = sibyl.post(path__regex=SIBYL_MESSAGES_PATH).respond(200, json={})
+
+        assert upload(client, "alice", "parcels", thread_id="thread-7").status_code == 200
+
+        assert messages.call_count == 1
+        assert messages.calls[0].request.url.path == "/sessions/thread-7/messages"
+        assert "parcels.geojson" in messages.calls[0].request.content.decode()
 
 
 def test_an_upload_lands_in_the_callers_own_directory(client, gated, tree, quiet_agent):

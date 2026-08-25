@@ -139,7 +139,7 @@ def stubs(monkeypatch, tmp_path):
     monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
 
-    async def no_notify(text):
+    async def no_notify(text, thread_id):
         return None
 
     def no_browser():

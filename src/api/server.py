@@ -19,6 +19,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     Header,
     HTTPException,
     Request,
@@ -240,20 +241,21 @@ async def sibyl_request(method: str, path: str, **kwargs) -> httpx.Response:
         )
 
 
-async def notify_agent(text: str) -> None:
-    """Append a message to sibyl's active session without running the model."""
+async def notify_agent(text: str, thread_id: str | None) -> None:
+    """Append a message to one named sibyl session without running the model.
+
+    A caller that names no session gets no note: sibyl's active session is
+    process-wide, so appending there puts one caller's file names in whichever
+    session another person is reading.
+    """
+    if not thread_id:
+        return
     try:
         async with httpx.AsyncClient(
             base_url=SIBYL_URL, timeout=SIBYL_TIMEOUT
         ) as client:
-            sessions = (await client.get("/sessions")).json()
-            session = next((s for s in sessions if s.get("active")), None)
-            if session is None:
-                session = (
-                    await client.post("/sessions", json={"name": "Default"})
-                ).json()
             await client.post(
-                f"/sessions/{session['id']}/messages", json={"content": text}
+                f"/sessions/{thread_id}/messages", json={"content": text}
             )
     except Exception as e:
         logger.warning(f"Could not notify agent: {e}")
@@ -312,6 +314,8 @@ class ToolCallRequest(BaseModel):
     # so the model knows it happened. sibyl itself never sets it, which is what
     # keeps a run the model asked for from being reported back to it twice.
     notify: bool = False
+    # the sibyl session the note goes to. Without one there is no note at all
+    thread_id: str | None = None
 
 
 # sync so FastAPI runs it in the threadpool: tools block for minutes
@@ -363,7 +367,11 @@ def run_tool(
         # JSON blob in the session, so the model gets the prose only
         prose = re.sub(r"\n?__[A-Z_]+__:.*", "", str(result))
         # this route is sync, so it runs in a worker thread with no event loop
-        asyncio.run(notify_agent(f"[{name} run from the viewer] {prose[:800]}"))
+        asyncio.run(
+            notify_agent(
+                f"[{name} run from the viewer] {prose[:800]}", request.thread_id
+            )
+        )
 
     return {"result": result}
 
@@ -787,6 +795,7 @@ async def get_datasets(authorization: Annotated[str | None, Header()] = None):
 @app.post("/upload", dependencies=[Depends(platform_auth)])
 async def upload_dataset(
     file: UploadFile = File(...),
+    thread_id: str | None = Form(None),
     authorization: Annotated[str | None, Header()] = None,
 ):
     # every path here is the caller's own: the directory, the catalogue
@@ -884,7 +893,8 @@ async def upload_dataset(
         await notify_agent(
             f"[Dataset uploaded] '{stem}': {metadata['geometry_type']}, "
             f"{metadata['row_count']} features, CRS: EPSG:4326, columns: {col_preview}. "
-            f"Filename for tools: {metadata['filename']}"
+            f"Filename for tools: {metadata['filename']}",
+            thread_id,
         )
 
         return metadata
@@ -1024,6 +1034,8 @@ async def health():
 class DrawRequest(BaseModel):
     geojson: dict
     name: str = "drawn_area"
+    # the sibyl session the note goes to. Without one there is no note at all
+    thread_id: str | None = None
 
 
 @app.post("/draw", dependencies=[Depends(platform_auth)])
@@ -1082,7 +1094,8 @@ async def save_drawn_area(
         await notify_agent(
             f"[User drew a shape on the map] '{safe_name}': {metadata['geometry_type']}, "
             f"center lon={center_lon}, lat={center_lat}. "
-            f"Filename for tools: {gpkg_path.name}"
+            f"Filename for tools: {gpkg_path.name}",
+            request.thread_id,
         )
 
         return metadata
