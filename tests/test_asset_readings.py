@@ -5,6 +5,7 @@ what agora documents: one entry per asset, its liveness, and its latest value
 per reading kind.
 """
 
+import asyncio
 import json
 
 import httpx
@@ -302,3 +303,68 @@ def test_a_share_link_token_binds_no_map(only_tool_is_the_probe):
 
 def test_no_header_binds_no_map(only_tool_is_the_probe):
     assert run_bound(None) == "None"
+
+
+# ── the same map reaches the chat run ────────────────────────────────────
+
+
+def drain(events):
+    async def collect():
+        return [event async for event in events]
+
+    return asyncio.run(collect())
+
+
+def sibyl_run_body(route):
+    return json.loads(route.calls.last.request.content)
+
+
+def test_the_run_request_carries_the_bound_document():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = sibyl.post("/runs").respond(
+            200, content=json.dumps({"kind": "done"}) + "\n"
+        )
+        with bound_document_scope(DOCUMENT_ID):
+            drain(server.agent_event_stream("what is TWIN-01 reading"))
+
+    assert sibyl_run_body(route)["document"] == DOCUMENT_ID
+
+
+def test_a_run_bound_to_no_map_sends_no_document():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = sibyl.post("/runs").respond(
+            200, content=json.dumps({"kind": "done"}) + "\n"
+        )
+        drain(server.agent_event_stream("what is TWIN-01 reading"))
+
+    # absent, not null: sibyl treats the field as optional
+    assert "document" not in sibyl_run_body(route)
+
+
+def chat(headers):
+    body = {
+        "threadId": "t1",
+        "runId": "r1",
+        "messages": [{"id": "m1", "role": "user", "content": "what is it reading"}],
+        "state": {},
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = sibyl.post("/runs").respond(
+            200, content=json.dumps({"kind": "done"}) + "\n"
+        )
+        response = client.post("/chat/agui", json=body, headers=headers)
+        assert response.status_code == 200, response.text
+    return sibyl_run_body(route)
+
+
+def test_the_chat_route_binds_the_document_header_for_the_run(monkeypatch):
+    monkeypatch.delenv(SECRET_ENV, raising=False)
+    assert chat({DOCUMENT_HEADER: DOCUMENT_ID})["document"] == DOCUMENT_ID
+
+
+def test_a_chat_from_no_map_sends_no_document(monkeypatch):
+    monkeypatch.delenv(SECRET_ENV, raising=False)
+    assert "document" not in chat({})

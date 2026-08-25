@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 2026-08-25: a chat question reaches the map it was asked from. `/chat/agui`
+  binds the `X-Agora-Document` header for the length of the stream and the run
+  request sends the bound document to sibyl, which puts it back on every tool
+  call of that run. Without the header the body carries no `document` and the
+  run reads no map.
 - 2026-08-25: `asset_readings`, a tool that answers what the sensors on a live
   map are reporting. It reads agora's `GET /documents/{id}/assets` as the caller,
   or `/assets/at?t=` for a moment in the past, and filters by reading kind, one

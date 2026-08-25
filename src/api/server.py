@@ -67,7 +67,11 @@ from src.core.auth import (
     require_platform_token,
     sign_mcp_token,
 )
-from src.core.bound_document import bound_document_scope, document_id_of
+from src.core.bound_document import (
+    bound_document_scope,
+    current_bound_document,
+    document_id_of,
+)
 from src.core.markers import VIEWER_COMMAND_MARKER, marker_payloads
 from src.core.tool_executor import execute_tool, report_configuration
 from src.core.user_token import bearer_token, user_token_scope
@@ -457,6 +461,10 @@ async def agent_event_stream(
     `user_token` is the caller's bearer. It names the session the run appends to
     and comes back on every tool call, so the tools act as this user. Without one
     sibyl refuses the run unless it was started with no gate.
+
+    The bound document goes with it, so sibyl sends `X-Agora-Document` back on
+    every tool call and a tool reading a live map answers about the one the
+    asker is looking at.
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
@@ -465,6 +473,9 @@ async def agent_event_stream(
         body["user_token"] = user_token
     if thread_id:
         body["thread_id"] = thread_id
+    document = current_bound_document()
+    if document:
+        body["document"] = document
 
     def run_in_thread():
         # no read timeout: a tool call can keep the stream silent for minutes
@@ -683,24 +694,33 @@ async def chat_agui(input: RunAgentInput, request: Request):
     """AG-UI event endpoint: the agent pipeline rendered as AG-UI SSE.
 
     The same bearer the gate checks is what sibyl holds for the run and sends
-    back on every tool call, so the run acts as this caller.
+    back on every tool call, so the run acts as this caller. `X-Agora-Document`
+    rides along the same way, naming the map the asker is looking at.
     """
     user_messages = [m for m in input.messages if getattr(m, "role", None) == "user"]
     if not user_messages:
         raise HTTPException(status_code=400, detail="No user message in input")
     prompt = user_messages[-1].content or ""
+    document = document_id_of(request.headers.get(DOCUMENT_HEADER))
+
+    async def bound_stream():
+        # the binding has to hold while the stream runs: the run request is
+        # built on the first pull, long after this route has returned
+        with bound_document_scope(document):
+            async for chunk in agui_stream(
+                agent_event_stream(
+                    prompt,
+                    user_token=bearer_token(request.headers.get("authorization")),
+                    thread_id=input.thread_id,
+                ),
+                thread_id=input.thread_id,
+                run_id=input.run_id,
+                accept=request.headers.get("accept"),
+            ):
+                yield chunk
 
     return StreamingResponse(
-        agui_stream(
-            agent_event_stream(
-                prompt,
-                user_token=bearer_token(request.headers.get("authorization")),
-                thread_id=input.thread_id,
-            ),
-            thread_id=input.thread_id,
-            run_id=input.run_id,
-            accept=request.headers.get("accept"),
-        ),
+        bound_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
