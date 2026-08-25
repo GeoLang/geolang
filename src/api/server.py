@@ -86,7 +86,6 @@ from src.core.utils import (
     resolve_under,
     save_catalogue,
     save_shares,
-    tool_input_path_or_none,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -571,16 +570,12 @@ async def agent_event_stream(
             )
             if saved:
                 seen = {}
-                # a tool can say "saved" about a file it then failed to write,
-                # and the viewer reports every layer it cannot fetch
+                for fname in saved:
+                    seen[fname] = {
+                        "name": fname.replace("_", " ").replace(".gpkg", ""),
+                        "file": f"outputs/{fname}",
+                    }
                 with user_token_scope(user_token):
-                    for fname in saved:
-                        if not tool_input_path_or_none("layers", f"outputs/{fname}"):
-                            continue
-                        seen[fname] = {
-                            "name": fname.replace("_", " ").replace(".gpkg", ""),
-                            "file": f"outputs/{fname}",
-                        }
                     coord_spec = infer_ui_spec_from_text(" ".join(assistant_texts))
                 center = coord_spec.get("center") if coord_spec else None
                 ui_spec = {"type": "map", "layers": list(seen.values())}
