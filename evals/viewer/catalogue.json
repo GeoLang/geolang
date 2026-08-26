@@ -1,72 +1,7 @@
 [
   {
-    "name": "camera.fly_to",
-    "description": "Move the camera to a longitude and latitude",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "lon": {
-          "type": "number",
-          "description": "longitude in degrees"
-        },
-        "lat": {
-          "type": "number",
-          "description": "latitude in degrees"
-        },
-        "height": {
-          "type": "number",
-          "description": "camera height in metres"
-        },
-        "heading": {
-          "type": "number",
-          "description": "camera heading in degrees"
-        },
-        "pitch": {
-          "type": "number",
-          "description": "camera pitch in degrees"
-        }
-      },
-      "required": [
-        "lon",
-        "lat"
-      ]
-    },
-    "reads": false,
-    "destructive": false
-  },
-  {
-    "name": "renderer.set",
-    "description": "Switch between the 3D globe and the 2D map",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "renderer": {
-          "type": "string",
-          "description": "which renderer draws the map",
-          "enum": [
-            "cesium",
-            "maplibre"
-          ]
-        },
-        "tab": {
-          "type": "string",
-          "description": "which tab to show",
-          "enum": [
-            "globe",
-            "map"
-          ]
-        }
-      },
-      "required": [
-        "renderer"
-      ]
-    },
-    "reads": false,
-    "destructive": false
-  },
-  {
     "name": "basemap.set",
-    "description": "Change the basemap under the layers",
+    "description": "Put a basemap under the layers.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -93,82 +28,141 @@
     "destructive": false
   },
   {
-    "name": "layers.set_visible",
-    "description": "Show or hide a layer",
+    "name": "camera.fly_to",
+    "description": "Fly the camera to a longitude and latitude.",
     "parameters": {
       "type": "object",
       "properties": {
-        "layer": {
-          "type": "string",
-          "description": "id or name from the viewer state"
-        },
-        "visible": {
-          "type": "boolean",
-          "description": "true shows the layer, false hides it"
-        }
-      },
-      "required": [
-        "layer",
-        "visible"
-      ]
-    },
-    "reads": false,
-    "destructive": false
-  },
-  {
-    "name": "layers.set_opacity",
-    "description": "Set a layer's opacity, 0 is invisible and 1 is solid",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "layer": {
-          "type": "string",
-          "description": "id or name from the viewer state"
-        },
-        "opacity": {
+        "lon": {
           "type": "number",
-          "description": "0 to 1"
+          "description": "Longitude in degrees, -180 to 180."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Latitude in degrees, -90 to 90."
+        },
+        "height": {
+          "type": "number",
+          "description": "Height above the ground in metres."
+        },
+        "heading": {
+          "type": "number",
+          "description": "Compass bearing in degrees, 0 is north."
+        },
+        "pitch": {
+          "type": "number",
+          "description": "Tilt in degrees, negative looks down at the ground."
         }
       },
       "required": [
-        "layer",
-        "opacity"
+        "lon",
+        "lat"
       ]
     },
     "reads": false,
     "destructive": false
   },
   {
-    "name": "layers.remove",
-    "description": "Take a layer off the map",
+    "name": "dataset.draw_branch",
+    "description": "Draw one branch of a dataset on the map, at its head or at a past moment.",
     "parameters": {
       "type": "object",
       "properties": {
-        "layer": {
+        "dataset": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "Dataset id or name."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch id or name, main by default."
+        },
+        "at": {
+          "type": "string",
+          "description": "ISO 8601 moment to draw the branch as it stood then."
         }
       },
       "required": [
-        "layer"
+        "dataset"
       ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "dataset.list",
+    "description": "List the versioned datasets and the branches each one has.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "reads": true,
+    "destructive": false
+  },
+  {
+    "name": "find_feature",
+    "description": "Find features whose properties carry some text, with the longitude and latitude of each.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Text to look for, case does not matter."
+        },
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name to search, or every layer."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "reads": true,
+    "destructive": false
+  },
+  {
+    "name": "history.show_at",
+    "description": "Show every asset as it stood at a past moment, instead of live.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string",
+          "description": "ISO 8601 moment to show."
+        }
+      },
+      "required": [
+        "at"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "history.show_live",
+    "description": "Follow the live readings again, after showing a past moment.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
     },
     "reads": false,
     "destructive": false
   },
   {
     "name": "layers.move",
-    "description": "Move a layer in the draw order",
+    "description": "Move one layer in the drawing order.",
     "parameters": {
       "type": "object",
       "properties": {
         "layer": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "Layer id or name."
         },
         "position": {
           "type": "string",
-          "description": "where to move it to",
+          "description": "Where the layer goes.",
           "enum": [
             "top",
             "bottom",
@@ -186,18 +180,36 @@
     "destructive": false
   },
   {
-    "name": "layers.set_color",
-    "description": "Colour a layer, as a css colour",
+    "name": "layers.remove",
+    "description": "Take one layer off the map.",
     "parameters": {
       "type": "object",
       "properties": {
         "layer": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "Layer id or name."
+        }
+      },
+      "required": [
+        "layer"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "layers.set_color",
+    "description": "Paint one vector layer a single colour.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name."
         },
         "color": {
           "type": "string",
-          "description": "css colour, e.g. '#ff0000'"
+          "description": "A css colour, e.g. #38bdf8 or teal."
         }
       },
       "required": [
@@ -209,18 +221,64 @@
     "destructive": false
   },
   {
-    "name": "layers.shade_by",
-    "description": "Shade a layer by the values in one of its columns",
+    "name": "layers.set_opacity",
+    "description": "Set how opaque one layer draws.",
     "parameters": {
       "type": "object",
       "properties": {
         "layer": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "Layer id or name."
+        },
+        "opacity": {
+          "type": "number",
+          "description": "0 is invisible, 1 is fully opaque."
+        }
+      },
+      "required": [
+        "layer",
+        "opacity"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "layers.set_visible",
+    "description": "Show or hide one layer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "true shows the layer, false hides it."
+        }
+      },
+      "required": [
+        "layer",
+        "visible"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "layers.shade_by",
+    "description": "Colour one vector layer by the values in a column.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name."
         },
         "column": {
           "type": "string",
-          "description": "column name in that layer"
+          "description": "The feature property to shade by."
         }
       },
       "required": [
@@ -232,146 +290,18 @@
     "destructive": false
   },
   {
-    "name": "split_view.set",
-    "description": "Turn the side by side view on or off",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "active": {
-          "type": "boolean",
-          "description": "true opens the split view"
-        },
-        "layout": {
-          "type": "string",
-          "description": "how the two panes are arranged"
-        }
-      },
-      "required": [
-        "active"
-      ]
-    },
-    "reads": false,
-    "destructive": false
-  },
-  {
-    "name": "project.list",
-    "description": "List the projects this person can open",
-    "parameters": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    },
-    "reads": true,
-    "destructive": false
-  },
-  {
-    "name": "project.open",
-    "description": "Open a project",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "project": {
-          "type": "string",
-          "description": "id or name from the viewer state"
-        }
-      },
-      "required": [
-        "project"
-      ]
-    },
-    "reads": false,
-    "destructive": false
-  },
-  {
-    "name": "dataset.list",
-    "description": "List the versioned datasets available",
-    "parameters": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    },
-    "reads": true,
-    "destructive": false
-  },
-  {
-    "name": "dataset.draw_branch",
-    "description": "Draw one branch of a dataset on the map, at an ISO 8601 moment when 'at' is given",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "dataset": {
-          "type": "string",
-          "description": "id or name from the viewer state"
-        },
-        "branch": {
-          "type": "string",
-          "description": "branch name, the dataset's current branch when absent"
-        },
-        "at": {
-          "type": "string",
-          "description": "ISO 8601 moment"
-        }
-      },
-      "required": [
-        "dataset"
-      ]
-    },
-    "reads": false,
-    "destructive": false
-  },
-  {
-    "name": "live.list",
-    "description": "List the live documents this person can join",
-    "parameters": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    },
-    "reads": true,
-    "destructive": false
-  },
-  {
-    "name": "live.join",
-    "description": "Join a live document",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "document": {
-          "type": "string",
-          "description": "id or name from the viewer state"
-        }
-      },
-      "required": [
-        "document"
-      ]
-    },
-    "reads": false,
-    "destructive": false
-  },
-  {
-    "name": "live.leave",
-    "description": "Leave the live document",
-    "parameters": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    },
-    "reads": false,
-    "destructive": true
-  },
-  {
     "name": "live.create_feed",
-    "description": "Start a live feed that polls every interval_seconds",
+    "description": "Create a producer that may send readings into the live document.",
     "parameters": {
       "type": "object",
       "properties": {
         "name": {
           "type": "string",
-          "description": "name for the new feed"
+          "description": "What the feed is called."
         },
         "interval_seconds": {
           "type": "number",
-          "description": "seconds between polls"
+          "description": "How often the producer reports, in seconds."
         }
       },
       "required": [
@@ -383,14 +313,54 @@
     "destructive": false
   },
   {
+    "name": "live.join",
+    "description": "Join a live document, so edits and readings are shared with everyone in it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "document": {
+          "type": "string",
+          "description": "Live document id or name."
+        }
+      },
+      "required": [
+        "document"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "live.leave",
+    "description": "Leave the live document this session is in.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "reads": false,
+    "destructive": true
+  },
+  {
+    "name": "live.list",
+    "description": "List the live documents this account can join.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "reads": true,
+    "destructive": false
+  },
+  {
     "name": "live.remove_feed",
-    "description": "Remove a live feed",
+    "description": "Delete a feed, so its producer can no longer send readings.",
     "parameters": {
       "type": "object",
       "properties": {
         "feed": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "Feed id or name."
         }
       },
       "required": [
@@ -402,29 +372,29 @@
   },
   {
     "name": "live.set_asset_rule",
-    "description": "Colour a layer's assets by a reading kind, breakpoints written as 'value:color,value:color'",
+    "description": "Colour the assets on a layer by their latest reading of one kind.",
     "parameters": {
       "type": "object",
       "properties": {
         "layer": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "Asset layer id or name."
         },
         "kind": {
           "type": "string",
-          "description": "reading kind, e.g. 'water_level'"
+          "description": "Reading kind, e.g. temperature."
         },
         "breakpoints": {
           "type": "string",
-          "description": "'value:color,value:color'"
+          "description": "Value and colour pairs, e.g. \"0:#2ecc71, 25:#f1c40f, 30:#e74c3c\"."
         },
         "default_color": {
           "type": "string",
-          "description": "css colour for an asset no breakpoint covers"
+          "description": "Colour for an asset with no reading in range."
         },
         "offline_color": {
           "type": "string",
-          "description": "css colour for an asset that has gone offline"
+          "description": "Colour for an asset agora stopped hearing from."
         }
       },
       "required": [
@@ -437,63 +407,93 @@
     "destructive": false
   },
   {
-    "name": "history.show_at",
-    "description": "Show the map as it was at an ISO 8601 moment",
+    "name": "project.list",
+    "description": "List the projects this account can open.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "reads": true,
+    "destructive": false
+  },
+  {
+    "name": "project.open",
+    "description": "Open a project, putting its saved map on screen.",
     "parameters": {
       "type": "object",
       "properties": {
-        "at": {
+        "project": {
           "type": "string",
-          "description": "ISO 8601 moment"
+          "description": "Project id or name."
         }
       },
       "required": [
-        "at"
+        "project"
       ]
     },
     "reads": false,
     "destructive": false
   },
   {
-    "name": "history.show_live",
-    "description": "Go back to the live map",
+    "name": "renderer.set",
+    "description": "Draw the map with the Cesium globe or with MapLibre, and optionally switch tab.",
     "parameters": {
       "type": "object",
-      "properties": {},
-      "required": []
+      "properties": {
+        "renderer": {
+          "type": "string",
+          "description": "cesium for the 3D globe, maplibre for the faster vector renderer",
+          "enum": [
+            "cesium",
+            "maplibre"
+          ]
+        },
+        "tab": {
+          "type": "string",
+          "description": "globe for the 3D view, map for the 2D view",
+          "enum": [
+            "globe",
+            "map"
+          ]
+        }
+      },
+      "required": [
+        "renderer"
+      ]
     },
     "reads": false,
     "destructive": false
   },
   {
     "name": "scenario.compare",
-    "description": "Compare two branches of a dataset, distance in metres",
+    "description": "Compare two branches of a dataset side by side, with the ground each one covers.",
     "parameters": {
       "type": "object",
       "properties": {
         "dataset": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "Dataset id or name."
         },
         "base_branch": {
           "type": "string",
-          "description": "branch to compare against"
+          "description": "Branch id or name to compare against."
         },
         "scenario_branch": {
           "type": "string",
-          "description": "branch holding the change"
+          "description": "Branch id or name being proposed."
         },
         "distance": {
           "type": "number",
-          "description": "how far apart two features may be and still pair, in metres"
+          "description": "How far a feature reaches, in metres. 50 by default."
         },
         "base_at": {
           "type": "string",
-          "description": "ISO 8601 moment for the base branch"
+          "description": "ISO 8601 moment to draw the base branch at."
         },
         "scenario_at": {
           "type": "string",
-          "description": "ISO 8601 moment for the scenario branch"
+          "description": "ISO 8601 moment to draw the scenario branch at."
         }
       },
       "required": [
@@ -507,7 +507,7 @@
   },
   {
     "name": "scenario.stop",
-    "description": "Stop comparing branches",
+    "description": "Stop the running comparison and take both branches off the map.",
     "parameters": {
       "type": "object",
       "properties": {},
@@ -517,25 +517,29 @@
     "destructive": false
   },
   {
-    "name": "find_feature",
-    "description": "Find a feature on the map by name or description",
+    "name": "split_view.set",
+    "description": "Show the map in one pane or in several side by side.",
     "parameters": {
       "type": "object",
       "properties": {
-        "query": {
-          "type": "string",
-          "description": "what the person called the feature"
+        "active": {
+          "type": "boolean",
+          "description": "true for several panes, false for one"
         },
-        "layer": {
+        "layout": {
           "type": "string",
-          "description": "id or name from the viewer state"
+          "description": "twoAcross for two panes, grid for four",
+          "enum": [
+            "twoAcross",
+            "grid"
+          ]
         }
       },
       "required": [
-        "query"
+        "active"
       ]
     },
-    "reads": true,
+    "reads": false,
     "destructive": false
   }
 ]
