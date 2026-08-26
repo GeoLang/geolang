@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 2026-08-26: `download_osm_data` fetches one named feature whole. `feature_name`
+  takes the feature's own geometry from Nominatim rather than searching an area,
+  so a river, motorway or canal arrives entire instead of cut off at whichever
+  place was searched. `data_type` picks between same-named hits, so "River
+  Thames" as `waterway=river` cannot land on a pub. `radius_m` sets the search
+  radius around a `lat,lon` place or a geocoded address, replacing the hardcoded
+  1000 m and 2000 m.
+
+### Fixed
+- 2026-08-26: `download_osm_data` no longer reports inflated feature counts for
+  a large place. osmnx splits an oversized area into overlapping Overpass
+  sub-queries and concatenates every response before indexing, so the same way
+  arrived up to five times: "South East England" reported 1872 river features
+  that were 468. Duplicate `(element, id)` entries are dropped, and the return
+  says when a query was subdivided, which was the difference between a fast call
+  and four silent minutes.
 - 2026-08-25: the viewer tells the model what it is looking at and what it can
   be told to do. `/chat/agui` reads the AG-UI `state` field, whose `viewer` half
   is the viewer's own snapshot and whose `actions` half is the catalogue of

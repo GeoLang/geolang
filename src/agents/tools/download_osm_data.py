@@ -2,14 +2,34 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from src.core.utils import tool_output_path
 
+NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_USER_AGENT = "geolang-gis-agent/1.0"
+
+DEFAULT_RADIUS_M = 1000
+# road networks need more reach than point features before the graph connects up
+DEFAULT_ROADS_RADIUS_M = 2000
+ADDRESS_FALLBACK_RADIUS_M = 2000
+
 
 class DownloadOSMDataArgs(BaseModel):
-    place_name: str = Field(
-        ...,
+    place_name: Optional[str] = Field(
+        None,
         description=(
             "Place to download data for. Use a neighbourhood or city for best results. "
             "For street addresses a 2km radius search is used automatically. "
-            "Examples: 'Marylebone, London', 'Islington, London', 'Manhattan, New York'."
+            "Examples: 'Marylebone, London', 'Islington, London', 'Manhattan, New York'. "
+            "Also accepts 'lat,lon'. Leave blank when using feature_name."
+        ),
+    )
+    feature_name: Optional[str] = Field(
+        None,
+        description=(
+            "Fetch one named OSM feature whole, ignoring any administrative boundary. "
+            "Use this for anything that crosses boundaries or that the user named "
+            "directly: 'River Thames', 'M25', 'Grand Union Canal', 'Pennine Way', "
+            "'Hyde Park'. A place_name query would cut such a feature off at the edge "
+            "of the place, so prefer feature_name whenever the user names the thing "
+            "itself rather than an area to search."
         ),
     )
     data_type: str = Field(
@@ -17,7 +37,16 @@ class DownloadOSMDataArgs(BaseModel):
         description=(
             "What to download. Common values: buildings, roads, schools, hospitals, "
             "parks, restaurants, shops, supermarkets, pharmacies, amenities, parking, "
-            "bus_stops. Or use OSM tag syntax like 'amenity=cafe' or 'shop=bakery'."
+            "bus_stops. Or use OSM tag syntax like 'amenity=cafe' or 'shop=bakery'. "
+            "With feature_name this only picks between same-named features."
+        ),
+    )
+    radius_m: Optional[int] = Field(
+        None,
+        description=(
+            "Search radius in metres around a 'lat,lon' place_name or a geocoded "
+            "address. Defaults to 1000 (2000 for roads). Ignored when place_name is "
+            "an area that geocodes to a boundary."
         ),
     )
     output_filename: Optional[str] = Field(
@@ -26,15 +55,78 @@ class DownloadOSMDataArgs(BaseModel):
     )
 
 
+def _named_feature_gdf(feature_name: str, tags: dict):
+    """Fetch one named OSM feature's own geometry from Nominatim.
+
+    Returns (GeoDataFrame, description) or (None, error message). The geometry is
+    the feature as OSM defines it, so a river arrives whole instead of clipped to
+    whichever place was searched.
+    """
+    import geopandas as gpd
+    import requests
+    from shapely.geometry import shape
+
+    resp = requests.get(
+        NOMINATIM_SEARCH_URL,
+        params={
+            "q": feature_name,
+            "format": "json",
+            "polygon_geojson": 1,
+            "limit": 10,
+        },
+        headers={"User-Agent": NOMINATIM_USER_AGENT},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    hits = [h for h in resp.json() if h.get("geojson")]
+    if not hits:
+        return None, f"No OSM feature named '{feature_name}' found."
+
+    # prefer a hit matching the requested tag, so "River Thames" as waterway=river
+    # cannot land on a pub or a footpath of the same name
+    key, value = next(iter(tags.items()), (None, None))
+    chosen = next(
+        (
+            h
+            for h in hits
+            if h.get("class") == key and (value is True or h.get("type") == value)
+        ),
+        hits[0],
+    )
+
+    gdf = gpd.GeoDataFrame(
+        [
+            {
+                "name": chosen.get("display_name", feature_name).split(",")[0],
+                "osm_type": chosen.get("osm_type"),
+                "osm_id": chosen.get("osm_id"),
+                "osm_class": chosen.get("class"),
+                "osm_value": chosen.get("type"),
+            }
+        ],
+        geometry=[shape(chosen["geojson"])],
+        crs="EPSG:4326",
+    ).explode(index_parts=False)
+
+    label = f"{chosen.get('osm_type')} {chosen.get('osm_id')}"
+    return gdf.reset_index(drop=True), label
+
+
 def download_osm_data(
-    place_name: str,
     data_type: str,
+    place_name: str = None,
+    feature_name: str = None,
+    radius_m: int = None,
     output_filename: str = None,
 ) -> str:
     """
     Download OpenStreetMap data for any place and save as GeoPackage.
     Returns the output path and feature count. Use this whenever the user asks
     for real-world data like buildings, roads, amenities, parks, or shops.
+
+    Pass feature_name instead of place_name to fetch one named feature whole. A
+    place_name search only returns what falls inside that place's boundary, so a
+    river or a motorway comes back cut off at the edge.
     """
     import traceback
 
@@ -78,30 +170,48 @@ def download_osm_data(
             # Try as an amenity value (e.g. "cafe", "gym")
             tags = {"amenity": dt}
 
-        # If place_name looks like "lat,lon" coordinates, use point-based download
-        import re as _re
+        named_feature_label = None
+        duplicates_dropped = 0
+        subdivided = False
 
-        _coord_m = _re.match(
-            r"^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$", place_name.strip()
-        )
-        if _coord_m:
-            _lat, _lon = float(_coord_m.group(1)), float(_coord_m.group(2))
-            place_name = f"{_lat},{_lon}"  # normalise for output filename
-            # Skip place-boundary attempt, go straight to point+radius
-            if dt == "roads":
-                G = ox.graph_from_point((_lat, _lon), dist=2000, network_type="all")
-                gdf = ox.graph_to_gdfs(G, nodes=False).reset_index(drop=True)
-            else:
-                gdf = ox.features_from_point((_lat, _lon), tags=tags, dist=1000)
-                if gdf.empty:
-                    return (
-                        f"No '{data_type}' features found within 1km of {place_name}."
-                    )
-                gdf = gdf.reset_index(drop=True)
-            # Jump to post-processing
-            _coord_download = True
+        if feature_name:
+            gdf, named_feature_label = _named_feature_gdf(feature_name, tags)
+            if gdf is None:
+                return named_feature_label
+            place_name = feature_name
+            _coord_download = True  # geometry already in hand, skip the area search
+        elif not place_name:
+            return "Give either place_name or feature_name."
         else:
-            _coord_download = False
+            # If place_name looks like "lat,lon" coordinates, use point-based download
+            import re as _re
+
+            _coord_m = _re.match(
+                r"^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$", place_name.strip()
+            )
+            if _coord_m:
+                _lat, _lon = float(_coord_m.group(1)), float(_coord_m.group(2))
+                place_name = f"{_lat},{_lon}"  # normalise for output filename
+                # Skip place-boundary attempt, go straight to point+radius
+                if dt == "roads":
+                    radius = radius_m or DEFAULT_ROADS_RADIUS_M
+                    G = ox.graph_from_point(
+                        (_lat, _lon), dist=radius, network_type="all"
+                    )
+                    gdf = ox.graph_to_gdfs(G, nodes=False).reset_index(drop=True)
+                else:
+                    radius = radius_m or DEFAULT_RADIUS_M
+                    gdf = ox.features_from_point((_lat, _lon), tags=tags, dist=radius)
+                    if gdf.empty:
+                        return (
+                            f"No '{data_type}' features found within "
+                            f"{radius}m of {place_name}."
+                        )
+                    gdf = gdf.reset_index(drop=True)
+                # Jump to post-processing
+                _coord_download = True
+            else:
+                _coord_download = False
 
         # Build output path
         if not output_filename:
@@ -117,22 +227,46 @@ def download_osm_data(
 
         # Download — try place boundary first, fall back to point+radius for addresses
         if not _coord_download:
-            if dt == "roads":
-                try:
-                    G = ox.graph_from_place(place_name, network_type="all")
-                except Exception:
-                    lat, lon = ox.geocode(place_name)
-                    G = ox.graph_from_point((lat, lon), dist=2000, network_type="all")
-                gdf = ox.graph_to_gdfs(G, nodes=False).reset_index(drop=True)
-            else:
-                try:
-                    gdf = ox.features_from_place(place_name, tags=tags)
-                except Exception:
-                    lat, lon = ox.geocode(place_name)
-                    gdf = ox.features_from_point((lat, lon), tags=tags, dist=2000)
-                if gdf.empty:
-                    return f"No '{data_type}' features found in {place_name}."
-                gdf = gdf.reset_index(drop=True)
+            import warnings
+
+            # osmnx splits an oversized area into sub-queries and says so only in a
+            # warning, which is the difference between a fast call and a slow one
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                if dt == "roads":
+                    try:
+                        G = ox.graph_from_place(place_name, network_type="all")
+                    except Exception:
+                        lat, lon = ox.geocode(place_name)
+                        G = ox.graph_from_point(
+                            (lat, lon),
+                            dist=radius_m or DEFAULT_ROADS_RADIUS_M,
+                            network_type="all",
+                        )
+                    gdf = ox.graph_to_gdfs(G, nodes=False).reset_index(drop=True)
+                else:
+                    try:
+                        gdf = ox.features_from_place(place_name, tags=tags)
+                    except Exception:
+                        lat, lon = ox.geocode(place_name)
+                        gdf = ox.features_from_point(
+                            (lat, lon),
+                            tags=tags,
+                            dist=radius_m or ADDRESS_FALLBACK_RADIUS_M,
+                        )
+                    if gdf.empty:
+                        return f"No '{data_type}' features found in {place_name}."
+                    # sub-queries overlap, so the same way comes back once per tile
+                    before = len(gdf)
+                    gdf = gdf[~gdf.index.duplicated()]
+                    duplicates_dropped = before - len(gdf)
+                    gdf = gdf.reset_index(drop=True)
+
+            subdivided = any("sub-queries" in str(w.message) for w in caught)
+            for w in caught:
+                warnings.warn_explicit(
+                    w.message, w.category, w.filename, w.lineno
+                )
 
         if gdf.empty:
             return f"No '{data_type}' features found in {place_name}."
@@ -203,11 +337,40 @@ def download_osm_data(
             gdf[keep].to_file(output_path, driver="GPKG")
 
         useful_cols = [c for c in gdf.columns if c not in ("geometry",)][:8]
-        return (
-            f"Downloaded {len(gdf)} {data_type} features ({dominant}) for {place_name}. "
-            f"Saved to outputs/{output_filename}.gpkg. "
-            f"Key columns: {', '.join(useful_cols)}"
+        source = (
+            f"{place_name} (OSM {named_feature_label}, whole feature)"
+            if named_feature_label
+            else place_name
         )
+        parts = [
+            f"Downloaded {len(gdf)} {data_type} features ({dominant}) for {source}.",
+            f"Saved to outputs/{output_filename}.gpkg.",
+        ]
+
+        # length tells the caller at a glance whether they got the whole feature or
+        # a piece of it, which a feature count cannot
+        if "Line" in dominant:
+            from pyproj import Geod
+
+            length_km = (
+                sum(Geod(ellps="WGS84").geometry_length(g) for g in gdf.geometry) / 1000
+            )
+            parts.append(f"Total length: {length_km:,.1f} km.")
+
+        if duplicates_dropped:
+            parts.append(
+                f"Dropped {duplicates_dropped} duplicate features returned by "
+                "overlapping sub-queries."
+            )
+        if subdivided:
+            parts.append(
+                f"'{place_name}' exceeds the Overpass max query area, so it ran as "
+                "several sub-queries and was slow. The response is cached, so the "
+                "same request again will be fast. To fetch one named feature whole, "
+                "use feature_name instead."
+            )
+        parts.append(f"Key columns: {', '.join(useful_cols)}")
+        return " ".join(parts)
 
     except Exception as e:
         return f"OSM download failed: {str(e)}\n{traceback.format_exc()}"
