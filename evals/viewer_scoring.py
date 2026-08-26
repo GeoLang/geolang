@@ -103,17 +103,35 @@ def call_action(call: dict) -> str:
     return str(call.get("action") or "")
 
 
+# the fields of a run call that are not the run's own parameters
+RUN_CALL_FIELDS = {"action", "name", "args", "url"}
+
+
+def _object_text(value) -> dict:
+    """`value` decoded as an object, or {} when it is not one."""
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def call_arguments(call: dict) -> dict:
-    """The arguments the call carries, wherever this action puts them."""
+    """The arguments the call carries, wherever this action puts them.
+
+    A run's parameters come as plain fields of the call, or as JSON text in
+    `args`, or in `url`, which is where one model writes the object. The tool
+    accepts all three, so the scorer reads all three.
+    """
     if call_action(call) != RUN_ACTION:
         return {k: v for k, v in call.items() if k != "action"}
-    args = call.get("args")
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except json.JSONDecodeError:
-            return {}
-    return args if isinstance(args, dict) else {}
+    written = _object_text(call.get("args")) or _object_text(call.get("url"))
+    flat = {k: v for k, v in call.items() if k not in RUN_CALL_FIELDS}
+    return {**written, **flat}
 
 
 def call_target(call: dict) -> str:

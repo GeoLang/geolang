@@ -128,6 +128,25 @@ def test_arguments_written_as_json_text_reach_the_viewer_as_an_object():
     }
 
 
+def test_run_parameters_given_as_plain_fields_reach_the_viewer():
+    assert _run_command(name="layers.set_visible", layer="Parcels", visible=False) == {
+        "action": "run",
+        "params": {"name": "layers.set_visible", "args": {"layer": "Parcels", "visible": False}},
+    }
+
+
+def test_run_parameters_written_into_url_are_taken_as_the_arguments():
+    """grok writes the object into url, whatever the schema says."""
+    assert _run_command(name="basemap.set", url='{"basemap": "satellite"}') == {
+        "action": "run",
+        "params": {"name": "basemap.set", "args": {"basemap": "satellite"}},
+    }
+
+
+def test_the_manifest_admits_fields_it_does_not_list():
+    assert ViewerControlArgs.model_json_schema()["additionalProperties"] is True
+
+
 def test_the_manifest_advertises_args_as_text():
     """A bare object schema with no properties is one a model leaves empty."""
     assert ViewerControlArgs.model_json_schema()["properties"]["args"]["anyOf"] == [

@@ -111,6 +111,18 @@ def test_arguments_sent_as_json_text_still_score():
     assert score_calls(HIDE_PARCELS, [call], SNAPSHOT).score == 1.0
 
 
+def test_arguments_sent_as_plain_fields_score():
+    call = {"action": "run", "name": "layers.set_visible", "layer": "Parcels", "visible": False}
+
+    assert score_calls(HIDE_PARCELS, [call], SNAPSHOT).score == 1.0
+
+
+def test_arguments_written_into_url_score():
+    call = {"action": "run", "name": "layers.set_visible", "url": '{"layer": "Parcels", "visible": false}'}
+
+    assert score_calls(HIDE_PARCELS, [call], SNAPSHOT).score == 1.0
+
+
 def test_a_string_that_is_not_an_object_leaves_the_arguments_empty():
     call = {"action": "run", "name": "layers.set_visible", "args": "Parcels"}
 

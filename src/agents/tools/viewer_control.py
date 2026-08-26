@@ -16,7 +16,7 @@ import json
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ViewerAction = Literal[
     "run",
@@ -77,12 +77,17 @@ ALLOWED_URL_SCHEMES = {"http", "https"}
 
 
 class ViewerControlArgs(BaseModel):
+    # a run's parameters arrive as plain fields of the call, whatever the
+    # catalogue entry names them, so the schema has to admit fields not listed here
+    model_config = ConfigDict(extra="allow")
+
     action: ViewerAction = Field(
         ...,
         description=(
             "Viewer action to perform. Common ones: "
-            "'run' (requires name, and args for that action's parameters): runs "
-            "one of the actions listed under 'Viewer actions' in the system prompt, "
+            "'run' (requires name, plus that action's own parameters as further "
+            "fields of this call): runs one of the actions listed under 'Viewer "
+            "actions' in the system prompt, "
             "'fly_to' (requires lon, lat), "
             "'set_view' (lon, lat, heading, pitch), "
             "'add_marker' (lon, lat, label, color), "
@@ -116,8 +121,9 @@ class ViewerControlArgs(BaseModel):
     args: Optional[str] = Field(
         None,
         description=(
-            "For action='run': JSON text of an object holding that action's "
-            "parameters, e.g. '{\"layer\": \"Parcels\", \"visible\": false}'"
+            "For action='run', only when the parameters cannot be given as fields "
+            "of this call: JSON text of an object holding them, e.g. "
+            "'{\"layer\": \"Parcels\", \"visible\": false}'"
         ),
     )
 
@@ -137,6 +143,20 @@ class ViewerControlArgs(BaseModel):
         if not isinstance(decoded, dict):
             raise ValueError("args must be JSON text holding an object")
         return value
+
+    @model_validator(mode="after")
+    def take_run_arguments_written_into_url(self):
+        # grok writes the run's argument object into url, whatever the schema says
+        if self.action != "run" or self.args is not None or self.url is None:
+            return self
+        try:
+            decoded = json.loads(self.url)
+        except json.JSONDecodeError:
+            return self
+        if isinstance(decoded, dict):
+            self.args = self.url
+            self.url = None
+        return self
 
     @model_validator(mode="after")
     def check_action_is_usable(self):
@@ -167,6 +187,7 @@ def viewer_control(
     iso: str = None,
     name: str = None,
     args: str = None,
+    **parameters,
 ) -> str:
     """Control the TileTopia 3D viewer. Use this to fly the camera to a location,
     add markers, load tilesets, apply point cloud classification colours, etc.
@@ -174,11 +195,12 @@ def viewer_control(
     After geocoding a place, call this with action='fly_to' and the coordinates.
     To change anything else about the viewer, call this with action='run', name set
     to one of the actions listed under 'Viewer actions' in the system prompt, and
-    args the JSON text of an object holding that action's parameters as that
-    entry spells them."""
+    that action's parameters as further fields of the same call, spelled as the
+    entry spells them, e.g. action='run', name='layers.set_visible',
+    layer='Parcels', visible=false."""
     if action == "run":
         decoded = json.loads(args) if args else {}
-        command = {"action": "run", "params": {"name": name, "args": decoded}}
+        command = {"action": "run", "params": {"name": name, "args": {**decoded, **parameters}}}
         return f"__VIEWER_CMD__:{json.dumps(command)}"
 
     params = {}
