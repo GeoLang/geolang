@@ -6,6 +6,44 @@ from src.core.utils import tool_input_path, tool_output_path
 LOW_BAND_M = 5.0  # same bands query_elevation uses: below 5m high, below 10m moderate
 MID_BAND_M = 10.0
 
+OVERPASS_TIMEOUT_S = 90
+
+# every OSM layer the score reads, fetched in one query and split by tag after
+OSM_LAYERS = {
+    "water": {"natural": ["water", "coastline"]},
+    "green": {
+        "landuse": ["grass", "forest", "meadow", "recreation_ground"],
+        "leisure": ["park", "garden", "nature_reserve"],
+    },
+    "industrial": {"landuse": ["industrial"]},
+    "roads": {"highway": ["motorway", "trunk", "primary"]},
+}
+
+
+def merged_tags(layers):
+    merged = {}
+    for tags in layers.values():
+        for key, values in tags.items():
+            known = merged.setdefault(key, [])
+            known.extend(value for value in values if value not in known)
+    return merged
+
+
+OSM_TAGS = merged_tags(OSM_LAYERS)
+
+
+def tagged_rows(features, tags):
+    """The rows carrying any of these tag values, an absent column matches none."""
+    mask = None
+    for key, values in tags.items():
+        if key not in features.columns:
+            continue
+        hit = features[key].isin(values)
+        mask = hit if mask is None else (mask | hit)
+    if mask is None:
+        return features.iloc[0:0]
+    return features[mask]
+
 
 def flood_score_from(elevations, water_dist_m=None):
     """
@@ -221,52 +259,48 @@ def assess_environmental_risk(
             else None
         )
 
-        # 2. Water body proximity (rivers, lakes, coastline)
-        water_count = 0
-        water_dist_m = None
+        # 2 to 5. one Overpass round trip for every layer: four queries on a
+        # dense city took minutes and tripped the rate limit between them
+        osm_layers = {}
         try:
-            water = ox.features_from_point(
-                (lat, lon),
-                tags={"natural": ["water", "coastline"]},
-                dist=radius_km * 1000,
-            )
-            water_count = len(water)
-            if water_count > 0:
-                water_proj = water.to_crs("EPSG:3857")
-                center_proj = (
-                    gpd.GeoDataFrame(geometry=[center], crs="EPSG:4326")
-                    .to_crs("EPSG:3857")
-                    .geometry.iloc[0]
-                )
-                water_dist_m = round(water_proj.distance(center_proj).min(), 0)
+            ox.settings.requests_timeout = OVERPASS_TIMEOUT_S
+            features = ox.features_from_point(
+                (lat, lon), tags=OSM_TAGS, dist=radius_km * 1000
+            ).to_crs("EPSG:3857")
+            osm_layers = {
+                name: tagged_rows(features, tags) for name, tags in OSM_LAYERS.items()
+            }
         except Exception as e:
-            warnings.append(f"water bodies (OSM: {e})")
+            warnings.append(f"OSM layers (Overpass: {e})")
+        center_proj = (
+            gpd.GeoDataFrame(geometry=[center], crs="EPSG:4326")
+            .to_crs("EPSG:3857")
+            .geometry.iloc[0]
+        )
+
+        def layer_count(name):
+            layer = osm_layers.get(name)
+            return 0 if layer is None else len(layer)
+
+        def nearest_m(name):
+            if layer_count(name) == 0:
+                return None
+            return round(osm_layers[name].distance(center_proj).min(), 0)
+
+        water_count = layer_count("water")
+        water_dist_m = nearest_m("water")
 
         # scored here, not with the samples, because it needs the water distance
         flood_score, flood_label = flood_score_from(elevations, water_dist_m)
 
         # 3. Green space coverage
         green_area_pct = 0.0
-        green_count = 0
-        try:
-            greens = ox.features_from_point(
-                (lat, lon),
-                tags={
-                    "landuse": ["grass", "forest", "meadow", "recreation_ground"],
-                    "leisure": ["park", "garden", "nature_reserve"],
-                },
-                dist=radius_km * 1000,
-            )
-            green_count = len(greens)
-            if green_count > 0:
-                greens_proj = greens.to_crs("EPSG:3857")
-                area_proj = area_gdf.to_crs("EPSG:3857")
-                green_total = greens_proj.geometry.area.sum()
-                area_total = area_proj.geometry.area.sum()
-                if area_total > 0:
-                    green_area_pct = round((green_total / area_total) * 100, 1)
-        except Exception as e:
-            warnings.append(f"green space (OSM: {e})")
+        green_count = layer_count("green")
+        if green_count > 0:
+            green_total = osm_layers["green"].geometry.area.sum()
+            area_total = area_gdf.to_crs("EPSG:3857").geometry.area.sum()
+            if area_total > 0:
+                green_area_pct = round((green_total / area_total) * 100, 1)
 
         # Green score (0-10, 10=best)
         if green_area_pct >= 30:
@@ -283,23 +317,8 @@ def assess_environmental_risk(
             green_label = "LOW"
 
         # 4. Industrial proximity
-        industrial_count = 0
-        industrial_dist_m = None
-        try:
-            industrial = ox.features_from_point(
-                (lat, lon), tags={"landuse": "industrial"}, dist=radius_km * 1000
-            )
-            industrial_count = len(industrial)
-            if industrial_count > 0:
-                ind_proj = industrial.to_crs("EPSG:3857")
-                center_proj = (
-                    gpd.GeoDataFrame(geometry=[center], crs="EPSG:4326")
-                    .to_crs("EPSG:3857")
-                    .geometry.iloc[0]
-                )
-                industrial_dist_m = round(ind_proj.distance(center_proj).min(), 0)
-        except Exception as e:
-            warnings.append(f"industrial sites (OSM: {e})")
+        industrial_count = layer_count("industrial")
+        industrial_dist_m = nearest_m("industrial")
 
         # Pollution score (0-10, 10=worst)
         if industrial_dist_m is not None and industrial_dist_m < 200:
@@ -316,23 +335,7 @@ def assess_environmental_risk(
             pollution_label = "LOW"
 
         # 5. Major road proximity (noise proxy)
-        road_dist_m = None
-        try:
-            roads = ox.features_from_point(
-                (lat, lon),
-                tags={"highway": ["motorway", "trunk", "primary"]},
-                dist=radius_km * 1000,
-            )
-            if len(roads) > 0:
-                roads_proj = roads.to_crs("EPSG:3857")
-                center_proj = (
-                    gpd.GeoDataFrame(geometry=[center], crs="EPSG:4326")
-                    .to_crs("EPSG:3857")
-                    .geometry.iloc[0]
-                )
-                road_dist_m = round(roads_proj.distance(center_proj).min(), 0)
-        except Exception as e:
-            warnings.append(f"major roads (OSM: {e})")
+        road_dist_m = nearest_m("roads")
 
         # Noise score (0-10, 10=worst)
         if road_dist_m is not None and road_dist_m < 50:

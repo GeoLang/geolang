@@ -96,6 +96,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanup and any client reading announcements missed its files.
 
 ### Changed
+- 2026-08-26: `assess_environmental_risk` fetches its water, green space,
+  industrial and major road layers in one Overpass query instead of four, split
+  by tag afterwards, with the request capped at 90 s. Four queries over Paris
+  at 5 km took 3.5 minutes and read as a hung chat, one takes about 30 s. A
+  failed query names "OSM layers" once in the tool's warnings.
 - 2026-08-26: sibyl's model config moves to two variable pairs.
   `SIBYL_CLOUD_API_KEY`, `SIBYL_CLOUD_API_BASE` and `SIBYL_CLOUD_MODELS` name
   the cloud models, `SIBYL_LOCAL_API_BASE` and `SIBYL_LOCAL_MODELS` add local
