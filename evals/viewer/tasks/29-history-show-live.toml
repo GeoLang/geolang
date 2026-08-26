@@ -1,0 +1,7 @@
+id = "history-show-live"
+prompt = "bring me back to the live map"
+notes = "No arguments, and it must not be confused with live.join."
+
+[expect]
+action = "run"
+name = "history.show_live"

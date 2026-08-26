@@ -1,0 +1,8 @@
+id = "split-view-on"
+prompt = "open the side by side view"
+notes = "Boolean parameter with no other argument."
+
+[expect]
+action = "run"
+name = "split_view.set"
+args = { active = true }

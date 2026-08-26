@@ -1,0 +1,8 @@
+id = "layers-show-flood-zones"
+prompt = "I want to see the flood zones"
+notes = "A two word layer name, and visible has to be true rather than false."
+
+[expect]
+action = "run"
+name = "layers.set_visible"
+args = { layer = "Flood zones", visible = true }

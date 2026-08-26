@@ -1,0 +1,8 @@
+id = "scenario-compare-branches"
+prompt = "compare the widening branch of the road network against main"
+notes = "Which branch is the base and which is the scenario has to come out right."
+
+[expect]
+action = "run"
+name = "scenario.compare"
+args = { dataset = "Road Network", base_branch = "main", scenario_branch = "widening" }

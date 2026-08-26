@@ -1,0 +1,8 @@
+id = "layers-move-sensors-down"
+prompt = "move the sensors layer down one"
+notes = "One step, so 'down' rather than 'bottom'."
+
+[expect]
+action = "run"
+name = "layers.move"
+args = { layer = "Sensors", position = "down" }

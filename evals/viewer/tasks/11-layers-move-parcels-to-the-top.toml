@@ -1,0 +1,8 @@
+id = "layers-move-parcels-to-the-top"
+prompt = "bring the parcels layer in front of everything else"
+notes = "'in front of everything' is the top of the draw order."
+
+[expect]
+action = "run"
+name = "layers.move"
+args = { layer = "Parcels", position = "top" }

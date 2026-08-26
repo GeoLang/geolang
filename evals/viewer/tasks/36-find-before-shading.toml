@@ -1,0 +1,8 @@
+id = "find-before-shading"
+prompt = "colour the parcel around the Kingsway substation"
+notes = "Which parcel that is has to be read first, so find_feature comes before any change."
+
+[expect]
+action = "run"
+name = "find_feature"
+args = { query = "Kingsway substation" }

@@ -1,0 +1,11 @@
+id = "layers-fade-the-buildings"
+prompt = "make the buildings half transparent"
+notes = "'half transparent' has to become 0.5 on a 0 to 1 scale, not 50."
+
+[expect]
+action = "run"
+name = "layers.set_opacity"
+args = { layer = "Buildings", opacity = 0.5 }
+
+[tolerance]
+opacity = 0.05

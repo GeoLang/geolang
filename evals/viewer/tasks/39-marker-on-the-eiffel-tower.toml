@@ -1,0 +1,11 @@
+id = "marker-on-the-eiffel-tower"
+prompt = "put a marker on the Eiffel Tower"
+notes = "Geocode first, then the fixed add_marker."
+
+[expect]
+action = "add_marker"
+args = { lon = 2.2945, lat = 48.8584 }
+
+[tolerance]
+lon = 0.05
+lat = 0.05

@@ -1,0 +1,7 @@
+id = "scenario-stop"
+prompt = "stop comparing the branches"
+notes = "Ending the comparison, not leaving the document."
+
+[expect]
+action = "run"
+name = "scenario.stop"

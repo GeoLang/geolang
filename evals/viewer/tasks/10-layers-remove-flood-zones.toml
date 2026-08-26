@@ -1,0 +1,8 @@
+id = "layers-remove-flood-zones"
+prompt = "take the flood zones off the map entirely"
+notes = "Removing rather than hiding: the prompt says off the map."
+
+[expect]
+action = "run"
+name = "layers.remove"
+args = { layer = "Flood zones" }

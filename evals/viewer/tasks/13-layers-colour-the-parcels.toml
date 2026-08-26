@@ -1,0 +1,8 @@
+id = "layers-colour-the-parcels"
+prompt = "colour the parcels layer #ff0000"
+notes = "The colour is given exactly so the check does not depend on a colour name."
+
+[expect]
+action = "run"
+name = "layers.set_color"
+args = { layer = "Parcels", color = "#ff0000" }

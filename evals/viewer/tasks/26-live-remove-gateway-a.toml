@@ -1,0 +1,8 @@
+id = "live-remove-gateway-a"
+prompt = "get rid of the Gateway A feed"
+notes = "The feed is named in the live document in the viewer state."
+
+[expect]
+action = "run"
+name = "live.remove_feed"
+args = { feed = "Gateway A" }

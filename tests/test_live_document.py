@@ -1022,6 +1022,19 @@ def test_a_command_that_does_not_move_the_camera_is_ignored(caller, monkeypatch)
     assert fake.received == []
 
 
+def test_an_action_from_the_viewers_own_catalogue_is_ignored(caller, monkeypatch):
+    """`run` names an action only the viewer knows, so nothing here reads it."""
+    fake = FakeAgora()
+    command = viewer_command(
+        "run", name="camera.fly_to", args={"lon": 2.35, "lat": 48.85}
+    )
+
+    note = publish(fake, command, monkeypatch, token=caller)
+
+    assert note is None
+    assert fake.received == []
+
+
 def test_the_height_to_zoom_curve_is_the_viewers():
     assert live_document.height_to_zoom(1000) == 16
     assert live_document.height_to_zoom(5000) == 14

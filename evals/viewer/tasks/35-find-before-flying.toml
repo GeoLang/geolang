@@ -1,0 +1,8 @@
+id = "find-before-flying"
+prompt = "fly to the old brewery"
+notes = "The camera needs coordinates the viewer state does not have, so the read comes first."
+
+[expect]
+action = "run"
+name = "find_feature"
+args = { query = "old brewery" }

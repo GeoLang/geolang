@@ -1,0 +1,11 @@
+id = "marker-on-the-picked-feature"
+prompt = "drop a marker on the feature I have picked"
+notes = "The coordinates are in the viewer state, so nothing has to be looked up."
+
+[expect]
+action = "add_marker"
+args = { lon = -0.1291, lat = 51.5085 }
+
+[tolerance]
+lon = 0.0005
+lat = 0.0005

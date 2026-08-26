@@ -1,0 +1,8 @@
+id = "find-the-kingsway-substation"
+prompt = "where is the Kingsway substation?"
+notes = "Nothing in the viewer state locates it, so find_feature is the first call."
+
+[expect]
+action = "run"
+name = "find_feature"
+args = { query = "Kingsway substation" }

@@ -1,0 +1,11 @@
+id = "live-create-feed"
+prompt = "start a live feed called Depot B that polls every 60 seconds"
+notes = "Two required arguments, one of them a number in seconds."
+
+[expect]
+action = "run"
+name = "live.create_feed"
+args = { name = "Depot B", interval_seconds = 60.0 }
+
+[tolerance]
+interval_seconds = 0.5

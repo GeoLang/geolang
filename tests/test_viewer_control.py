@@ -84,3 +84,52 @@ def test_the_command_carries_the_action_and_parameters_through():
         "action": "load_tileset",
         "params": {"url": "https://example.com/t.json"},
     }
+
+
+# ── the open action, whose name comes from the viewer's own catalogue ─────
+
+
+def _run_command(**fields) -> dict:
+    args = ViewerControlArgs(action="run", **fields)
+    _, _, payload = viewer_control(**args.model_dump(exclude_unset=True)).partition(":")
+    return json.loads(payload)
+
+
+def test_run_without_a_name_is_refused():
+    with pytest.raises(ValidationError) as raised:
+        ViewerControlArgs(action="run", args={"layer": "Parcels"})
+
+    assert "name" in str(raised.value)
+
+
+def test_run_carries_the_catalogue_name_and_its_arguments():
+    assert _run_command(
+        name="layers.set_visible", args={"layer": "Parcels", "visible": False}
+    ) == {
+        "action": "run",
+        "params": {
+            "name": "layers.set_visible",
+            "args": {"layer": "Parcels", "visible": False},
+        },
+    }
+
+
+def test_run_without_arguments_sends_an_empty_object():
+    assert _run_command(name="live.leave") == {
+        "action": "run",
+        "params": {"name": "live.leave", "args": {}},
+    }
+
+
+def test_arguments_written_as_json_text_decode_to_an_object():
+    args = ViewerControlArgs(
+        action="run", name="layers.set_opacity", args='{"layer": "L1", "opacity": 0.4}'
+    )
+
+    assert args.args == {"layer": "L1", "opacity": 0.4}
+
+
+@pytest.mark.parametrize("text", ['["Parcels", false]', '"Parcels"', "Parcels", "42"])
+def test_arguments_that_are_not_an_object_are_refused(text):
+    with pytest.raises(ValidationError):
+        ViewerControlArgs(action="run", name="layers.set_visible", args=text)

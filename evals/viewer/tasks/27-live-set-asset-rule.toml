@@ -1,0 +1,8 @@
+id = "live-set-asset-rule"
+prompt = "colour the sensors layer by water_level with breakpoints 0.5:#2c7fb8,1.5:#f03b20"
+notes = "The breakpoint string is given verbatim so its format is not guessed."
+
+[expect]
+action = "run"
+name = "live.set_asset_rule"
+args = { layer = "Sensors", kind = "water_level", breakpoints = "0.5:#2c7fb8,1.5:#f03b20" }

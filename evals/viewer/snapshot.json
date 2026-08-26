@@ -1,0 +1,87 @@
+{
+  "mode": "chat",
+  "renderer": "cesium",
+  "tab": "globe",
+  "basemap": "osm",
+  "camera": {
+    "lon": -0.1276,
+    "lat": 51.5072,
+    "height": 4000,
+    "heading": 0,
+    "pitch": -45
+  },
+  "layers": [
+    {
+      "id": "lyr_parcels",
+      "name": "Parcels",
+      "kind": "vector",
+      "visible": true,
+      "opacity": 1
+    },
+    {
+      "id": "lyr_flood",
+      "name": "Flood zones",
+      "kind": "vector",
+      "visible": false,
+      "opacity": 0.6
+    },
+    {
+      "id": "lyr_buildings",
+      "name": "Buildings",
+      "kind": "3dtiles",
+      "visible": true,
+      "opacity": 1
+    },
+    {
+      "id": "lyr_sensors",
+      "name": "Sensors",
+      "kind": "assets",
+      "visible": true,
+      "opacity": 1
+    }
+  ],
+  "project": {
+    "id": "prj_riverside",
+    "name": "Riverside Widening"
+  },
+  "dataset": {
+    "id": "ds_network",
+    "name": "Road Network",
+    "branch": "main",
+    "branches": [
+      "main",
+      "widening"
+    ]
+  },
+  "liveDocument": {
+    "id": "doc_riverside",
+    "name": "Riverside Live",
+    "feeds": [
+      {
+        "id": "feed_gateway_a",
+        "name": "Gateway A",
+        "interval_seconds": 30
+      }
+    ]
+  },
+  "assetRule": {
+    "layer": "lyr_sensors",
+    "kind": "water_level",
+    "breakpoints": "0.5:#2c7fb8,1.5:#f03b20",
+    "defaultColor": "#999999",
+    "offlineColor": "#444444"
+  },
+  "splitView": {
+    "active": false,
+    "layout": "vertical"
+  },
+  "historyAt": null,
+  "scenario": null,
+  "pickedFeature": {
+    "id": "P-1183",
+    "name": "12 Mill Lane",
+    "layer": "lyr_parcels",
+    "lon": -0.1291,
+    "lat": 51.5085
+  }
+}

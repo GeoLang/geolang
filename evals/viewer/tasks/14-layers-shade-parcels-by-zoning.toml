@@ -1,0 +1,8 @@
+id = "layers-shade-parcels-by-zoning"
+prompt = "shade the parcels by their zoning column"
+notes = "Shading by a column, not setting one flat colour."
+
+[expect]
+action = "run"
+name = "layers.shade_by"
+args = { layer = "Parcels", column = "zoning" }

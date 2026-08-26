@@ -1,0 +1,8 @@
+id = "renderer-back-to-the-globe"
+prompt = "put me back on the 3d globe"
+notes = "The other end of the same enum."
+
+[expect]
+action = "run"
+name = "renderer.set"
+args = { renderer = "cesium" }

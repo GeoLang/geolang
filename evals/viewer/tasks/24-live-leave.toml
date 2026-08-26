@@ -1,0 +1,7 @@
+id = "live-leave"
+prompt = "leave the live document"
+notes = "Destructive, so the viewer asks first. The model calls it the same way."
+
+[expect]
+action = "run"
+name = "live.leave"

@@ -1,0 +1,8 @@
+id = "live-join-riverside"
+prompt = "join the riverside live document"
+notes = "The document id in the viewer state is an equally correct answer."
+
+[expect]
+action = "run"
+name = "live.join"
+args = { document = "Riverside Live" }

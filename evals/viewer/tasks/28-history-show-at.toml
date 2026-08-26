@@ -1,0 +1,8 @@
+id = "history-show-at"
+prompt = "show me the map as it was at 2026-05-01T12:00:00Z"
+notes = "Time travel, not a dataset branch."
+
+[expect]
+action = "run"
+name = "history.show_at"
+args = { at = "2026-05-01T12:00:00Z" }

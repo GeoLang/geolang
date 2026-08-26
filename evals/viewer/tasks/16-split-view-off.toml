@@ -1,0 +1,8 @@
+id = "split-view-off"
+prompt = "close the split view again"
+notes = "The same action with the boolean the other way round."
+
+[expect]
+action = "run"
+name = "split_view.set"
+args = { active = false }

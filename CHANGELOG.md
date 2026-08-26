@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 2026-08-25: the viewer tells the model what it is looking at and what it can
+  be told to do. `/chat/agui` reads the AG-UI `state` field, whose `viewer` half
+  is the viewer's own snapshot and whose `actions` half is the catalogue of
+  named actions it can run, and `src/api/viewer_state.py` renders both into the
+  run's system prompt. `viewer_control` gains `run`, which carries a catalogue
+  name and its arguments back as
+  `{"action": "run", "params": {"name": ..., "args": {...}}}`, and accepts
+  `args` written as JSON text because small local models send it that way. A
+  request with no catalogue sends the persona unchanged. `evals/viewer/` holds
+  40 golden tasks over a fixture snapshot and catalogue, scored by
+  `python -m evals.viewer_runner`.
 - 2026-08-25: a chat question reaches the map it was asked from. `/chat/agui`
   binds the `X-Agora-Document` header for the length of the stream and the run
   request sends the bound document to sibyl, which puts it back on every tool

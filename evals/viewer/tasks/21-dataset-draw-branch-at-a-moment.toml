@@ -1,0 +1,8 @@
+id = "dataset-draw-branch-at-a-moment"
+prompt = "draw the road network main branch as it stood at 2026-06-01T00:00:00Z"
+notes = "The moment is given in ISO 8601 and has to survive unchanged."
+
+[expect]
+action = "run"
+name = "dataset.draw_branch"
+args = { dataset = "Road Network", branch = "main", at = "2026-06-01T00:00:00Z" }

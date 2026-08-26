@@ -1,0 +1,7 @@
+id = "project-list"
+prompt = "what projects can I open?"
+notes = "A read action: the answer comes back as the next user message."
+
+[expect]
+action = "run"
+name = "project.list"

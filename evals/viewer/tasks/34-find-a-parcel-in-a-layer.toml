@@ -1,0 +1,8 @@
+id = "find-a-parcel-in-a-layer"
+prompt = "find the parcel called Ferry Wharf in the parcels layer"
+notes = "The layer narrows the search and is in the viewer state."
+
+[expect]
+action = "run"
+name = "find_feature"
+args = { query = "Ferry Wharf", layer = "Parcels" }

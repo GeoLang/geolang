@@ -24,7 +24,7 @@ SIBYL = os.environ.get("NL_EVAL_SIBYL", "http://localhost:8090")
 RUN_READ_TIMEOUT = 300.0
 
 
-def _up(url: str) -> bool:
+def service_up(url: str) -> bool:
     try:
         return httpx.get(url, timeout=3).status_code == 200
     except Exception:
@@ -62,9 +62,9 @@ def geodukt_reachable() -> str:
 
 def stack_skip_reason(allow_cloud: bool) -> str:
     """Why the stack cannot be evaluated, or "" when it can."""
-    if not _up(f"{GEOLANG}/tools"):
+    if not service_up(f"{GEOLANG}/tools"):
         return f"geolang api not up at {GEOLANG}"
-    if not _up(f"{SIBYL}/health"):
+    if not service_up(f"{SIBYL}/health"):
         return f"sibyl not up at {SIBYL}"
     profile, _ = active_profile()
     if profile == "cloud" and not allow_cloud:
@@ -219,12 +219,12 @@ def score_from_directory(tasks: list, directory: Path) -> list:
     return results
 
 
-def markdown_report(meta: dict, results: list, tasks: list) -> str:
+def markdown_report(meta: dict, results: list, tasks: list, title="Workflow eval") -> str:
     by_id = {t.id: t for t in tasks}
     repeated = meta["aggregate"].get("runs_per_task", 1) > 1
     flaky = meta["aggregate"].get("flaky") or []
     lines = [
-        f"# Workflow eval: {meta['profile']} / {meta['model'] or 'unknown model'}",
+        f"# {title}: {meta['profile']} / {meta['model'] or 'unknown model'}",
         "",
         f"{meta['mode']} mode, {meta['generated_at']}",
         "",

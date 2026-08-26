@@ -1,0 +1,11 @@
+id = "fly-to-paris"
+prompt = "fly to Paris"
+notes = "A place name, so geocode_place then the fixed fly_to with its coordinates."
+
+[expect]
+action = "fly_to"
+args = { lon = 2.35, lat = 48.85 }
+
+[tolerance]
+lon = 0.5
+lat = 0.5

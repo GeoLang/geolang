@@ -1,0 +1,11 @@
+id = "scenario-compare-within-25-metres"
+prompt = "compare road network main with widening, pairing features within 25 metres"
+notes = "The optional distance is in metres and must not be converted."
+
+[expect]
+action = "run"
+name = "scenario.compare"
+args = { dataset = "Road Network", base_branch = "main", scenario_branch = "widening", distance = 25.0 }
+
+[tolerance]
+distance = 0.5

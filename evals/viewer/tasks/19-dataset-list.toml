@@ -1,0 +1,7 @@
+id = "dataset-list"
+prompt = "which datasets have versions I can look at?"
+notes = "A read action that takes no arguments."
+
+[expect]
+action = "run"
+name = "dataset.list"

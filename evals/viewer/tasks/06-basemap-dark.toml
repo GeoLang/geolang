@@ -1,0 +1,8 @@
+id = "basemap-dark"
+prompt = "the basemap is too bright, give me the dark one"
+notes = "Catches a model that invents a basemap name outside the enum."
+
+[expect]
+action = "run"
+name = "basemap.set"
+args = { basemap = "dark" }

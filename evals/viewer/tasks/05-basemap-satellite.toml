@@ -1,0 +1,8 @@
+id = "basemap-satellite"
+prompt = "show the satellite imagery underneath"
+notes = "Plainest possible enum choice."
+
+[expect]
+action = "run"
+name = "basemap.set"
+args = { basemap = "satellite" }

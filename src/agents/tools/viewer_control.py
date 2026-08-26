@@ -8,14 +8,18 @@ to fly to locations, show/hide layers, toggle classification, etc.
 so a name it would only log and drop never leaves here, and a caller cannot
 reach for a command by writing one. `sql_query` is deliberately absent: it has a
 tool of its own, which the MCP surface does not offer.
+
+`run` is the one open action. It carries the name of an action the viewer listed
+in the run's system prompt, so what it may reach is whatever that catalogue held.
 """
 import json
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ViewerAction = Literal[
+    "run",
     "fly_to",
     "set_view",
     "add_marker",
@@ -58,6 +62,7 @@ ViewerAction = Literal[
 # what the viewer cannot do anything without, so the model is told here rather
 # than by a command that silently does nothing
 REQUIRED_PARAMETERS: dict[str, tuple[str, ...]] = {
+    "run": ("name",),
     "fly_to": ("lon", "lat"),
     "set_view": ("lon", "lat"),
     "add_marker": ("lon", "lat"),
@@ -76,6 +81,8 @@ class ViewerControlArgs(BaseModel):
         ...,
         description=(
             "Viewer action to perform. Common ones: "
+            "'run' (requires name, and args for that action's parameters): runs "
+            "one of the actions listed under 'Viewer actions' in the system prompt, "
             "'fly_to' (requires lon, lat), "
             "'set_view' (lon, lat, heading, pitch), "
             "'add_marker' (lon, lat, label, color), "
@@ -97,6 +104,34 @@ class ViewerControlArgs(BaseModel):
     url: Optional[str] = Field(None, description="http or https URL for tileset or GeoJSON")
     attribute: Optional[str] = Field(None, description="Attribute name for classification (default 'Classification')")
     iso: Optional[str] = Field(None, description="ISO 8601 date string for time slider")
+    name: Optional[str] = Field(
+        None,
+        description=(
+            "For action='run': the name of one action listed under 'Viewer actions' "
+            "in the system prompt, e.g. 'layers.set_visible'"
+        ),
+    )
+    args: Optional[dict] = Field(
+        None,
+        description=(
+            "For action='run': an object holding that action's parameters, "
+            "e.g. {\"layer\": \"Parcels\", \"visible\": false}"
+        ),
+    )
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def decode_args_written_as_json_text(cls, value):
+        # small local models send the nested object as a string
+        if not isinstance(value, str):
+            return value
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            raise ValueError("args must be an object or JSON text holding one")
+        if not isinstance(decoded, dict):
+            raise ValueError("args must be an object or JSON text holding one")
+        return decoded
 
     @model_validator(mode="after")
     def check_action_is_usable(self):
@@ -125,11 +160,20 @@ def viewer_control(
     url: str = None,
     attribute: str = None,
     iso: str = None,
+    name: str = None,
+    args: dict = None,
 ) -> str:
     """Control the TileTopia 3D viewer. Use this to fly the camera to a location,
     add markers, load tilesets, apply point cloud classification colours, etc.
     The command is sent to the viewer frontend which executes it.
-    After geocoding a place, call this with action='fly_to' and the coordinates."""
+    After geocoding a place, call this with action='fly_to' and the coordinates.
+    To change anything else about the viewer, call this with action='run', name set
+    to one of the actions listed under 'Viewer actions' in the system prompt, and
+    args an object holding that action's parameters as that entry spells them."""
+    if action == "run":
+        command = {"action": "run", "params": {"name": name, "args": args or {}}}
+        return f"__VIEWER_CMD__:{json.dumps(command)}"
+
     params = {}
     for key, val in [
         ("lon", lon), ("lat", lat), ("height", height),

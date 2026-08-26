@@ -19,6 +19,10 @@ Each line is a standard SSE `data: <json>` payload, wrapped in `RUN_STARTED`/`RU
 
 An `Authorization: Bearer <jwt>` header is forwarded to sibyl as the run's `user_token`, and sibyl sends it back on every tool call of that run, so the tools reach ptolemy, tiletopia and geodukt as that user. Without one the run is anonymous: public reads work, gated writes fail.
 
+The body's `state` is the viewer's own, in two parts: `viewer`, an opaque snapshot of what is on screen (camera, renderer, basemap, layers, project, dataset, live document, history, picked feature), and `actions`, the catalogue of named actions that viewer can run. Each catalogue entry has a `name`, a `description`, JSON Schema `parameters`, and the flags `reads` and `destructive`. [`src/api/viewer_state.py`](../src/api/viewer_state.py) renders both into the run's system prompt as a `Viewer state:` line of compact JSON and a `Viewer actions:` line per action, so the model answers about the map in front of the asker and can name one of these actions back. A `state` with no `actions` list sends the persona unchanged.
+
+The model calls one of them with `viewer_control(action='run', name=..., args={...})`, which emits `__VIEWER_CMD__:{"action": "run", "params": {"name": "<catalogue name>", "args": {...}}}` for the viewer to execute. An action marked `reads` answers a question rather than changing the map: the viewer sends the answer back as the next run's user message, whose text is `Result of <name>: <text>`. An action marked `destructive` is one the viewer asks the person to confirm before running.
+
 ## Sessions
 
 Sessions live in sibyl. These routes are proxies and keep no state of their own.
@@ -191,7 +195,7 @@ Every step of a `__PLAN__` payload carries `runs_caller_code`. It is true when t
 
 **Export & discovery** — `export_to_gpkg`, `list_user_datasets`, `list_outputs`, `list_qgis_algorithms`, `check_qgis_status`, `run_qgis_algorithm`.
 
-**Escape hatches** — `geopandas_api` (arbitrary GeoPandas), `pyqgis_api` (arbitrary PyQGIS), `viewer_control` (raw viewer commands), `emit_ui_spec` (structured map hints).
+**Escape hatches** — `geopandas_api` (arbitrary GeoPandas), `pyqgis_api` (arbitrary PyQGIS), `viewer_control` (raw viewer commands, and `action='run'` for one the viewer listed in the run's `state`), `emit_ui_spec` (structured map hints).
 
 Adding a tool is a single file: drop a module into `src/agents/tools/` exporting `TOOL_FUNCTION` and `TOOL_SCHEMA`. No restart needed. See [architecture.md](architecture.md#tool-manifest-and-execution).
 

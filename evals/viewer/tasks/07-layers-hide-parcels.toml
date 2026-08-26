@@ -1,0 +1,8 @@
+id = "layers-hide-parcels"
+prompt = "hide the parcels layer"
+notes = "The layer is named in the viewer state, by name or by id."
+
+[expect]
+action = "run"
+name = "layers.set_visible"
+args = { layer = "Parcels", visible = false }

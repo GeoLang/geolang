@@ -1,0 +1,7 @@
+id = "live-list"
+prompt = "which live maps could I join?"
+notes = "A read action, and the viewer state already names the one it is in."
+
+[expect]
+action = "run"
+name = "live.list"

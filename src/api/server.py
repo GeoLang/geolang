@@ -47,7 +47,7 @@ from ag_ui.encoder import EventEncoder
 
 import httpx
 
-from src.agents.agent_manager import PERSONA, approval_route_only, load_external_tools
+from src.agents.agent_manager import approval_route_only, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
 from src.api.live_document import (
     DOCUMENT_HEADER,
@@ -57,6 +57,7 @@ from src.api.live_document import (
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.api.outputs_retention import sweep_outputs_periodically
+from src.api.viewer_state import system_prompt_for
 from src.core.auth import (
     MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
     SECRET_ENV,
@@ -449,7 +450,10 @@ def approve_workflow(
 
 
 async def agent_event_stream(
-    message: str, user_token: str | None = None, thread_id: str | None = None
+    message: str,
+    user_token: str | None = None,
+    thread_id: str | None = None,
+    state=None,
 ):
     """Run a sibyl agent run and yield normalized (kind, payload) events.
 
@@ -465,10 +469,14 @@ async def agent_event_stream(
     The bound document goes with it, so sibyl sends `X-Agora-Document` back on
     every tool call and a tool reading a live map answers about the one the
     asker is looking at.
+
+    `state` is the viewer's AG-UI state: its own snapshot and the actions it can
+    run. Both go into the system prompt, so the model answers about the map in
+    front of the asker and can name an action back.
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
-    body = {"system_prompt": PERSONA, "message": message}
+    body = {"system_prompt": system_prompt_for(state), "message": message}
     if user_token:
         body["user_token"] = user_token
     if thread_id:
@@ -696,6 +704,9 @@ async def chat_agui(input: RunAgentInput, request: Request):
     The same bearer the gate checks is what sibyl holds for the run and sends
     back on every tool call, so the run acts as this caller. `X-Agora-Document`
     rides along the same way, naming the map the asker is looking at.
+
+    `state` is the viewer's snapshot of itself and the actions it can run, and
+    both reach the model as part of the run's system prompt.
     """
     user_messages = [m for m in input.messages if getattr(m, "role", None) == "user"]
     if not user_messages:
@@ -712,6 +723,7 @@ async def chat_agui(input: RunAgentInput, request: Request):
                     prompt,
                     user_token=bearer_token(request.headers.get("authorization")),
                     thread_id=input.thread_id,
+                    state=input.state,
                 ),
                 thread_id=input.thread_id,
                 run_id=input.run_id,

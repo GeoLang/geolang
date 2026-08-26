@@ -1,0 +1,8 @@
+id = "project-open-riverside"
+prompt = "open the riverside widening project"
+notes = "The project is in the viewer state, so no listing is needed first."
+
+[expect]
+action = "run"
+name = "project.open"
+args = { project = "Riverside Widening" }

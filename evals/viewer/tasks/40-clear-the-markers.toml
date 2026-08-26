@@ -1,0 +1,6 @@
+id = "clear-the-markers"
+prompt = "clear everything you have drawn on the map"
+notes = "The fixed action that takes no arguments at all."
+
+[expect]
+action = "clear_entities"
