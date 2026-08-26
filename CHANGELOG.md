@@ -96,6 +96,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanup and any client reading announcements missed its files.
 
 ### Changed
+- 2026-08-26: `calculate_isochrones` and `score_sites` each make one request
+  where they made one per threshold or per site. The driving branch asks
+  Valhalla for every contour in a single POST and labels each returned ring
+  from its own `properties.contour`, so a contour the server drops no longer
+  shifts the labels onto the wrong polygons. `score_sites` fetches every site's
+  elevation from OpenTopoData in batches of 100 before it scores anything, and
+  the `flood_risk` criterion reads that list instead of calling the network per
+  site.
 - 2026-08-26: `assess_environmental_risk` fetches its water, green space,
   industrial and major road layers in one Overpass query instead of four, split
   by tag afterwards, with the request capped at 90 s. Four queries over Paris

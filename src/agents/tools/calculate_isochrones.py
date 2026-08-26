@@ -45,6 +45,10 @@ _ROAD_FILTERS = {
 }
 
 
+# valhalla rejects a request with more contours than service_limits.isochrone.max_contours
+VALHALLA_MAX_CONTOURS = 4
+
+
 def calculate_isochrones(
     place_name: str,
     travel_mode: str = "walking",
@@ -103,14 +107,18 @@ def calculate_isochrones(
         if network_type == "drive":
             import requests
 
+            from shapely.geometry import shape
+
             valhalla_url = "https://valhalla1.openstreetmap.de/isochrone"
             features = []
+            descending_times = sorted(times, reverse=True)
 
-            for t_min in sorted(times, reverse=True):
+            for start in range(0, len(descending_times), VALHALLA_MAX_CONTOURS):
+                chunk = descending_times[start : start + VALHALLA_MAX_CONTOURS]
                 payload = {
                     "locations": [{"lon": lon, "lat": lat}],
                     "costing": "auto",
-                    "contours": [{"time": t_min}],
+                    "contours": [{"time": t_min} for t_min in chunk],
                     "polygons": True,
                     "denoise": 0.5,
                     "generalize": 150,
@@ -119,19 +127,18 @@ def calculate_isochrones(
                 resp.raise_for_status()
                 fc = resp.json()
 
-                # Extract the polygon from the FeatureCollection
-                poly = None
-                if fc.get("type") == "FeatureCollection" and fc.get("features"):
-                    geom = fc["features"][0].get("geometry", {})
-                    from shapely.geometry import shape
-
-                    poly = shape(geom)
-
-                if poly is not None:
+                # label from properties.contour, a dropped contour would shift positions
+                if fc.get("type") != "FeatureCollection":
+                    continue
+                for feature in fc.get("features") or []:
+                    geom = feature.get("geometry")
+                    contour = (feature.get("properties") or {}).get("contour")
+                    if geom is None or contour is None:
+                        continue
                     features.append(
                         {
-                            "geometry": poly,
-                            "minutes": t_min,
+                            "geometry": shape(geom),
+                            "minutes": int(contour),
                             "mode": travel_mode,
                             "road_detail": "valhalla",
                             "place": place_name,

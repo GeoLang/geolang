@@ -47,6 +47,9 @@ class ScoreSitesArgs(BaseModel):
     )
 
 
+OPENTOPODATA_MAX_LOCATIONS = 100
+
+
 def score_sites(
     sites: str,
     criteria: str = "population,amenities,transport,flood_risk,green_space",
@@ -122,7 +125,29 @@ def score_sites(
         ox.settings.timeout = 30
         ox.settings.overpass_rate_limit = False
 
-        for site in site_list:
+        site_elevations = [None] * len(site_list)
+        if "flood_risk" in criteria_list:
+            for start in range(0, len(site_list), OPENTOPODATA_MAX_LOCATIONS):
+                batch = site_list[start : start + OPENTOPODATA_MAX_LOCATIONS]
+                locations = "|".join(f"{s['lat']:.6f},{s['lon']:.6f}" for s in batch)
+                elev_url = (
+                    f"https://api.opentopodata.org/v1/srtm90m?locations={locations}"
+                )
+                try:
+                    elev_resp = requests.get(elev_url, timeout=10)
+                    if elev_resp.status_code == 200:
+                        elev_data = elev_resp.json()
+                        if elev_data.get("status") == "OK":
+                            for offset, result in enumerate(
+                                elev_data.get("results", [])
+                            ):
+                                elev = result.get("elevation")
+                                if elev is not None:
+                                    site_elevations[start + offset] = float(elev)
+                except Exception:
+                    pass
+
+        for site_index, site in enumerate(site_list):
             lat, lon = site["lat"], site["lon"]
 
             # Batch all OSM data in a single Overpass query
@@ -210,19 +235,9 @@ def score_sites(
                         score = float(count)
 
                     elif criterion == "flood_risk":
-                        elev_url = f"https://api.opentopodata.org/v1/srtm90m?locations={lat},{lon}"
-                        try:
-                            elev_resp = requests.get(elev_url, timeout=10)
-                            if elev_resp.status_code == 200:
-                                elev_data = elev_resp.json()
-                                if elev_data.get("status") == "OK" and elev_data.get(
-                                    "results"
-                                ):
-                                    elev = elev_data["results"][0].get("elevation")
-                                    if elev is not None:
-                                        score = float(elev)
-                        except Exception:
-                            pass
+                        elevation = site_elevations[site_index]
+                        if elevation is not None:
+                            score = elevation
 
                     elif criterion == "green_space" and osm_features is not None:
                         landuse_col = osm_features.get("landuse")

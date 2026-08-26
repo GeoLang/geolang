@@ -11,12 +11,15 @@ import numpy as np
 import pytest
 import rasterio
 from shapely.geometry import Point, box
+from shapely.geometry import mapping as shapely_mapping
 
 from src.agents.tools.assess_environmental_risk import (
     assess_environmental_risk,
     flood_score_from,
 )
+from src.agents.tools.calculate_isochrones import calculate_isochrones
 from src.agents.tools.download_population_grid import download_population_grid
+from src.agents.tools.score_sites import score_sites
 from src.core import utils
 
 LAT, LON = 52.6369, -1.1398  # Leicester
@@ -96,6 +99,51 @@ def _fake_worldpop(pyramid=None, pending_polls=0, submits=None):
                 json=lambda: {"status": "created", "taskid": "task-1"},
             )
         raise AssertionError(f"unexpected request: {url}")
+
+    return SimpleNamespace(get=get)
+
+
+class _SettingsOsmnx(_FakeOsmnx):
+    """osmnx carrying the settings object score_sites writes its timeout to."""
+
+    def __init__(self):
+        self.settings = SimpleNamespace(timeout=180, overpass_rate_limit=True)
+
+
+def _fake_valhalla(posts):
+    """One request answers every contour, ascending, which is not the asked order."""
+
+    def post(url, json=None, timeout=None):
+        posts.append(json)
+        features = [
+            {
+                "type": "Feature",
+                "properties": {"contour": float(contour["time"])},
+                "geometry": shapely_mapping(
+                    Point(LON, LAT).buffer(contour["time"] / 1000.0)
+                ),
+            }
+            for contour in sorted(json["contours"], key=lambda c: c["time"])
+        ]
+        return SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {"type": "FeatureCollection", "features": features},
+        )
+
+    return SimpleNamespace(post=post)
+
+
+def _fake_opentopodata(gets):
+    """Elevation rises with position in the batch, so a shifted list shows up."""
+
+    def get(url, params=None, headers=None, timeout=None):
+        gets.append(url)
+        locations = url.split("locations=")[1].split("|")
+        results = [{"elevation": 10.0 * (i + 1)} for i in range(len(locations))]
+        return SimpleNamespace(
+            status_code=200, json=lambda: {"status": "OK", "results": results}
+        )
 
     return SimpleNamespace(get=get)
 
@@ -387,3 +435,53 @@ def test_population_grid_sums_the_worldpop_pyramid(monkeypatch, stub_services):
     sent = json.loads(params["geojson"])
     assert sent["type"] == "FeatureCollection"
     assert sent["features"][0]["geometry"]["type"] == "Polygon"
+
+
+def test_driving_isochrones_ask_valhalla_once_for_every_contour(
+    monkeypatch, stub_services
+):
+    posts = []
+    monkeypatch.setitem(sys.modules, "requests", _fake_valhalla(posts))
+
+    out = calculate_isochrones(
+        "Leicester",
+        travel_mode="driving",
+        time_minutes="5,10,15",
+        output_filename="drive_iso",
+    )
+    assert "Computed driving isochrones" in out, out
+
+    assert len(posts) == 1
+    assert [c["time"] for c in posts[0]["contours"]] == [15, 10, 5]
+    assert posts[0]["polygons"] is True
+    assert posts[0]["denoise"] == 0.5
+    assert posts[0]["generalize"] == 150
+
+    gdf = _read_output("drive_iso")
+    assert sorted(gdf["minutes"]) == [5, 10, 15]
+
+    # each ring is labelled from properties.contour, so extent ranks with the label
+    bounds = gdf.geometry.bounds
+    widths = dict(zip(gdf["minutes"], bounds["maxx"] - bounds["minx"]))
+    assert widths[15] > widths[10] > widths[5]
+
+
+def test_score_sites_asks_opentopodata_once_for_every_site(monkeypatch, stub_services):
+    monkeypatch.setitem(sys.modules, "osmnx", _SettingsOsmnx())
+    gets = []
+    monkeypatch.setitem(sys.modules, "requests", _fake_opentopodata(gets))
+
+    names = ["Shoreditch London", "Kings Cross London", "Brixton London"]
+    out = score_sites(
+        "; ".join(names), criteria="flood_risk", output_filename="site_flood"
+    )
+    assert "Site scoring results" in out, out
+
+    assert len(gets) == 1
+    locations = gets[0].split("locations=")[1].split("|")
+    assert len(locations) == len(names)
+
+    # elevations land back on the site that asked for them, not shifted along
+    ranked = _read_output("site_flood").sort_values("rank")
+    assert list(ranked["name"]) == list(reversed(names))
+    assert list(ranked["flood_risk_raw"]) == [30.0, 20.0, 10.0]
