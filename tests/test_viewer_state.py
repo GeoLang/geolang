@@ -88,11 +88,12 @@ def test_a_catalogue_with_no_viewer_renders_an_empty_snapshot():
     assert _section(prompt, "Viewer state:") == "{}"
 
 
-def test_every_action_is_one_line_naming_its_parameters():
+def test_every_action_names_its_parameters_and_describes_them_below():
     prompt = system_prompt_for(_state(SET_VISIBLE, BASEMAP_SET))
 
     assert _section(prompt, "Viewer actions:").splitlines() == [
         "layers.set_visible(layer: string, visible: boolean): Show or hide a layer",
+        "  layer: layer id or name",
         "basemap.set(basemap: osm|satellite|dark, fade?: boolean): Switch the basemap",
     ]
 

@@ -15,6 +15,8 @@ READS_MARKER = "[reads]"
 DESTRUCTIVE_MARKER = "[asks to confirm]"
 # a parameter that declares no type in the catalogue
 DEFAULT_PARAMETER_TYPE = "string"
+# parameter descriptions sit under their action line
+PARAMETER_INDENT = "  "
 
 INSTRUCTIONS = (
     "To change the viewer, call viewer_control with action='run', name set to one "
@@ -66,7 +68,12 @@ def action_line(entry: dict) -> str:
         line += f" {READS_MARKER}"
     if entry.get("destructive"):
         line += f" {DESTRUCTIVE_MARKER}"
-    return line
+    described = [
+        f"{PARAMETER_INDENT}{name}: {str(schema.get('description')).strip()}"
+        for name, schema in properties.items()
+        if isinstance(schema, dict) and str(schema.get("description") or "").strip()
+    ]
+    return "\n".join([line, *described])
 
 
 def system_prompt_for(state) -> str:
