@@ -32,16 +32,16 @@ def service_up(url: str) -> bool:
 
 
 def active_profile() -> tuple:
-    """(profile id, model name) from sibyl, ("unknown", "") when it cannot say."""
+    """(profile id, model name, server) from sibyl, ("unknown", "", "") when it cannot say."""
     try:
         body = httpx.get(f"{SIBYL}/models", timeout=5).json()
     except Exception:
-        return "unknown", ""
+        return "unknown", "", ""
     active = body.get("active") or "unknown"
     for profile in body.get("profiles") or []:
         if profile.get("id") == active:
-            return active, profile.get("model") or ""
-    return active, ""
+            return active, profile.get("model") or "", profile.get("server") or ""
+    return active, "", ""
 
 
 def geodukt_reachable() -> str:
@@ -66,8 +66,8 @@ def stack_skip_reason(allow_cloud: bool) -> str:
         return f"geolang api not up at {GEOLANG}"
     if not service_up(f"{SIBYL}/health"):
         return f"sibyl not up at {SIBYL}"
-    profile, _ = active_profile()
-    if profile == "cloud" and not allow_cloud:
+    _, _, server = active_profile()
+    if server == "cloud" and not allow_cloud:
         return "sibyl is on the cloud profile: pass --allow-cloud to spend credits"
     # without the catalog the model abandons the workflow path and falls back to
     # the single-shot tools, which would score every task zero for the wrong reason
@@ -334,7 +334,7 @@ def main(argv=None) -> int:
         if reason:
             print(f"SKIP: {reason}")
             return 0
-        profile, model = active_profile()
+        profile, model, _ = active_profile()
         mode = "stack"
         if not args.no_fixtures:
             created = ensure_fixtures(tasks)

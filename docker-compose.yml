@@ -25,9 +25,16 @@ services:
   sibyl:
     build: ../sibyl
     environment:
-      XAI_API_KEY: "${XAI_API_KEY}"
+      SIBYL_CLOUD_API_KEY: "${SIBYL_CLOUD_API_KEY}"
+      SIBYL_CLOUD_API_BASE: "${SIBYL_CLOUD_API_BASE:-}"
+      SIBYL_CLOUD_MODELS: "${SIBYL_CLOUD_MODELS:-}"
+      SIBYL_LOCAL_API_BASE: "${SIBYL_LOCAL_API_BASE:-}"
+      SIBYL_LOCAL_MODELS: "${SIBYL_LOCAL_MODELS:-}"
+      SIBYL_THINKING: "${SIBYL_THINKING:-}"
       GEOLANG_URL: "http://geolang:8080"
       SIBYL_DB_PATH: "/data/sibyl.db"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - sibyl-data:/data
     ports:

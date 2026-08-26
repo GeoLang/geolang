@@ -469,7 +469,16 @@ def _stack(
         mock.get(f"{runner.SIBYL}/health").respond(503)
     mock.get(f"{runner.SIBYL}/models").respond(
         200,
-        json={"active": profile, "profiles": [{"id": profile, "model": "some-model"}]},
+        json={
+            "active": f"{profile}:some-model",
+            "profiles": [
+                {
+                    "id": f"{profile}:some-model",
+                    "model": "some-model",
+                    "server": profile,
+                }
+            ],
+        },
     )
     return mock
 

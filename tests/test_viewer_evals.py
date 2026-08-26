@@ -325,7 +325,16 @@ def _stack(sibyl_up=True, profile="local"):
         mock.get(f"{viewer_runner.runner.SIBYL}/health").respond(503)
     mock.get(f"{viewer_runner.runner.SIBYL}/models").respond(
         200,
-        json={"active": profile, "profiles": [{"id": profile, "model": "some-model"}]},
+        json={
+            "active": f"{profile}:some-model",
+            "profiles": [
+                {
+                    "id": f"{profile}:some-model",
+                    "model": "some-model",
+                    "server": profile,
+                }
+            ],
+        },
     )
     return mock
 

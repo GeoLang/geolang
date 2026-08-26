@@ -22,7 +22,7 @@
 
 - Docker + Docker Compose
 - Python 3.11+ (for the FastAPI server on the host)
-- An LLM provider API key (xAI Grok by default, any OpenAI-compatible endpoint works)
+- An OpenAI-compatible provider key (xAI Grok by default), or a local llama-server, or both
 
 ### Configure
 
@@ -30,12 +30,14 @@ GeoLang reads provider keys from environment variables. **Do not commit keys to
 `docker-compose.yml`.** Use a `.env` file or shell exports:
 
 ```bash
-export XAI_API_KEY="your-xai-key-here"
+export SIBYL_CLOUD_API_KEY="your-provider-key-here"
 ```
 
-sibyl reads the key from `XAI_API_KEY` only and sends it as a bearer token to
-whatever `SIBYL_API_BASE` points at. To use another OpenAI-compatible provider,
-set `SIBYL_API_BASE` and put that provider's key in `XAI_API_KEY`.
+sibyl sends that key as a bearer token to `SIBYL_CLOUD_API_BASE`, which defaults
+to x.ai. `SIBYL_CLOUD_MODELS` lists the cloud models offered in the viewer.
+`SIBYL_LOCAL_API_BASE` plus `SIBYL_LOCAL_MODELS` add local models on top, see
+[../sibyl/README.md](../sibyl/README.md) for the llama-server launch. Every
+model in either list is one entry in the viewer's model switch.
 
 ### Run both services
 

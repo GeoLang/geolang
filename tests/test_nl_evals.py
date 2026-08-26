@@ -9,7 +9,6 @@ choices and artifact validity, never on exact phrasing.
 import json
 import os
 import re
-import subprocess
 
 import httpx
 import pytest
@@ -30,20 +29,15 @@ def _up(url: str) -> bool:
 
 
 def _sibyl_is_local() -> bool:
-    # /health doesn't report the backend, so read the container env: running
-    # these against cloud mode would silently spend x.ai credits
+    # running these against a cloud profile would silently spend x.ai credits
     try:
-        out = subprocess.run(
-            ["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", "viewtopia-sibyl-1"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout
+        body = httpx.get(f"{SIBYL}/models", timeout=5).json()
     except Exception:
         return False
-    for line in out.splitlines():
-        if line.startswith("SIBYL_API_BASE="):
-            return "host.docker.internal" in line or "172.17.0.1" in line
+    active = body.get("active")
+    for profile in body.get("profiles") or []:
+        if profile.get("id") == active:
+            return profile.get("server") == "local"
     return False
 
 

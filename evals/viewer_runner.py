@@ -42,8 +42,8 @@ def viewer_skip_reason(allow_cloud: bool) -> str:
         return f"geolang api not up at {runner.GEOLANG}"
     if not service_up(f"{runner.SIBYL}/health"):
         return f"sibyl not up at {runner.SIBYL}"
-    profile, _ = active_profile()
-    if profile == "cloud" and not allow_cloud:
+    _, _, server = active_profile()
+    if server == "cloud" and not allow_cloud:
         return "sibyl is on the cloud profile: pass --allow-cloud to spend credits"
     return ""
 
@@ -134,7 +134,7 @@ def main(argv=None) -> int:
     catalogue = load_fixture(args.catalogue)
     system_prompt = system_prompt_for({"viewer": snapshot, "actions": catalogue})
 
-    profile, model = active_profile()
+    profile, model, _ = active_profile()
     results = []
     user_session = active_session_id()
     eval_sessions = []

@@ -96,6 +96,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanup and any client reading announcements missed its files.
 
 ### Changed
+- 2026-08-26: sibyl's model config moves to two variable pairs.
+  `SIBYL_CLOUD_API_KEY`, `SIBYL_CLOUD_API_BASE` and `SIBYL_CLOUD_MODELS` name
+  the cloud models, `SIBYL_LOCAL_API_BASE` and `SIBYL_LOCAL_MODELS` add local
+  ones, and `XAI_API_KEY` is gone from `.env`. `docker-compose.yml` passes all
+  of them through to the sibyl service and reaches a host llama-server through
+  `host.docker.internal`. The evals decide whether a run spends cloud credits
+  from the active profile's `server` field rather than from a `cloud` id.
 - 2026-08-24: `buffer_clip_dissolve` takes no `input_path` to mean "save the
   buffer polygon itself": one EPSG:4326 polygon with `center_lon`,
   `center_lat` and `buffer_km` as properties. Before this no tool could answer
