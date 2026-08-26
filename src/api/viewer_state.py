@@ -20,7 +20,9 @@ PARAMETER_INDENT = "  "
 
 INSTRUCTIONS = (
     "To change the viewer, call viewer_control with action='run', name set to one "
-    "of the names above and args an object holding that action's parameters. "
+    "of the names above and args the JSON text of an object holding that "
+    "action's parameters, for example args='{\"layer\": \"Parcels\", "
+    "\"visible\": false}'. Never put them in any other field. "
     "For layers, projects, documents and feeds use the ids or names from the "
     f"viewer state. A {READS_MARKER} action answers a question: its answer arrives "
     "as the next user message beginning 'Result of <name>:', so carry on from "

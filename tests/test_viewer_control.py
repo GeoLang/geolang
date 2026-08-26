@@ -121,12 +121,19 @@ def test_run_without_arguments_sends_an_empty_object():
     }
 
 
-def test_arguments_written_as_json_text_decode_to_an_object():
-    args = ViewerControlArgs(
-        action="run", name="layers.set_opacity", args='{"layer": "L1", "opacity": 0.4}'
-    )
+def test_arguments_written_as_json_text_reach_the_viewer_as_an_object():
+    assert _run_command(name="layers.set_opacity", args='{"layer": "L1", "opacity": 0.4}') == {
+        "action": "run",
+        "params": {"name": "layers.set_opacity", "args": {"layer": "L1", "opacity": 0.4}},
+    }
 
-    assert args.args == {"layer": "L1", "opacity": 0.4}
+
+def test_the_manifest_advertises_args_as_text():
+    """A bare object schema with no properties is one a model leaves empty."""
+    assert ViewerControlArgs.model_json_schema()["properties"]["args"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
 
 
 @pytest.mark.parametrize("text", ['["Parcels", false]', '"Parcels"', "Parcels", "42"])

@@ -111,27 +111,32 @@ class ViewerControlArgs(BaseModel):
             "in the system prompt, e.g. 'layers.set_visible'"
         ),
     )
-    args: Optional[dict] = Field(
+    # advertised as text, since a model given a bare object schema with no
+    # properties leaves it empty and puts the values in some other field
+    args: Optional[str] = Field(
         None,
         description=(
-            "For action='run': an object holding that action's parameters, "
-            "e.g. {\"layer\": \"Parcels\", \"visible\": false}"
+            "For action='run': JSON text of an object holding that action's "
+            "parameters, e.g. '{\"layer\": \"Parcels\", \"visible\": false}'"
         ),
     )
 
     @field_validator("args", mode="before")
     @classmethod
-    def decode_args_written_as_json_text(cls, value):
-        # small local models send the nested object as a string
+    def keep_args_as_json_text_of_an_object(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return json.dumps(value)
         if not isinstance(value, str):
-            return value
+            raise ValueError("args must be JSON text holding an object")
         try:
             decoded = json.loads(value)
         except json.JSONDecodeError:
-            raise ValueError("args must be an object or JSON text holding one")
+            raise ValueError("args must be JSON text holding an object")
         if not isinstance(decoded, dict):
-            raise ValueError("args must be an object or JSON text holding one")
-        return decoded
+            raise ValueError("args must be JSON text holding an object")
+        return value
 
     @model_validator(mode="after")
     def check_action_is_usable(self):
@@ -161,7 +166,7 @@ def viewer_control(
     attribute: str = None,
     iso: str = None,
     name: str = None,
-    args: dict = None,
+    args: str = None,
 ) -> str:
     """Control the TileTopia 3D viewer. Use this to fly the camera to a location,
     add markers, load tilesets, apply point cloud classification colours, etc.
@@ -169,9 +174,11 @@ def viewer_control(
     After geocoding a place, call this with action='fly_to' and the coordinates.
     To change anything else about the viewer, call this with action='run', name set
     to one of the actions listed under 'Viewer actions' in the system prompt, and
-    args an object holding that action's parameters as that entry spells them."""
+    args the JSON text of an object holding that action's parameters as that
+    entry spells them."""
     if action == "run":
-        command = {"action": "run", "params": {"name": name, "args": args or {}}}
+        decoded = json.loads(args) if args else {}
+        command = {"action": "run", "params": {"name": name, "args": decoded}}
         return f"__VIEWER_CMD__:{json.dumps(command)}"
 
     params = {}
