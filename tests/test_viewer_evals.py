@@ -213,7 +213,7 @@ def test_every_task_names_an_action_the_viewer_offers():
     tasks = load_tasks(TASKS_DIR)
     catalogue_names = {entry["name"] for entry in CATALOGUE}
 
-    assert len(tasks) == 61
+    assert len(tasks) == 67
     assert all(t.prompt and t.notes for t in tasks)
     for task in tasks:
         assert task.action == "run", task.id

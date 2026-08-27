@@ -1,0 +1,8 @@
+id = "size-the-point-cloud-points"
+prompt = "draw the point cloud points at 6 pixels"
+notes = "Only a point cloud has points to size, so there is no vector equivalent."
+
+[expect]
+action = "run"
+name = "tileset.set_point_size"
+args = { size = 6 }

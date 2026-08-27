@@ -1,0 +1,8 @@
+id = "heatmap-the-sensors"
+prompt = "show the Sensors as a heatmap"
+notes = "Reads the points out of a layer already on the map."
+
+[expect]
+action = "run"
+name = "layers.add_heatmap"
+args = { layer = "Sensors" }

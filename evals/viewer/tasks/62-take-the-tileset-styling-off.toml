@@ -1,0 +1,7 @@
+id = "take-the-tileset-styling-off"
+prompt = "take the styling back off the 3D tiles"
+notes = "Undoes any of the tileset shading, and takes no arguments."
+
+[expect]
+action = "run"
+name = "tileset.reset_style"

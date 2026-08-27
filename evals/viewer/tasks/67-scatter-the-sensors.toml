@@ -1,0 +1,8 @@
+id = "scatter-the-sensors"
+prompt = "draw the Sensors as filled circles"
+notes = "Not layers.set_color, which paints a layer already drawn."
+
+[expect]
+action = "run"
+name = "layers.add_scatter"
+args = { layer = "Sensors" }

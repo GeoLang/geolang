@@ -1,0 +1,8 @@
+id = "hexbin-the-sensors"
+prompt = "bin the Sensors into hexagons"
+notes = "Not analysis.spatial_stats, which reduces a grid and answers with numbers."
+
+[expect]
+action = "run"
+name = "layers.add_hexbin"
+args = { layer = "Sensors" }

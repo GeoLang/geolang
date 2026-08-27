@@ -1,0 +1,8 @@
+id = "fade-every-tileset"
+prompt = "fade every 3D tileset to 0.4 opacity"
+notes = "Says every tileset, so not layers.set_opacity, which fades one named layer."
+
+[expect]
+action = "run"
+name = "tileset.set_opacity"
+args = { opacity = 0.4 }
