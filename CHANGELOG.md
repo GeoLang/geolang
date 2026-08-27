@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1000 m and 2000 m.
 
 ### Fixed
+- 2026-08-26: `download_osm_data` refuses a named-feature lookup rather than
+  drawing the wrong thing. It used to take Nominatim's first hit when none
+  carried the requested tag, so `feature_name="river"` as `waterway=river`
+  returned relation 2604751, a civil parish called River near Dover, for a
+  question about Benghazi. A hit must now carry the tag, a kind of feature
+  passed as a name ("river", "waterway") is refused with the `place_name` plus
+  `data_type` form to use instead, and `data_type` resolves "rivers" and
+  "river" to `waterway=river` and a bare key like "waterway" to `waterway=*`
+  rather than to `amenity=rivers`, which could never match anything.
 - 2026-08-26: `download_osm_data` no longer reports inflated feature counts for
   a large place. osmnx splits an oversized area into overlapping Overpass
   sub-queries and concatenates every response before indexing, so the same way

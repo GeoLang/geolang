@@ -212,3 +212,58 @@ def test_neither_a_place_nor_a_feature_is_refused(monkeypatch, outputs):
     monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx(_features([1])))
 
     assert "place_name or feature_name" in download_osm_data(data_type="cafes")
+
+
+def test_a_kind_of_feature_is_refused_as_a_name(monkeypatch, outputs):
+    monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx(_features([1])))
+
+    result = download_osm_data(data_type="waterway", feature_name="river", place_name="Benghazi")
+
+    assert "names a kind of feature" in result
+    assert "data_type='river'" in result
+
+
+def test_a_named_feature_that_is_not_the_kind_asked_for_is_refused(monkeypatch, outputs):
+    # relation 2604751 is a civil parish called River, near Dover
+    parish = {
+        "osm_type": "relation",
+        "osm_id": 2604751,
+        "class": "boundary",
+        "type": "administrative",
+        "display_name": "River, Dover, Kent, England",
+        "geojson": {"type": "Point", "coordinates": [1.27, 51.14]},
+    }
+    fake = _RecordingOsmnx(_features([1]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+    monkeypatch.setitem(sys.modules, "requests", _nominatim([parish]))
+
+    result = download_osm_data(
+        data_type="waterway=river", feature_name="Riverside Walk", output_filename="x"
+    )
+
+    assert "is a waterway=river" in result
+    assert "River (boundary=administrative)" in result
+    assert "place_name and data_type" in result
+
+
+@pytest.mark.parametrize(
+    ("data_type", "expected"),
+    [
+        ("rivers", {"waterway": "river"}),
+        ("river", {"waterway": "river"}),
+        ("waterway", {"waterway": True}),
+        ("railway", {"railway": True}),
+        ("cafes", {"amenity": "cafe"}),
+        ("gym", {"amenity": "gym"}),
+        ("shop=bakery", {"shop": "bakery"}),
+    ],
+)
+def test_a_data_type_resolves_to_a_tag_that_can_match_something(
+    monkeypatch, outputs, data_type, expected
+):
+    fake = _RecordingOsmnx(_features([1, 2]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+
+    download_osm_data(data_type=data_type, place_name=f"{LAT},{LON}", output_filename="x")
+
+    assert fake.point_calls[0]["tags"] == expected

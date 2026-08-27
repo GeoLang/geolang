@@ -5,6 +5,22 @@ from src.core.utils import tool_output_path
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_USER_AGENT = "geolang-gis-agent/1.0"
 
+# OSM tag keys a caller may name on their own, meaning "everything carrying it"
+OSM_TAG_KEYS = {
+    "waterway",
+    "natural",
+    "landuse",
+    "highway",
+    "amenity",
+    "shop",
+    "building",
+    "leisure",
+    "office",
+    "railway",
+    "tourism",
+    "boundary",
+}
+
 DEFAULT_RADIUS_M = 1000
 # road networks need more reach than point features before the graph connects up
 DEFAULT_ROADS_RADIUS_M = 2000
@@ -91,8 +107,22 @@ def _named_feature_gdf(feature_name: str, tags: dict):
             for h in hits
             if h.get("class") == key and (value is True or h.get("type") == value)
         ),
-        hits[0],
+        None,
     )
+    if chosen is None:
+        # no fallback to the first hit: geocoding a word that is not really a name
+        # lands on whatever happens to carry it, and a wrong layer drawn without
+        # complaint is worse than no layer
+        found = ", ".join(
+            f"{h.get('display_name', '?').split(',')[0]} ({h.get('class')}={h.get('type')})"
+            for h in hits[:3]
+        )
+        return None, (
+            f"No OSM feature named '{feature_name}' is a {key}={value}. "
+            f"Nominatim offered: {found}. "
+            "If you meant every such feature in an area rather than one named "
+            "feature, pass place_name and data_type instead of feature_name."
+        )
 
     gdf = gpd.GeoDataFrame(
         [
@@ -157,6 +187,14 @@ def download_osm_data(
             "amenities": {"amenity": True},
             "water": {"natural": "water"},
             "forests": {"landuse": "forest"},
+            "rivers": {"waterway": "river"},
+            "river": {"waterway": "river"},
+            "streams": {"waterway": "stream"},
+            "canals": {"waterway": "canal"},
+            "waterways": {"waterway": True},
+            "lakes": {"natural": "water"},
+            "coastline": {"natural": "coastline"},
+            "railways": {"railway": True},
         }
 
         # Resolve tags
@@ -166,6 +204,10 @@ def download_osm_data(
             tags = {key.strip(): val.strip()}
         elif dt in OSM_TAG_MAP:
             tags = OSM_TAG_MAP[dt]
+        elif dt in OSM_TAG_KEYS:
+            # a bare key like "waterway": everything carrying it, not an amenity
+            # named after it, which matches nothing at all
+            tags = {dt: True}
         else:
             # Try as an amenity value (e.g. "cafe", "gym")
             tags = {"amenity": dt}
@@ -175,6 +217,15 @@ def download_osm_data(
         subdivided = False
 
         if feature_name:
+            # "river" is a kind of thing, not the name of one, and geocoding it
+            # lands on whatever place happens to be called that
+            if feature_name.lower().strip() in OSM_TAG_MAP or feature_name.lower().strip() in OSM_TAG_KEYS:
+                return (
+                    f"'{feature_name}' names a kind of feature, not one feature. "
+                    f"For every {feature_name} in an area, pass data_type='{feature_name}' "
+                    "with place_name. Keep feature_name for a proper name like "
+                    "'River Thames' or 'M25'."
+                )
             gdf, named_feature_label = _named_feature_gdf(feature_name, tags)
             if gdf is None:
                 return named_feature_label
