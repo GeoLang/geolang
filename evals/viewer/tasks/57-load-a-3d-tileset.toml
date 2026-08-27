@@ -1,0 +1,8 @@
+id = "load-a-3d-tileset"
+prompt = "load the 3D tileset at https://tiles.example.org/riverside/tileset.json"
+notes = "The url is in the prompt, so nothing has to be discovered first."
+
+[expect]
+action = "run"
+name = "data.add_tileset"
+args = { url = "https://tiles.example.org/riverside/tileset.json" }

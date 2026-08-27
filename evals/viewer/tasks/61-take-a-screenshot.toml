@@ -1,0 +1,7 @@
+id = "take-a-screenshot"
+prompt = "take a picture of the globe as it looks now"
+notes = "No arguments at all, and it must not be confused with data.export."
+
+[expect]
+action = "run"
+name = "scene.screenshot"

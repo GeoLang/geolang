@@ -1,0 +1,8 @@
+id = "shade-the-tileset-by-a-property"
+prompt = "colour the 3D tiles by their BuildingType values"
+notes = "The property is named in the prompt, spelled as the tileset spells it."
+
+[expect]
+action = "run"
+name = "tileset.shade_by_property"
+args = { property = "BuildingType" }

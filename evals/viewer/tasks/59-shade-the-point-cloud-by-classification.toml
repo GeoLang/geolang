@@ -1,0 +1,7 @@
+id = "shade-the-point-cloud-by-classification"
+prompt = "colour the point cloud by its LIDAR classification codes"
+notes = "It applies to every tileset on the globe, so it takes no arguments."
+
+[expect]
+action = "run"
+name = "tileset.shade_by_classification"

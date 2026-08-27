@@ -1,0 +1,7 @@
+id = "shade-the-buildings-by-height"
+prompt = "colour the Buildings by height band"
+notes = "Buildings is a tiles3d layer, and layers.shade_by is vector only, so the tileset action is the answer."
+
+[expect]
+action = "run"
+name = "tileset.shade_by_height"

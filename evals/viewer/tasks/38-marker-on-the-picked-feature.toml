@@ -3,7 +3,8 @@ prompt = "drop a marker on the feature I have picked"
 notes = "The coordinates are in the viewer state, so nothing has to be looked up."
 
 [expect]
-action = "add_marker"
+action = "run"
+name = "marker.add"
 args = { lon = -0.1291, lat = 51.5085 }
 
 [tolerance]

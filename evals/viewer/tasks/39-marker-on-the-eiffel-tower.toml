@@ -1,9 +1,10 @@
 id = "marker-on-the-eiffel-tower"
 prompt = "put a marker on the Eiffel Tower"
-notes = "Geocode first, then the fixed add_marker."
+notes = "Geocode first, then marker.add."
 
 [expect]
-action = "add_marker"
+action = "run"
+name = "marker.add"
 args = { lon = 2.2945, lat = 48.8584 }
 
 [tolerance]

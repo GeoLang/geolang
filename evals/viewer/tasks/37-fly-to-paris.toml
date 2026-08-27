@@ -1,9 +1,10 @@
 id = "fly-to-paris"
 prompt = "fly to Paris"
-notes = "A place name, so geocode_place then the fixed fly_to with its coordinates."
+notes = "A place name, so geocode_place then camera.fly_to with its coordinates."
 
 [expect]
-action = "fly_to"
+action = "run"
+name = "camera.fly_to"
 args = { lon = 2.35, lat = 48.85 }
 
 [tolerance]

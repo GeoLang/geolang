@@ -19,7 +19,6 @@ from evals.viewer_scoring import (
     load_tasks,
     score_calls,
 )
-from src.agents.tools.viewer_control import ViewerAction
 
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "evals" / "viewer"
 TASKS_DIR = FIXTURE_DIR / "tasks"
@@ -42,7 +41,11 @@ FLY_TO_PARIS = ViewerTask(
     {
         "id": "fly-to-paris",
         "prompt": "fly to Paris",
-        "expect": {"action": "fly_to", "args": {"lon": 2.35, "lat": 48.85}},
+        "expect": {
+            "action": "run",
+            "name": "camera.fly_to",
+            "args": {"lon": 2.35, "lat": 48.85},
+        },
         "tolerance": {"lon": 0.5, "lat": 0.5},
     }
 )
@@ -171,33 +174,24 @@ def test_scoring_is_deterministic():
     assert [c.as_dict() for c in first.checks] == [c.as_dict() for c in second.checks]
 
 
-# ── the fixed actions, whose arguments are not nested ────────────────────
+# ── a fixed action is not an answer ──────────────────────────────────────
 
 
-def test_a_fixed_action_reads_its_arguments_from_the_call_itself():
+def test_a_fixed_action_call_does_not_answer_a_run_task():
+    """The miss the catalogue exists to prevent: the old name, the right place."""
     result = score_calls(
         FLY_TO_PARIS, [{"action": "fly_to", "lon": 2.3522, "lat": 48.8566}], SNAPSHOT
     )
 
-    assert result.score == 1.0
+    assert [c.name for c in result.failures] == ["calls run camera.fly_to"]
 
 
-def test_a_fixed_action_outside_its_tolerance_fails_that_argument():
+def test_a_run_outside_its_tolerance_fails_that_argument():
     result = score_calls(
-        FLY_TO_PARIS, [{"action": "fly_to", "lon": 4.9, "lat": 48.8566}], SNAPSHOT
+        FLY_TO_PARIS, [run_call("camera.fly_to", lon=4.9, lat=48.8566)], SNAPSHOT
     )
 
     assert [c.name for c in result.failures] == ["lon = 2.35"]
-
-
-def test_running_a_catalogue_action_does_not_answer_a_fixed_one():
-    result = score_calls(
-        FLY_TO_PARIS,
-        [run_call("camera.fly_to", lon=2.3522, lat=48.8566)],
-        SNAPSHOT,
-    )
-
-    assert [c.name for c in result.failures] == ["calls fly_to"]
 
 
 # ── the snapshot's own names ─────────────────────────────────────────────
@@ -219,13 +213,11 @@ def test_every_task_names_an_action_the_viewer_offers():
     tasks = load_tasks(TASKS_DIR)
     catalogue_names = {entry["name"] for entry in CATALOGUE}
 
-    assert len(tasks) == 56
+    assert len(tasks) == 61
     assert all(t.prompt and t.notes for t in tasks)
     for task in tasks:
-        if task.action == "run":
-            assert task.name in catalogue_names, task.id
-        else:
-            assert task.action in ViewerAction.__args__, task.id
+        assert task.action == "run", task.id
+        assert task.name in catalogue_names, task.id
 
 
 def test_the_suite_covers_every_action_in_the_catalogue():
@@ -233,16 +225,6 @@ def test_the_suite_covers_every_action_in_the_catalogue():
     covered = {t.name for t in tasks if t.action == "run"}
 
     assert covered == {entry["name"] for entry in CATALOGUE}
-
-
-def test_the_suite_exercises_the_fixed_actions_too():
-    tasks = load_tasks(TASKS_DIR)
-
-    assert {t.action for t in tasks if t.action != "run"} == {
-        "fly_to",
-        "add_marker",
-        "clear_entities",
-    }
 
 
 def test_a_task_must_expect_an_action():
@@ -260,10 +242,7 @@ def test_a_perfect_answer_to_every_task_aggregates_to_one():
     tasks = load_tasks(TASKS_DIR)
     results = []
     for task in tasks:
-        if task.action == "run":
-            call = {"action": "run", "name": task.name, "args": dict(task.args)}
-        else:
-            call = dict(task.args, action=task.action)
+        call = {"action": "run", "name": task.name, "args": dict(task.args)}
         results.append(score_calls(task, [call], SNAPSHOT))
 
     assert aggregate(results)["score"] == 1.0
