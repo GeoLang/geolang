@@ -49,8 +49,11 @@ def ui_spec(*files) -> str:
     return "Done. __UI_SPEC__:" + json.dumps({"type": "map", "layers": layers})
 
 
-def viewer_command(action="fly_to", **params) -> str:
-    return "__VIEWER_CMD__:" + json.dumps({"action": action, "params": params})
+def viewer_command(name="camera.fly_to", **args) -> str:
+    """A run of one catalogue action, the only shape viewer_control emits."""
+    return "__VIEWER_CMD__:" + json.dumps(
+        {"action": "run", "params": {"name": name, "args": args}}
+    )
 
 
 def reader(**files):
@@ -1001,7 +1004,7 @@ def test_the_last_camera_command_is_the_one_that_lands(caller, monkeypatch):
     result = "\n".join(
         [
             viewer_command(lon=1.0, lat=1.0),
-            viewer_command("set_view", lon=2.35, lat=48.85),
+            viewer_command(lon=2.35, lat=48.85, height=5000),
         ]
     )
 
@@ -1015,21 +1018,8 @@ def test_a_command_that_does_not_move_the_camera_is_ignored(caller, monkeypatch)
     fake = FakeAgora()
 
     note = publish(
-        fake, viewer_command("add_marker", lon=1.0, lat=1.0), monkeypatch, token=caller
+        fake, viewer_command("marker.add", lon=1.0, lat=1.0), monkeypatch, token=caller
     )
-
-    assert note is None
-    assert fake.received == []
-
-
-def test_an_action_from_the_viewers_own_catalogue_is_ignored(caller, monkeypatch):
-    """`run` names an action only the viewer knows, so nothing here reads it."""
-    fake = FakeAgora()
-    command = viewer_command(
-        "run", name="camera.fly_to", args={"lon": 2.35, "lat": 48.85}
-    )
-
-    note = publish(fake, command, monkeypatch, token=caller)
 
     assert note is None
     assert fake.received == []

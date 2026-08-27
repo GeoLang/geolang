@@ -83,9 +83,10 @@ LAYER_ID_DIGEST_CHARS = 12
 
 ORDER_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-# what the viewer's own camera commands land on, so the agent's presence matches
-# what the command would have done in a browser
-CAMERA_DEFAULT_HEIGHT_METRES = {"fly_to": 1000.0, "set_view": 5000.0}
+# the catalogue's camera action and the height it lands on, so the agent's
+# presence matches what the command would have done in a browser
+CAMERA_ACTION = "camera.fly_to"
+CAMERA_DEFAULT_HEIGHT_METRES = 1000.0
 CAMERA_ZOOM_NUMERATOR = 59_000_000.0
 MINIMUM_CAMERA_HEIGHT_METRES = 200.0
 MINIMUM_ZOOM = 3
@@ -530,18 +531,24 @@ def camera_viewport(commands) -> dict | None:
     for command in commands:
         if not isinstance(command, dict):
             continue
-        default_height = CAMERA_DEFAULT_HEIGHT_METRES.get(str(command.get("action")))
         parameters = command.get("params")
-        if default_height is None or not isinstance(parameters, dict):
+        if not isinstance(parameters, dict):
             continue
-        longitude = _number(parameters.get("lon"))
-        latitude = _number(parameters.get("lat"))
+        if str(parameters.get("name")) != CAMERA_ACTION:
+            continue
+        arguments = parameters.get("args")
+        if not isinstance(arguments, dict):
+            continue
+        longitude = _number(arguments.get("lon"))
+        latitude = _number(arguments.get("lat"))
         if longitude is None or latitude is None:
             continue
-        height = _number(parameters.get("height"))
+        height = _number(arguments.get("height"))
         viewport = {
             "center": [longitude, latitude],
-            "zoom": height_to_zoom(default_height if height is None else height),
+            "zoom": height_to_zoom(
+                CAMERA_DEFAULT_HEIGHT_METRES if height is None else height
+            ),
         }
     return viewport
 

@@ -53,8 +53,6 @@ VIEWER_CMD = {
     "params": {"name": "camera.fly_to", "args": {"lon": 2.35, "lat": 48.85}},
 }
 VIEWER_ARGUMENTS = {"action": "run", "name": "camera.fly_to", "lon": 2.35, "lat": 48.85}
-# the only command shape the live document reads a camera move out of
-CAMERA_CMD = {"action": "fly_to", "params": {"lon": 2.35, "lat": 48.85}}
 DOCUMENT_ID = "0f8b1c2d-3e4f-4a5b-8c7d-9e0f1a2b3c4d"
 
 
@@ -376,7 +374,7 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
     def bound_probe():
         """Return a map command and record the bearer used to produce it."""
         execution_tokens.append(current_user_token())
-        return f"__VIEWER_CMD__:{json.dumps(CAMERA_CMD)}"
+        return f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
 
     monkeypatch.setattr(
         mcp_server, "load_external_tools", lambda: [(bound_probe, NoArgs)]
@@ -400,7 +398,7 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
 
     content = result_of(response)["content"]
     # the tool's own text is untouched, the document write is reported beside it
-    assert content[0]["text"] == f"__VIEWER_CMD__:{json.dumps(CAMERA_CMD)}"
+    assert content[0]["text"] == f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
     assert content[1]["text"] == "Live document: camera moved."
     execution_claims = jwt.decode(
         execution_tokens[0], SECRET, algorithms=["HS256"]
