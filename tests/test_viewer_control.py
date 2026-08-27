@@ -1,7 +1,9 @@
 """What the viewer will accept, decided here rather than in the browser.
 
-`action` used to be any string and `url` any string, so the tool would hand the
-viewer whatever it was given and the viewer would run whatever it understood.
+`run` is the only action, and its name comes from the catalogue the viewer sends
+with the message, so this file guards the two things the tool still decides: the
+url the viewer is allowed to fetch, and that every parameter the model wrote
+reaches the command.
 """
 
 import json
@@ -9,47 +11,32 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from src.agents.tools.viewer_control import (
-    REQUIRED_PARAMETERS,
-    ViewerControlArgs,
-    viewer_control,
-)
+from src.agents.tools.viewer_control import ViewerControlArgs, viewer_control
 
 PARIS = {"lon": 2.35, "lat": 48.85}
 
 
-def test_a_known_action_with_its_parameters_is_accepted():
-    args = ViewerControlArgs(action="fly_to", **PARIS)
+def test_run_is_accepted():
+    args = ViewerControlArgs(action="run", name="camera.fly_to", **PARIS)
 
-    assert args.action == "fly_to"
+    assert args.action == "run"
     assert viewer_control(**args.model_dump(exclude_unset=True)).startswith(
         "__VIEWER_CMD__:"
     )
 
 
-@pytest.mark.parametrize("action", ["run_script", "", "FLY_TO", "eval"])
-def test_an_action_the_viewer_does_not_have_is_refused(action):
+@pytest.mark.parametrize(
+    "action", ["fly_to", "add_marker", "load_tileset", "run_script", "", "RUN", "eval"]
+)
+def test_an_action_other_than_run_is_refused(action):
     with pytest.raises(ValidationError):
-        ViewerControlArgs(action=action, **PARIS)
+        ViewerControlArgs(action=action, name="camera.fly_to", **PARIS)
 
 
 def test_sql_query_is_not_reachable_through_this_tool():
     """It has a tool of its own, and that one is kept off the MCP surface."""
     with pytest.raises(ValidationError):
         ViewerControlArgs(action="sql_query")
-
-
-@pytest.mark.parametrize("action, required", sorted(REQUIRED_PARAMETERS.items()))
-def test_an_action_missing_what_it_needs_is_refused(action, required):
-    with pytest.raises(ValidationError) as raised:
-        ViewerControlArgs(action=action)
-
-    for name in required:
-        assert name in str(raised.value)
-
-
-def test_an_action_that_needs_nothing_takes_nothing():
-    assert ViewerControlArgs(action="screenshot").action == "screenshot"
 
 
 # ── the url the viewer fetches ───────────────────────────────────────────
@@ -67,23 +54,12 @@ def test_an_action_that_needs_nothing_takes_nothing():
 )
 def test_a_url_that_is_not_a_network_address_is_refused(url):
     with pytest.raises(ValidationError):
-        ViewerControlArgs(action="add_geojson", url=url)
+        ViewerControlArgs(action="run", name="data.import_url", url=url)
 
 
 @pytest.mark.parametrize("url", ["http://example.com/a.json", "https://example.com/a.json"])
 def test_an_http_url_is_accepted(url):
-    assert ViewerControlArgs(action="add_geojson", url=url).url == url
-
-
-def test_the_command_carries_the_action_and_parameters_through():
-    args = ViewerControlArgs(action="load_tileset", url="https://example.com/t.json")
-
-    _, _, payload = viewer_control(**args.model_dump(exclude_unset=True)).partition(":")
-
-    assert json.loads(payload) == {
-        "action": "load_tileset",
-        "params": {"url": "https://example.com/t.json"},
-    }
+    assert ViewerControlArgs(action="run", name="data.import_url", url=url).url == url
 
 
 # ── the open action, whose name comes from the viewer's own catalogue ─────
@@ -135,11 +111,39 @@ def test_run_parameters_given_as_plain_fields_reach_the_viewer():
     }
 
 
+def test_run_parameters_the_schema_also_names_reach_the_viewer():
+    """lon and lat are fields of the tool as well as parameters of the action."""
+    assert _run_command(name="camera.fly_to", **PARIS, height=800) == {
+        "action": "run",
+        "params": {
+            "name": "camera.fly_to",
+            "args": {"lon": 2.35, "lat": 48.85, "height": 800},
+        },
+    }
+
+
+def test_an_argument_object_wins_over_a_field_of_the_same_name():
+    assert _run_command(name="camera.fly_to", lon=0.0, args='{"lon": 2.35, "lat": 48.85}') == {
+        "action": "run",
+        "params": {"name": "camera.fly_to", "args": {"lon": 2.35, "lat": 48.85}},
+    }
+
+
 def test_run_parameters_written_into_url_are_taken_as_the_arguments():
     """grok writes the object into url, whatever the schema says."""
     assert _run_command(name="basemap.set", url='{"basemap": "satellite"}') == {
         "action": "run",
         "params": {"name": "basemap.set", "args": {"basemap": "satellite"}},
+    }
+
+
+def test_a_url_reaches_the_viewer_as_an_argument():
+    assert _run_command(name="data.import_url", url="https://example.com/a.json") == {
+        "action": "run",
+        "params": {
+            "name": "data.import_url",
+            "args": {"url": "https://example.com/a.json"},
+        },
     }
 
 

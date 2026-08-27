@@ -96,12 +96,11 @@ PERSONA = (
     "The viewer may have been reloaded or cleared since; never reply that something is "
     "'already displayed' or 'already rendered' — just render it again. "
     # TileTopia viewer control
-    "IMPORTANT: When the user asks to fly to a location, zoom to coordinates, or navigate the 3D view, "
-    "ALWAYS call viewer_control with action='fly_to' after geocoding the place. "
-    "When the user asks to show classification colours on point clouds, use viewer_control with action='style_by_classification'. "
-    "When the user asks to add a marker or pin, use viewer_control with action='add_marker'. "
-    "When the user asks to load a 3D tileset, use viewer_control with action='load_tileset'. "
-    "When the user asks to clear the view, use viewer_control with action='clear_entities'. "
+    "IMPORTANT: To change anything about the viewer, call viewer_control with action='run', "
+    "name set to the entry from the 'Viewer actions' list in this prompt that matches what "
+    "the user asked for, and that entry's parameters as fields of the same call, spelled as "
+    "the list spells them. That list is the whole set of things the viewer can do, so read "
+    "it and pick from it rather than inventing a name. "
     # Platform geodatabase
     "When the user refers to data stored in the platform geodatabase (shared layers, "
     "versioned datasets, 'our data', a named enterprise dataset), use ptolemy_query: "
@@ -109,8 +108,8 @@ PERSONA = (
     "to fetch features as GPKG for analysis or display. "
     # Tileset discovery
     "When the user asks what 3D layers, tilesets, terrain, or buildings are available "
-    "to display, call list_tilesets, then load the chosen one with "
-    "viewer_control(action='load_tileset', url=..., label=...). "
+    "to display, call list_tilesets, then load the chosen one with viewer_control, "
+    "using the entry from the 'Viewer actions' list that loads a tileset from a url. "
     # In-browser SQL: an escape hatch, not the default for analysis
     "sql_query is an escape hatch for a one-off question you cannot express as a "
     "workflow: it runs DuckDB SQL in the viewer over data already reachable from the "

@@ -48,7 +48,13 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-VIEWER_CMD = {"action": "fly_to", "params": {"lon": 2.35, "lat": 48.85}}
+VIEWER_CMD = {
+    "action": "run",
+    "params": {"name": "camera.fly_to", "args": {"lon": 2.35, "lat": 48.85}},
+}
+VIEWER_ARGUMENTS = {"action": "run", "name": "camera.fly_to", "lon": 2.35, "lat": 48.85}
+# the only command shape the live document reads a camera move out of
+CAMERA_CMD = {"action": "fly_to", "params": {"lon": 2.35, "lat": 48.85}}
 DOCUMENT_ID = "0f8b1c2d-3e4f-4a5b-8c7d-9e0f1a2b3c4d"
 
 
@@ -187,7 +193,7 @@ def test_a_tool_runs_and_comes_back_as_text(open_mode, client):
     response = call(
         client,
         "tools/call",
-        {"name": "viewer_control", "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85}},
+        {"name": "viewer_control", "arguments": VIEWER_ARGUMENTS},
     )
 
     assert result_of(response)["isError"] is False
@@ -199,7 +205,7 @@ def test_a_marker_reaches_the_caller_unmodified(open_mode, client):
     response = call(
         client,
         "tools/call",
-        {"name": "viewer_control", "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85}},
+        {"name": "viewer_control", "arguments": VIEWER_ARGUMENTS},
     )
 
     marker, _, payload = text_of(response).partition(":")
@@ -370,7 +376,7 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
     def bound_probe():
         """Return a map command and record the bearer used to produce it."""
         execution_tokens.append(current_user_token())
-        return f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
+        return f"__VIEWER_CMD__:{json.dumps(CAMERA_CMD)}"
 
     monkeypatch.setattr(
         mcp_server, "load_external_tools", lambda: [(bound_probe, NoArgs)]
@@ -394,7 +400,7 @@ def test_a_bound_call_writes_to_the_document_and_still_returns_its_result(
 
     content = result_of(response)["content"]
     # the tool's own text is untouched, the document write is reported beside it
-    assert content[0]["text"] == f"__VIEWER_CMD__:{json.dumps(VIEWER_CMD)}"
+    assert content[0]["text"] == f"__VIEWER_CMD__:{json.dumps(CAMERA_CMD)}"
     assert content[1]["text"] == "Live document: camera moved."
     execution_claims = jwt.decode(
         execution_tokens[0], SECRET, algorithms=["HS256"]
@@ -425,10 +431,7 @@ def test_a_document_that_cannot_be_written_never_costs_the_result(
         response = call(
             client,
             "tools/call",
-            {
-                "name": "viewer_control",
-                "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
-            },
+            {"name": "viewer_control", "arguments": VIEWER_ARGUMENTS},
             token=mcp_mint(),
             document=DOCUMENT_ID,
         )
@@ -448,10 +451,7 @@ def test_an_unbound_call_is_exactly_what_it_was(gated, client, monkeypatch):
     response = call(
         client,
         "tools/call",
-        {
-            "name": "viewer_control",
-            "arguments": {"action": "fly_to", "lon": 2.35, "lat": 48.85},
-        },
+        {"name": "viewer_control", "arguments": VIEWER_ARGUMENTS},
         token=mcp_mint(),
     )
 
@@ -466,7 +466,7 @@ def test_an_unbound_call_is_exactly_what_it_was(gated, client, monkeypatch):
     [
         ("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "c", "version": "0"}}),
         ("tools/list", {}),
-        ("tools/call", {"name": "viewer_control", "arguments": {"action": "screenshot"}}),
+        ("tools/call", {"name": "viewer_control", "arguments": VIEWER_ARGUMENTS}),
     ],
 )
 def test_no_token_is_rejected(gated, client, method, params):

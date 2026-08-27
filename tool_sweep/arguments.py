@@ -149,7 +149,8 @@ SWEEP_ARGUMENTS: dict[str, ToolSample] = {
     ),
     "viewer_control": ToolSample(
         args={
-            "action": "fly_to",
+            "action": "run",
+            "name": "camera.fly_to",
             "lon": SWEEP_CENTER_LON,
             "lat": SWEEP_CENTER_LAT,
             "height": 800,
