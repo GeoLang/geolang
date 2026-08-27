@@ -2,8 +2,8 @@
 TileTopia tileset discovery tool.
 
 Lists 3D tilesets hosted by the platform's TileTopia service (ingested assets)
-and its open data catalog, with viewer-loadable URLs for viewer_control
-load_tileset (the viewer reaches TileTopia through the same-origin /tiles/ proxy).
+and its open data catalog, with viewer-loadable URLs for the viewer's tileset
+action (the viewer reaches TileTopia through the same-origin /tiles/ proxy).
 """
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -26,8 +26,8 @@ def list_tilesets(search: str = None, category: str = None) -> str:
     """
     List 3D tilesets available from the platform's TileTopia service: hosted
     assets (ingested 3D Tiles) and the open data catalog. Returns viewer-loadable
-    URLs. To display one, call viewer_control with action='load_tileset' and the
-    listed url. Use this when the user asks what 3D layers, tilesets, terrain,
+    URLs. To display one, call viewer_control with action='run' and the viewer
+    action that adds a tileset from a url, with the listed url. Use this when the user asks what 3D layers, tilesets, terrain,
     or buildings are available to show.
     """
     import os
@@ -77,7 +77,8 @@ def list_tilesets(search: str = None, category: str = None) -> str:
             return "No tilesets available: TileTopia has no hosted assets or catalog entries."
 
         lines.append(
-            "Load one with viewer_control(action='load_tileset', url=<url>, label=<name>)."
+            "Load one with viewer_control(action='run') and the viewer action that "
+            "adds a tileset from a url."
         )
         return "\n".join(lines)
 
