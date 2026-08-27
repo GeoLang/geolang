@@ -1,0 +1,14 @@
+id = "terrain-profile-between-two-points"
+prompt = "how much climb is there from longitude -0.13, latitude 51.5 to longitude -0.12, latitude 51.52?"
+notes = "A question about the ground, so nothing is drawn and the answer comes back to the chat."
+
+[expect]
+action = "run"
+name = "analysis.terrain_profile"
+args = { start_lon = -0.13, start_lat = 51.5, end_lon = -0.12, end_lat = 51.52 }
+
+[tolerance]
+start_lon = 0.001
+start_lat = 0.001
+end_lon = 0.001
+end_lat = 0.001

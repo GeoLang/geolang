@@ -1,6 +1,6 @@
 id = "live-remove-gateway-a"
 prompt = "get rid of the Gateway A feed"
-notes = "The feed is named in the live document in the viewer state."
+notes = "The viewer state lists no feeds, so the name comes from the prompt. Destructive, so the viewer asks first."
 
 [expect]
 action = "run"

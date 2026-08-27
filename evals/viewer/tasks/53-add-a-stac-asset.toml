@@ -1,0 +1,8 @@
+id = "add-a-stac-asset"
+prompt = "put the visual asset of item S2B_31UDQ_20260801_0_L2A from https://earth-search.aws.element84.com/v1 on the map"
+notes = "The item id and the asset key are both spelled out, as a search would have listed them."
+
+[expect]
+action = "run"
+name = "stac.add_asset"
+args = { catalog = "https://earth-search.aws.element84.com/v1", item = "S2B_31UDQ_20260801_0_L2A", asset = "visual" }

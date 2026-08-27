@@ -1,0 +1,12 @@
+id = "viewshed-from-a-point"
+prompt = "what can someone standing 20 metres up at longitude -0.128, latitude 51.508 see within 3 km?"
+notes = "The reach is given in kilometres and the action takes metres."
+
+[expect]
+action = "run"
+name = "analysis.viewshed"
+args = { lon = -0.128, lat = 51.508, height_m = 20.0, radius_m = 3000.0 }
+
+[tolerance]
+lon = 0.001
+lat = 0.001

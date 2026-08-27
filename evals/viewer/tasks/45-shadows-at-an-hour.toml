@@ -1,0 +1,8 @@
+id = "shadows-at-an-hour"
+prompt = "cast shadows as they fall at 3pm on 2026-06-21"
+notes = "3pm is hour 15, and the date has to survive as yyyy-mm-dd."
+
+[expect]
+action = "run"
+name = "scene.shadows"
+args = { on = true, date = "2026-06-21", hour = 15.0 }

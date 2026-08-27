@@ -1,0 +1,8 @@
+id = "draw-a-sql-result"
+prompt = "draw the parcels over 500 square metres from the parcels table on the map, and call the layer Big parcels"
+notes = "The SQL text is not pinned, the layer name is."
+
+[expect]
+action = "run"
+name = "sql.to_layer"
+args = { name = "Big parcels" }

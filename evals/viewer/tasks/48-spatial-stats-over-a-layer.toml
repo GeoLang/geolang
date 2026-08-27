@@ -1,0 +1,8 @@
+id = "spatial-stats-over-a-layer"
+prompt = "bin the sensors into 250 metre cells and take the mean water_level in each"
+notes = "The layer is in the viewer state, and mean needs the property it weighs."
+
+[expect]
+action = "run"
+name = "analysis.spatial_stats"
+args = { layer = "Sensors", method = "mean", property = "water_level", cell_size = 250.0 }

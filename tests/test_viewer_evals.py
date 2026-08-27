@@ -207,9 +207,9 @@ def test_the_snapshot_pairs_every_id_with_its_name():
     groups = equivalent_identifiers(SNAPSHOT)
 
     assert {"lyr_sensors", "sensors"} in groups
+    assert {"lyr_buildings", "buildings"} in groups
+    assert {"prj_riverside", "riverside widening"} in groups
     assert {"doc_riverside", "riverside live"} in groups
-    assert {"feed_gateway_a", "gateway a"} in groups
-    assert {"ds_network", "road network"} in groups
 
 
 # ── the shipped suite ────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ def test_every_task_names_an_action_the_viewer_offers():
     tasks = load_tasks(TASKS_DIR)
     catalogue_names = {entry["name"] for entry in CATALOGUE}
 
-    assert len(tasks) == 40
+    assert len(tasks) == 56
     assert all(t.prompt and t.notes for t in tasks)
     for task in tasks:
         if task.action == "run":

@@ -1,0 +1,8 @@
+id = "export-a-layer"
+prompt = "download the parcels layer as geoparquet"
+notes = "The layer is in the viewer state and the format is one of a fixed set."
+
+[expect]
+action = "run"
+name = "data.export"
+args = { layer = "Parcels", format = "geoparquet" }

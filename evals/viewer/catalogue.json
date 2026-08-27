@@ -1,5 +1,202 @@
 [
   {
+    "name": "analysis.cross_section",
+    "description": "Draw a line on the map and answer how the ground under it rises and falls.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name to run along, instead of the two points."
+        },
+        "start_lon": {
+          "type": "number",
+          "description": "Longitude the line starts at."
+        },
+        "start_lat": {
+          "type": "number",
+          "description": "Latitude the line starts at."
+        },
+        "end_lon": {
+          "type": "number",
+          "description": "Longitude the line ends at."
+        },
+        "end_lat": {
+          "type": "number",
+          "description": "Latitude the line ends at."
+        },
+        "samples": {
+          "type": "number",
+          "description": "How many points to read the elevation at, 10 to 200. 100 by default."
+        }
+      },
+      "required": []
+    },
+    "reads": true,
+    "destructive": false
+  },
+  {
+    "name": "analysis.flood",
+    "description": "Flood the ground under a water level and draw what it covers.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "level_m": {
+          "type": "number",
+          "description": "Water level in metres above sea level."
+        },
+        "bbox": {
+          "type": "array",
+          "description": "Where to flood, as [west, south, east, north] in degrees. The current view by default."
+        }
+      },
+      "required": [
+        "level_m"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "analysis.spatial_stats",
+    "description": "Bin one layer's points into a grid and reduce each cell, drawn as extruded cells on the map.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name to read the points from."
+        },
+        "method": {
+          "type": "string",
+          "description": "How a cell reduces the points in it. count by default.",
+          "enum": [
+            "count",
+            "sum",
+            "mean"
+          ]
+        },
+        "property": {
+          "type": "string",
+          "description": "Numeric property sum and mean weigh. count ignores it."
+        },
+        "cell_size": {
+          "type": "number",
+          "description": "Cell side in metres, 50 to 5000. 500 by default."
+        }
+      },
+      "required": [
+        "layer"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "analysis.terrain_profile",
+    "description": "Read the ground elevation along a line, and answer how it rises and falls.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name to run along, instead of the two points."
+        },
+        "start_lon": {
+          "type": "number",
+          "description": "Longitude the line starts at."
+        },
+        "start_lat": {
+          "type": "number",
+          "description": "Latitude the line starts at."
+        },
+        "end_lon": {
+          "type": "number",
+          "description": "Longitude the line ends at."
+        },
+        "end_lat": {
+          "type": "number",
+          "description": "Latitude the line ends at."
+        },
+        "samples": {
+          "type": "number",
+          "description": "How many points to read the elevation at, 10 to 200. 100 by default."
+        }
+      },
+      "required": []
+    },
+    "reads": true,
+    "destructive": false
+  },
+  {
+    "name": "analysis.travel_time",
+    "description": "Draw how far a vehicle gets from one point within given minutes, one polygon per band.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "lon": {
+          "type": "number",
+          "description": "Longitude of the point travelled from."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Latitude of the point travelled from."
+        },
+        "bands": {
+          "type": "string",
+          "description": "Minutes to reach, comma separated. \"5, 10, 15\" by default."
+        },
+        "profile": {
+          "type": "string",
+          "description": "What is travelling. car by default.",
+          "enum": [
+            "car",
+            "bicycle",
+            "pedestrian",
+            "truck"
+          ]
+        }
+      },
+      "required": [
+        "lon",
+        "lat"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "analysis.viewshed",
+    "description": "Work out what an observer standing at a point can see, and draw the visible ground.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "lon": {
+          "type": "number",
+          "description": "Observer longitude in degrees."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Observer latitude in degrees."
+        },
+        "height_m": {
+          "type": "number",
+          "description": "How far the observer's eyes are above the ground, in metres. 2 by default."
+        },
+        "radius_m": {
+          "type": "number",
+          "description": "How far out to look, in metres. 1000 by default."
+        }
+      },
+      "required": [
+        "lon",
+        "lat"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
     "name": "basemap.set",
     "description": "Put a basemap under the layers.",
     "parameters": {
@@ -57,6 +254,130 @@
       "required": [
         "lon",
         "lat"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "data.add_service",
+    "description": "Add a map service as a layer, from its URL.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Which kind of service the URL serves.",
+          "enum": [
+            "wms",
+            "wmts",
+            "wfs",
+            "xyz",
+            "pmtiles"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "description": "Service URL. WMTS and XYZ take a {z}/{x}/{y} tile template."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name for the layer."
+        }
+      },
+      "required": [
+        "type",
+        "url",
+        "name"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "data.export",
+    "description": "Download one vector layer as a file.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "description": "Layer id or name."
+        },
+        "format": {
+          "type": "string",
+          "description": "Which format to write, geojson by default.",
+          "enum": [
+            "geoparquet",
+            "flatgeobuf",
+            "pmtiles",
+            "geojson"
+          ]
+        }
+      },
+      "required": [
+        "layer"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "data.import_url",
+    "description": "Import a data file from a URL and draw it on the map.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL of the file to import."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name for the layer, the file name by default."
+        },
+        "format": {
+          "type": "string",
+          "description": "The file's format, read from the URL by default.",
+          "enum": [
+            ".geojson",
+            ".json",
+            ".kml",
+            ".gpx",
+            ".csv",
+            ".gpkg",
+            ".shp",
+            ".dbf",
+            ".shx",
+            ".prj",
+            ".cpg",
+            ".fgb",
+            ".parquet",
+            ".geoparquet",
+            ".zip",
+            ".geojson.gz",
+            ".pmtiles",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".bmp",
+            ".pdf",
+            ".wld",
+            ".jgw",
+            ".jpw",
+            ".pgw",
+            ".tfw",
+            ".bpw",
+            ".gfw",
+            ".prj",
+            ".gsb"
+          ]
+        }
+      },
+      "required": [
+        "url"
       ]
     },
     "reads": false,
@@ -517,6 +838,71 @@
     "destructive": false
   },
   {
+    "name": "scene.clipping",
+    "description": "Cut the globe open along one axis to see inside it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean",
+          "description": "true cuts the globe, false puts it back whole."
+        },
+        "axis": {
+          "type": "string",
+          "description": "Earth-fixed axis the cut is made along. z by default.",
+          "enum": [
+            "x",
+            "y",
+            "z"
+          ]
+        },
+        "position": {
+          "type": "number",
+          "description": "Where along the axis the cut falls, 0 to 100. 50 cuts through the earth's centre."
+        }
+      },
+      "required": [
+        "on"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "scene.shadows",
+    "description": "Light the globe from the sun at a date and time of day, casting shadows from buildings and terrain.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean",
+          "description": "true casts shadows, false leaves the globe lit flat."
+        },
+        "date": {
+          "type": "string",
+          "description": "The day the sun is placed on, as yyyy-mm-dd. Today by default."
+        },
+        "hour": {
+          "type": "number",
+          "description": "Hour of the local day, 0 to 24, fractions allowed. 12 by default."
+        },
+        "darkness": {
+          "type": "number",
+          "description": "How dark a shadow falls, 0 to 1. 0.3 by default."
+        },
+        "soft_shadows": {
+          "type": "boolean",
+          "description": "true softens the shadow edges. true by default."
+        }
+      },
+      "required": [
+        "on"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
     "name": "split_view.set",
     "description": "Show the map in one pane or in several side by side.",
     "parameters": {
@@ -540,6 +926,135 @@
       ]
     },
     "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "sql.attach_url",
+    "description": "Attach a remote CSV or Parquet file as a table SQL can query.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL of the .csv or .parquet file."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name to query it as, the file name by default."
+        },
+        "format": {
+          "type": "string",
+          "description": "The file's format, read from the URL by default.",
+          "enum": [
+            "csv",
+            "parquet"
+          ]
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "sql.query",
+    "description": "Run a SQL query over the loaded tables and read the rows back.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "sql": {
+          "type": "string",
+          "description": "The DuckDB SQL to run."
+        }
+      },
+      "required": [
+        "sql"
+      ]
+    },
+    "reads": true,
+    "destructive": false
+  },
+  {
+    "name": "sql.to_layer",
+    "description": "Draw the result of a SQL query on the map as a layer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "sql": {
+          "type": "string",
+          "description": "The DuckDB SQL to run."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name for the layer, the query itself by default."
+        }
+      },
+      "required": [
+        "sql"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "stac.add_asset",
+    "description": "Put one asset of a STAC item on the map, the way its kind allows.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "catalog": {
+          "type": "string",
+          "description": "STAC catalog URL, as in https://earth-search.aws.element84.com/v1."
+        },
+        "item": {
+          "type": "string",
+          "description": "Item id, as stac.search lists it."
+        },
+        "asset": {
+          "type": "string",
+          "description": "Asset key, as stac.search lists it."
+        }
+      },
+      "required": [
+        "catalog",
+        "item",
+        "asset"
+      ]
+    },
+    "reads": false,
+    "destructive": false
+  },
+  {
+    "name": "stac.search",
+    "description": "Search one collection of a STAC catalog for items, listing the assets each one carries.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "catalog": {
+          "type": "string",
+          "description": "STAC catalog URL, as in https://earth-search.aws.element84.com/v1."
+        },
+        "collection": {
+          "type": "string",
+          "description": "Collection id or title."
+        },
+        "bbox": {
+          "type": "string",
+          "description": "west,south,east,north in degrees. The current view by default."
+        },
+        "limit": {
+          "type": "number",
+          "description": "How many items, 20 by default."
+        }
+      },
+      "required": [
+        "catalog",
+        "collection"
+      ]
+    },
+    "reads": true,
     "destructive": false
   }
 ]

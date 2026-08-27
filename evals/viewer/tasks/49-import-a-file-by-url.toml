@@ -1,0 +1,8 @@
+id = "import-a-file-by-url"
+prompt = "import https://example.org/data/wards.geojson onto the map"
+notes = "The layer name and the format both come from the URL, so neither has to be given."
+
+[expect]
+action = "run"
+name = "data.import_url"
+args = { url = "https://example.org/data/wards.geojson" }

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 2026-08-27: the viewer eval covers every action the viewer offers. 16 tasks
+  under `evals/viewer/tasks/` for the terrain, scene, data, STAC and SQL actions
+  that shipped on 2026-08-26, and `snapshot.json` and `catalogue.json` refreshed
+  from viewtopia's own fixtures, so the state the eval sends is what
+  `buildViewerSnapshot` builds. The old state carried a dataset list and a feed
+  list the viewer has never sent, and named the live document `liveDocument`
+  where the viewer says `live`. The scorer now reads `documentId` as an id, so a
+  model answering with the live document's id still scores.
 - 2026-08-26: `download_osm_data` fetches one named feature whole. `feature_name`
   takes the feature's own geometry from Nominatim rather than searching an area,
   so a river, motorway or canal arrives entire instead of cut off at whichever

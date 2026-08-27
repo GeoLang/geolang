@@ -1,0 +1,8 @@
+id = "search-a-stac-collection"
+prompt = "search the sentinel-2-l2a collection of https://earth-search.aws.element84.com/v1 and show me 5 items"
+notes = "No area is given, so the search covers the current view."
+
+[expect]
+action = "run"
+name = "stac.search"
+args = { catalog = "https://earth-search.aws.element84.com/v1", collection = "sentinel-2-l2a", limit = 5.0 }

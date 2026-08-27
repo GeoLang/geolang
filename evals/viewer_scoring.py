@@ -78,7 +78,8 @@ def equivalent_identifiers(snapshot) -> list:
 
     def walk(value):
         if isinstance(value, dict):
-            identifier = value.get("id")
+            # the live document is the one thing the state keys by documentId
+            identifier = value.get("id") or value.get("documentId")
             name = value.get("name")
             if isinstance(identifier, str) and isinstance(name, str):
                 groups.append({identifier.strip().lower(), name.strip().lower()})

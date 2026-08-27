@@ -1,6 +1,6 @@
 id = "dataset-draw-widening-branch"
 prompt = "draw the widening branch of the road network"
-notes = "Both the dataset and one of its branches are in the viewer state."
+notes = "The viewer state lists no datasets, so both names come from the prompt."
 
 [expect]
 action = "run"

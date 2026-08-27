@@ -1,0 +1,8 @@
+id = "attach-a-remote-table"
+prompt = "attach https://example.org/data/sales.parquet so I can query it as sales"
+notes = "The format comes from the URL, so only the name has to be carried."
+
+[expect]
+action = "run"
+name = "sql.attach_url"
+args = { url = "https://example.org/data/sales.parquet", name = "sales" }

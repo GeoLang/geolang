@@ -1,0 +1,8 @@
+id = "flood-the-current-view"
+prompt = "flood everything on screen under 4 metres above sea level"
+notes = "No area is given, so the action floods the view the camera is showing."
+
+[expect]
+action = "run"
+name = "analysis.flood"
+args = { level_m = 4.0 }

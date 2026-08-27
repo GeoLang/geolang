@@ -1,0 +1,14 @@
+id = "cross-section-along-a-line"
+prompt = "draw a cross section from longitude -0.13, latitude 51.5 to longitude -0.12, latitude 51.52, reading 60 points"
+notes = "Drawing the line is what separates this from the plain profile."
+
+[expect]
+action = "run"
+name = "analysis.cross_section"
+args = { start_lon = -0.13, start_lat = 51.5, end_lon = -0.12, end_lat = 51.52, samples = 60.0 }
+
+[tolerance]
+start_lon = 0.001
+start_lat = 0.001
+end_lon = 0.001
+end_lat = 0.001

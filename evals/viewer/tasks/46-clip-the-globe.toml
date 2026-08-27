@@ -1,0 +1,8 @@
+id = "clip-the-globe"
+prompt = "cut the globe open along the y axis at 30 percent"
+notes = "The axis is one of a fixed set and the position is a percentage."
+
+[expect]
+action = "run"
+name = "scene.clipping"
+args = { on = true, axis = "y", position = 30.0 }
