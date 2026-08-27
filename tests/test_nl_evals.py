@@ -13,12 +13,13 @@ import re
 import httpx
 import pytest
 
+from evals.platform_token import auth_headers
+from evals.runner import run_events, sibyl_refuses_the_token
 from src.agents.agent_manager import PERSONA
 
 GEOLANG = os.environ.get("NL_EVAL_GEOLANG", "http://localhost:8080")
 SIBYL = os.environ.get("NL_EVAL_SIBYL", "http://localhost:8090")
 MODEL_PROBE = os.environ.get("NL_EVAL_MODEL", "http://172.17.0.1:18200/v1/models")
-RUN_READ_TIMEOUT = 240.0
 
 
 def _up(url: str) -> bool:
@@ -48,9 +49,14 @@ pytestmark = pytest.mark.skipif(
     not (
         _up(f"{GEOLANG}/tools")
         and _up(f"{SIBYL}/health")
+        # sibyl gates /runs, and without a token every test here fails 401
+        and not sibyl_refuses_the_token()
         and (_allow_cloud or (_up(MODEL_PROBE) and _sibyl_is_local()))
     ),
-    reason="local model chain not up (geolang api + sibyl in local mode + llama server)",
+    reason=(
+        "local model chain not up (geolang api + sibyl in local mode + llama "
+        "server), or no token for sibyl"
+    ),
 )
 
 
@@ -84,29 +90,21 @@ class RunResult:
 
 def run_prompt(message: str) -> RunResult:
     res = RunResult()
-    timeout = httpx.Timeout(connect=10.0, read=RUN_READ_TIMEOUT, write=30.0, pool=10.0)
-    with httpx.Client(timeout=timeout) as client:
-        with client.stream(
-            "POST", f"{SIBYL}/runs", json={"system_prompt": PERSONA, "message": message}
-        ) as r:
-            r.raise_for_status()
-            for line in r.iter_lines():
-                if not line.strip():
-                    continue
-                ev = json.loads(line)
-                kind = ev.get("kind")
-                if kind == "tool_call":
-                    res.tool_calls.append((str(ev.get("name") or ""), str(ev.get("args") or "")))
-                elif kind == "tool_return":
-                    res.tool_returns.append((str(ev.get("name") or ""), str(ev.get("content") or "")))
-                elif kind == "text":
-                    res.texts.append(str(ev.get("content") or ""))
+    for ev in run_events({"system_prompt": PERSONA, "message": message}):
+        kind = ev.get("kind")
+        if kind == "tool_call":
+            res.tool_calls.append((str(ev.get("name") or ""), str(ev.get("args") or "")))
+        elif kind == "tool_return":
+            res.tool_returns.append((str(ev.get("name") or ""), str(ev.get("content") or "")))
+        elif kind == "text":
+            res.texts.append(str(ev.get("content") or ""))
     return res
 
 
 def fetch_geojson(path: str) -> dict:
     name = path.split("/")[-1]
-    r = httpx.get(f"{GEOLANG}/geojson/{name}", timeout=60)
+    # geolang gates the artifact routes the same way sibyl gates its own
+    r = httpx.get(f"{GEOLANG}/geojson/{name}", headers=auth_headers(), timeout=60)
     r.raise_for_status()
     return r.json()
 

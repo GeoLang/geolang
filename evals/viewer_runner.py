@@ -16,7 +16,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 
 from evals import runner
 from evals.runner import (
@@ -25,7 +24,9 @@ from evals.runner import (
     delete_sessions,
     markdown_report,
     restore_session,
+    run_events,
     service_up,
+    sibyl_refuses_the_token,
     start_eval_session,
 )
 from evals.scoring import TaskSamples, aggregate
@@ -42,6 +43,8 @@ def viewer_skip_reason(allow_cloud: bool) -> str:
         return f"geolang api not up at {runner.GEOLANG}"
     if not service_up(f"{runner.SIBYL}/health"):
         return f"sibyl not up at {runner.SIBYL}"
+    if sibyl_refuses_the_token():
+        return runner.TOKEN_HINT
     _, _, server = active_profile()
     if server == "cloud" and not allow_cloud:
         return "sibyl is on the cloud profile: pass --allow-cloud to spend credits"
@@ -52,33 +55,22 @@ def capture_calls(prompt: str, system_prompt: str) -> list:
     """Every viewer_control call of one run, arguments decoded.
 
     A call whose arguments will not parse is dropped: the viewer could not have
-    run it either, so it is not an answer.
+    run it either, so it is not an answer. A run cut short keeps the calls it
+    made before it went, since a model that answered and then rambled on still
+    answered.
     """
     calls = []
-    timeout = httpx.Timeout(
-        connect=10.0, read=runner.RUN_READ_TIMEOUT, write=30.0, pool=10.0
-    )
-    with httpx.Client(timeout=timeout) as client:
-        with client.stream(
-            "POST",
-            f"{runner.SIBYL}/runs",
-            json={"system_prompt": system_prompt, "message": prompt},
-        ) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if not line.strip():
-                    continue
-                event = json.loads(line)
-                if event.get("kind") != "tool_call":
-                    continue
-                if str(event.get("name") or "") != VIEWER_CONTROL_TOOL:
-                    continue
-                try:
-                    arguments = json.loads(str(event.get("args") or ""))
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(arguments, dict):
-                    calls.append(arguments)
+    for event in run_events({"system_prompt": system_prompt, "message": prompt}):
+        if event.get("kind") != "tool_call":
+            continue
+        if str(event.get("name") or "") != VIEWER_CONTROL_TOOL:
+            continue
+        try:
+            arguments = json.loads(str(event.get("args") or ""))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(arguments, dict):
+            calls.append(arguments)
     return calls
 
 

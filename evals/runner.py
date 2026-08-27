@@ -16,12 +16,14 @@ from pathlib import Path
 
 import httpx
 
+from evals.platform_token import SECRET_ENV, TOKEN_ENV, auth_headers, run_body
 from evals.scoring import TaskSamples, aggregate, load_tasks, score_manifest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GEOLANG = os.environ.get("NL_EVAL_GEOLANG", "http://localhost:8080")
 SIBYL = os.environ.get("NL_EVAL_SIBYL", "http://localhost:8090")
-RUN_READ_TIMEOUT = 300.0
+# httpx waits this long per chunk, so it only fires on a stalled stream
+RUN_READ_TIMEOUT = 90.0
 
 
 def service_up(url: str) -> bool:
@@ -29,6 +31,25 @@ def service_up(url: str) -> bool:
         return httpx.get(url, timeout=3).status_code == 200
     except Exception:
         return False
+
+
+def sibyl_refuses_the_token() -> bool:
+    """True when sibyl answers 401, so the harness has no usable token.
+
+    /sessions is the cheapest gated route, and a 401 here is what every later
+    call would hit, one task at a time, with nothing said about why.
+    """
+    try:
+        response = httpx.get(f"{SIBYL}/sessions", headers=auth_headers(), timeout=5)
+    except Exception:
+        return False
+    return response.status_code == 401
+
+
+TOKEN_HINT = (
+    f"sibyl refuses the token: set {TOKEN_ENV} to a platform JWT, or {SECRET_ENV} "
+    "to the shared secret to mint one"
+)
 
 
 def active_profile() -> tuple:
@@ -66,6 +87,8 @@ def stack_skip_reason(allow_cloud: bool) -> str:
         return f"geolang api not up at {GEOLANG}"
     if not service_up(f"{SIBYL}/health"):
         return f"sibyl not up at {SIBYL}"
+    if sibyl_refuses_the_token():
+        return TOKEN_HINT
     _, _, server = active_profile()
     if server == "cloud" and not allow_cloud:
         return "sibyl is on the cloud profile: pass --allow-cloud to spend credits"
@@ -109,10 +132,14 @@ def ensure_fixtures(tasks: list) -> list:
 
 def active_session_id():
     try:
-        sessions = httpx.get(f"{SIBYL}/sessions", timeout=5).json()
+        sessions = httpx.get(f"{SIBYL}/sessions", headers=auth_headers(), timeout=5).json()
     except Exception:
         return None
-    return next((s["id"] for s in sessions if s.get("active")), None)
+    # a refusal answers with an object, and iterating that walks its keys
+    if not isinstance(sessions, list):
+        return None
+    entries = [s for s in sessions if isinstance(s, dict)]
+    return next((s["id"] for s in entries if s.get("active")), None)
 
 
 def start_eval_session(name: str):
@@ -121,16 +148,22 @@ def start_eval_session(name: str):
     A run always replays sibyl's active session, and a model that refused once
     ("that file does not exist") repeats itself from its own history otherwise.
     """
-    created = httpx.post(f"{SIBYL}/sessions", json={"name": name}, timeout=10).json()
-    session_id = created["id"]
-    httpx.post(f"{SIBYL}/sessions/{session_id}/activate", timeout=10).raise_for_status()
+    headers = auth_headers()
+    response = httpx.post(f"{SIBYL}/sessions", json={"name": name}, headers=headers, timeout=10)
+    response.raise_for_status()
+    session_id = response.json()["id"]
+    httpx.post(
+        f"{SIBYL}/sessions/{session_id}/activate", headers=headers, timeout=10
+    ).raise_for_status()
     return session_id
 
 
 def restore_session(session_id) -> None:
     if session_id:
         try:
-            httpx.post(f"{SIBYL}/sessions/{session_id}/activate", timeout=10)
+            httpx.post(
+                f"{SIBYL}/sessions/{session_id}/activate", headers=auth_headers(), timeout=10
+            )
         except Exception as e:
             print(f"could not reactivate session {session_id}: {e}", file=sys.stderr)
 
@@ -138,9 +171,34 @@ def restore_session(session_id) -> None:
 def delete_sessions(session_ids) -> None:
     for session_id in session_ids:
         try:
-            httpx.delete(f"{SIBYL}/sessions/{session_id}", timeout=10)
+            httpx.delete(f"{SIBYL}/sessions/{session_id}", headers=auth_headers(), timeout=10)
         except Exception as e:
             print(f"could not delete session {session_id}: {e}", file=sys.stderr)
+
+
+def run_events(body: dict):
+    """Every event of one run, as it arrives.
+
+    A model that loops decodes until the read timeout, and a dropped connection
+    ends the stream early. Either way the events already read are what the model
+    did, so this stops rather than raising: one stuck sample must not cost the
+    rest of a sweep. A refused or failed request still raises, since that is a
+    problem with the stack rather than with one prompt.
+    """
+    timeout = httpx.Timeout(connect=10.0, read=RUN_READ_TIMEOUT, write=30.0, pool=10.0)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            with client.stream("POST", f"{SIBYL}/runs", json=run_body(body)) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+    except httpx.TransportError as e:
+        print(f"  run cut short: {e}", file=sys.stderr)
 
 
 PLANNING_TOOLS = ("plan_workflow", "run_workflow")
@@ -169,39 +227,30 @@ def capture_answer(message: str):
     # a turn can carry several calls before any result, so results are matched to
     # calls by tool name in order rather than assuming they interleave
     pending = {}
-    timeout = httpx.Timeout(connect=10.0, read=RUN_READ_TIMEOUT, write=30.0, pool=10.0)
-    with httpx.Client(timeout=timeout) as client:
-        # imported late so scoring a capture needs neither the tools nor the stack
-        from src.agents.agent_manager import PERSONA
+    # imported late so scoring a capture needs neither the tools nor the stack
+    from src.agents.agent_manager import PERSONA
 
-        with client.stream(
-            "POST", f"{SIBYL}/runs", json={"system_prompt": PERSONA, "message": message}
-        ) as r:
-            r.raise_for_status()
-            for line in r.iter_lines():
-                if not line.strip():
-                    continue
-                event = json.loads(line)
-                kind = event.get("kind")
-                name = str(event.get("name") or "")
-                if kind == "tool_call":
-                    tools.append(name)
-                    if name not in PLANNING_TOOLS:
-                        continue
-                    try:
-                        args = json.loads(str(event.get("args") or ""))
-                    except json.JSONDecodeError:
-                        continue
-                    toml_text = args.get("manifest_toml")
-                    if toml_text:
-                        pending.setdefault(name, []).append(str(toml_text))
-                elif kind == "tool_return" and pending.get(name):
-                    manifest = pending[name].pop(0)
-                    content = str(event.get("content") or "").strip()
-                    if content.upper().startswith("ERROR"):
-                        rejection = content
-                    else:
-                        accepted.append(manifest)
+    for event in run_events({"system_prompt": PERSONA, "message": message}):
+        kind = event.get("kind")
+        name = str(event.get("name") or "")
+        if kind == "tool_call":
+            tools.append(name)
+            if name not in PLANNING_TOOLS:
+                continue
+            try:
+                args = json.loads(str(event.get("args") or ""))
+            except json.JSONDecodeError:
+                continue
+            toml_text = args.get("manifest_toml")
+            if toml_text:
+                pending.setdefault(name, []).append(str(toml_text))
+        elif kind == "tool_return" and pending.get(name):
+            manifest = pending[name].pop(0)
+            content = str(event.get("content") or "").strip()
+            if content.upper().startswith("ERROR"):
+                rejection = content
+            else:
+                accepted.append(manifest)
     # a call whose result never arrived stays an answer, so a truncated run fails
     # loudly instead of scoring as though the model planned nothing
     for leftover in pending.values():
