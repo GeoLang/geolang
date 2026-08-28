@@ -138,7 +138,10 @@ def topological_transforms(manifest: dict) -> list:
         # a source, a dangling reference, or a cycle: treat as the graph root
         if step is None or name in seen:
             return 0
-        value = 1 + depth(step.get("input"), seen | {name})
+        parents = [step.get("input")]
+        if step.get("join"):
+            parents.append(step.get("join"))
+        value = 1 + max(depth(parent, seen | {name}) for parent in parents)
         cache[name] = value
         return value
 

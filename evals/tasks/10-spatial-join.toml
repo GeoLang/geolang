@@ -1,0 +1,21 @@
+id = "spatial-join"
+prompt = "Using a workflow, tag every point in outputs/eval_incidents.geojson with the name of the district polygon it falls inside, from outputs/eval_districts.gpkg, and save a GeoPackage."
+inputs = ["outputs/eval_incidents.geojson", "outputs/eval_districts.gpkg"]
+notes = """Two sources, one spatial_join. join names the districts step. The
+direct spatial_join tool still exists for a one-shot join; this task asks for a
+workflow, so the answer is a manifest."""
+
+[expect]
+ordered = false
+
+[[expect.source]]
+format = "geojson"
+
+[[expect.source]]
+format = "geopackage"
+
+[[expect.transform]]
+operation = "spatial_join"
+
+[[expect.sink]]
+format = "geopackage"

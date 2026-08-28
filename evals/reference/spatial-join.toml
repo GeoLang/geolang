@@ -1,0 +1,24 @@
+[project]
+name = "incidents-by-district"
+
+[[source]]
+name = "incidents"
+format = "geojson"
+path = "outputs/eval_incidents.geojson"
+
+[[source]]
+name = "districts"
+format = "geopackage"
+path = "outputs/eval_districts.gpkg"
+
+[[transform]]
+name = "tagged"
+input = "incidents"
+join = "districts"
+operation = "spatial_join"
+
+[[sink]]
+name = "out"
+input = "tagged"
+format = "geopackage"
+path = "outputs/eval_incidents_by_district.gpkg"

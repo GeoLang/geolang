@@ -384,10 +384,11 @@ def test_the_shipped_suite_loads_and_spans_the_pipeline():
         "reproject",
         "schema_map",
         "simplify",
+        "spatial_join",
     }
     formats = {canon_format(f) for t in tasks for f in t.sources + t.sinks}
     assert formats == {"csv", "geojson", "geopackage", "shapefile"}
-    assert [t.id for t in tasks if t.unavailable] == ["spatial-join-unavailable"]
+    assert [t.id for t in tasks if t.unavailable] == []
 
 
 def test_every_reference_answer_scores_one():

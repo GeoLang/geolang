@@ -64,8 +64,8 @@ def plan_workflow(manifest_toml: str, title: str = None) -> str:
     this, present the returned steps in plain language, and only call
     run_workflow with the same manifest once the user approves. Use this instead
     of chaining buffer_clip_dissolve, clip_layer and friends by hand whenever a
-    request needs several chained operations over files. A manifest cannot run
-    spatial_join (transforms take one input): call that tool directly."""
+    request needs several chained operations over files. spatial_join takes a
+    second input named by join, which is an earlier step."""
     import json
 
     manifest, error = parse_manifest(manifest_toml)

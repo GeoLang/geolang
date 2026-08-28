@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- 2026-08-28: a workflow may run `spatial_join`. geodukt takes `join` as the
+  other step, so eval task 10 is a real join rather than a negative
+  "unavailable" case, and the agent no longer tells the model to leave it out
+  of a manifest.
+
 ### Added
 - 2026-08-27: the viewer eval covers every action the viewer offers. 16 tasks
   under `evals/viewer/tasks/` for the terrain, scene, data, STAC and SQL actions
