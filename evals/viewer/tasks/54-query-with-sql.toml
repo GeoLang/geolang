@@ -1,7 +1,0 @@
-id = "query-with-sql"
-prompt = "count the rows in the parcels table with SQL"
-notes = "The SQL text is not pinned: what is scored is reaching for the query that reads rows back rather than the one that draws a layer."
-
-[expect]
-action = "run"
-name = "sql.query"

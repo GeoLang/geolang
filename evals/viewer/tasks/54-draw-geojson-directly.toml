@@ -1,0 +1,8 @@
+id = "draw-geojson-directly"
+prompt = "draw a triangle joining 7.41,43.72 and 7.44,43.72 and 7.42,43.75 on the map, and call the layer Survey area"
+notes = "The ring coordinates are not pinned, the layer name is. A polygon the model composes itself is the case data.import_url and marker.add cannot cover."
+
+[expect]
+action = "run"
+name = "data.add_geojson"
+args = { name = "Survey area" }
