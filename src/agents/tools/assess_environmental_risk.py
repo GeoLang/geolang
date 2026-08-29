@@ -20,6 +20,20 @@ OSM_LAYERS = {
 }
 
 
+def pinned_geocode_hit(hits):
+    """The hit Nominatim ranked first, or its equal-importance twin with the lowest id.
+
+    Nominatim's own order weighs how well the name matched, so it stays: sorting
+    by importance alone put New York (old name New Amsterdam) above Amsterdam.
+    It can still swap equally ranked hits between calls, so those tie-break on
+    osm_type and osm_id to keep the elevation sample grid anchored.
+    """
+    first = hits[0]
+    importance = float(first.get("importance") or 0.0)
+    tied = [hit for hit in hits if float(hit.get("importance") or 0.0) == importance]
+    return min(tied, key=lambda hit: (str(hit.get("osm_type") or ""), int(hit.get("osm_id") or 0)))
+
+
 def merged_tags(layers):
     merged = {}
     for tags in layers.values():
@@ -151,8 +165,6 @@ def assess_environmental_risk(
         if _coord_m:
             lat, lon = float(_coord_m.group(1)), float(_coord_m.group(2))
         else:
-            # pin the anchor: Nominatim can reorder equally-ranked hits between
-            # calls, and a moved anchor moves the whole elevation sample grid
             lat, lon = None, None
             try:
                 _geo_resp = requests.get(
@@ -170,14 +182,7 @@ def assess_environmental_risk(
             except Exception:
                 _hits = []
             if isinstance(_hits, list) and _hits:
-                _best = sorted(
-                    _hits,
-                    key=lambda h: (
-                        -float(h.get("importance") or 0.0),
-                        str(h.get("osm_type") or ""),
-                        int(h.get("osm_id") or 0),
-                    ),
-                )[0]
+                _best = pinned_geocode_hit(_hits)
                 lat, lon = float(_best["lat"]), float(_best["lon"])
             if lat is None:
                 lat, lon = ox.geocode(place_name)
