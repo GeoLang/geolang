@@ -1,8 +1,8 @@
 id = "renderer-back-to-the-globe"
 prompt = "put me back on the 3d globe"
-notes = "The other end of the same enum."
+notes = "The 3d globe is the globe tab. renderer.set would also show it, but the tab switch is the direct call."
 
 [expect]
 action = "run"
-name = "renderer.set"
-args = { renderer = "cesium" }
+name = "view.set_tab"
+args = { tab = "globe" }

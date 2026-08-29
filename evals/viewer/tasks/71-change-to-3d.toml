@@ -1,0 +1,8 @@
+id = "change-to-3d"
+prompt = "change to 3d"
+notes = "Said from the map tab. 3d names the globe tab, not a renderer value."
+
+[expect]
+action = "run"
+name = "view.set_tab"
+args = { tab = "globe" }
