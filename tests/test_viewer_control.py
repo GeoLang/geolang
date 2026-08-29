@@ -137,6 +137,17 @@ def test_run_parameters_written_into_url_are_taken_as_the_arguments():
     }
 
 
+def test_a_scalar_written_as_a_one_element_list_is_read_as_the_scalar():
+    """grok wraps numbers in a list; the viewer then never sees the call."""
+    assert _run_command(name="camera.fly_to", lon=[12.48], lat=["41.9"], height=[800000]) == {
+        "action": "run",
+        "params": {
+            "name": "camera.fly_to",
+            "args": {"lon": 12.48, "lat": 41.9, "height": 800000},
+        },
+    }
+
+
 def test_a_url_reaches_the_viewer_as_an_argument():
     assert _run_command(name="data.import_url", url="https://example.com/a.json") == {
         "action": "run",

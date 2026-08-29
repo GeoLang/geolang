@@ -64,6 +64,14 @@ class ViewerControlArgs(BaseModel):
         ),
     )
 
+    @field_validator("*", mode="before")
+    @classmethod
+    def take_a_scalar_out_of_a_one_element_list(cls, value):
+        # grok wraps a number or a string in a one-element list
+        if isinstance(value, list) and len(value) == 1:
+            return value[0]
+        return value
+
     @field_validator("args", mode="before")
     @classmethod
     def keep_args_as_json_text_of_an_object(cls, value):
