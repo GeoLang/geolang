@@ -13,3 +13,10 @@ cp tests/unit/fixtures/action-catalogue.json ../geolang/evals/viewer/catalogue.j
 
 Run the eval with `python -m evals.viewer_runner --repeat 3`. One run is a poor
 estimate of a score.
+
+`--record recordings/name.json` writes the tool calls each task drew, along with
+the pass or fail each one earned. `--replay recordings/name.json` scores those
+calls against the current tasks and snapshot without asking a model, so it needs
+neither sibyl nor the network and prints the same report a live run prints.
+`tests/test_viewer_replay.py` replays `recordings/grok-2026-08-29.json` and fails
+when any recorded score moves, which is what makes the eval a CI gate.

@@ -2,6 +2,7 @@
 
   python -m evals.viewer_runner
   python -m evals.viewer_runner --only layers-hide-parcels --repeat 3
+  python -m evals.viewer_runner --replay evals/viewer/recordings/grok-2026-08-29.json
 
 The viewer state and the action catalogue are fixtures under evals/viewer/, sent
 to sibyl exactly the way `/chat/agui` sends the live ones, so what the model is
@@ -79,6 +80,81 @@ def load_fixture(path):
         return json.load(fh)
 
 
+LIVE_RECORDING_SOURCE = "captured by evals.viewer_runner --record"
+
+
+def write_recording(path: Path, source: str, profile: str, model: str, captured: dict):
+    """The calls each task drew, so a later run can score them with no model.
+
+    `captured` is {task id: (calls, result)}. The result is written as the
+    pass/fail the recording claims, which is what makes a replay a fixed point.
+    """
+    document = {
+        "source": source,
+        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "profile": profile,
+        "model": model,
+        "tasks": [
+            {
+                "id": task_id,
+                "calls": calls,
+                "expected_pass": result.score == 1.0,
+            }
+            for task_id, (calls, result) in captured.items()
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, indent=2) + "\n")
+
+
+def replay_recording(entries: list, tasks: list, snapshot: dict) -> list:
+    """(recorded entry, score) for every recorded task, scored as a live run does."""
+    by_id = {task.id: task for task in tasks}
+    scored = []
+    for entry in entries:
+        task = by_id.get(entry["id"])
+        if task is None:
+            raise ValueError(f"recording names {entry['id']}, which no task defines")
+        scored.append((entry, score_calls(task, entry["calls"], snapshot)))
+    return scored
+
+
+def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
+    """(one TaskSamples per task, {task id: (calls, first run's score)})."""
+    # imported late so loading a task never needs the persona or the tools
+    from src.api.viewer_state import system_prompt_for
+
+    catalogue = load_fixture(args.catalogue)
+    system_prompt = system_prompt_for({"viewer": snapshot, "actions": catalogue})
+
+    results = []
+    captured = {}
+    user_session = active_session_id()
+    eval_sessions = []
+    try:
+        for task in tasks:
+            samples = []
+            for run in range(1, args.repeat + 1):
+                label = (
+                    f"{task.id}…"
+                    if args.repeat == 1
+                    else f"{task.id} {run}/{args.repeat}…"
+                )
+                print(f"running {label}", file=sys.stderr)
+                # a fresh session per run, so one sample cannot bias the next
+                eval_sessions.append(start_eval_session(f"viewer eval {task.id} {run}"))
+                calls = capture_calls(task.prompt, system_prompt)
+                result = score_calls(task, calls, snapshot)
+                if run == 1:
+                    captured[task.id] = (calls, result)
+                samples.append(result)
+            results.append(TaskSamples(task.id, samples))
+    finally:
+        restore_session(user_session)
+        delete_sessions(eval_sessions)
+    return results, captured
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tasks", default=str(FIXTURE_DIR / "tasks"))
@@ -102,9 +178,27 @@ def main(argv=None) -> int:
         help="run each task N times and report the mean, the range and which "
         "tasks were flaky. Sampling makes one run a poor estimate of a score",
     )
+    parser.add_argument(
+        "--record",
+        metavar="PATH",
+        help="after the run, write the calls each task drew to PATH, so they can "
+        "be replayed later with no model",
+    )
+    parser.add_argument(
+        "--replay",
+        metavar="PATH",
+        help="score the calls in the recording at PATH instead of asking a model. "
+        "Reaches neither sibyl nor the network",
+    )
     args = parser.parse_args(argv)
     if args.repeat < 1:
         print("--repeat must be at least 1", file=sys.stderr)
+        return 2
+    if args.record and args.replay:
+        print(
+            "--record needs a live run, so it cannot go with --replay",
+            file=sys.stderr,
+        )
         return 2
 
     tasks = load_tasks(args.tasks)
@@ -114,44 +208,33 @@ def main(argv=None) -> int:
             print(f"no tasks match {args.only}", file=sys.stderr)
             return 2
 
-    reason = viewer_skip_reason(args.allow_cloud)
-    if reason:
-        print(f"SKIP: {reason}")
-        return 0
-
-    # imported late so loading a task never needs the persona or the tools
-    from src.api.viewer_state import system_prompt_for
-
     snapshot = load_fixture(args.snapshot)
-    catalogue = load_fixture(args.catalogue)
-    system_prompt = system_prompt_for({"viewer": snapshot, "actions": catalogue})
 
-    profile, model, _ = active_profile()
-    results = []
-    user_session = active_session_id()
-    eval_sessions = []
-    try:
-        for task in tasks:
-            samples = []
-            for run in range(1, args.repeat + 1):
-                label = (
-                    f"{task.id}…"
-                    if args.repeat == 1
-                    else f"{task.id} {run}/{args.repeat}…"
-                )
-                print(f"running {label}", file=sys.stderr)
-                # a fresh session per run, so one sample cannot bias the next
-                eval_sessions.append(start_eval_session(f"viewer eval {task.id} {run}"))
-                calls = capture_calls(task.prompt, system_prompt)
-                samples.append(score_calls(task, calls, snapshot))
-            results.append(TaskSamples(task.id, samples))
-    finally:
-        restore_session(user_session)
-        delete_sessions(eval_sessions)
+    if args.replay:
+        recording = load_fixture(args.replay)
+        wanted = {t.id for t in tasks}
+        entries = [e for e in recording["tasks"] if e["id"] in wanted]
+        scored = replay_recording(entries, tasks, snapshot)
+        results = [TaskSamples(entry["id"], [result]) for entry, result in scored]
+        profile = recording.get("profile") or "recording"
+        model = recording.get("model") or ""
+        mode = "replay"
+    else:
+        reason = viewer_skip_reason(args.allow_cloud)
+        if reason:
+            print(f"SKIP: {reason}")
+            return 0
+        profile, model, _ = active_profile()
+        results, captured = run_against_the_stack(args, tasks, snapshot)
+        mode = "stack"
+        if args.record:
+            write_recording(
+                Path(args.record), LIVE_RECORDING_SOURCE, profile, model, captured
+            )
 
     meta = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "mode": "stack",
+        "mode": mode,
         "profile": profile,
         "model": model,
         "aggregate": aggregate(results),
