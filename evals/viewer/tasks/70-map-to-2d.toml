@@ -1,0 +1,8 @@
+id = "map-to-2d"
+prompt = "change map to 2d"
+notes = "2d names the map tab, so this is a tab switch and no renderer value fits."
+
+[expect]
+action = "run"
+name = "view.set_tab"
+args = { tab = "map" }

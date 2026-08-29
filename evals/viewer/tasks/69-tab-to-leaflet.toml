@@ -1,0 +1,8 @@
+id = "tab-to-leaflet"
+prompt = "change renderer to leaflet"
+notes = "leaflet is not a renderer.set value: it is what the map tab draws with."
+
+[expect]
+action = "run"
+name = "view.set_tab"
+args = { tab = "map" }

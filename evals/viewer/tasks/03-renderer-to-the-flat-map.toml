@@ -1,8 +1,8 @@
 id = "renderer-to-the-flat-map"
 prompt = "switch to the flat 2d map"
-notes = "'flat 2d map' has to land on the maplibre renderer, one of the enum values."
+notes = "The flat 2d map is the map tab drawn by Leaflet, not a renderer.set value."
 
 [expect]
 action = "run"
-name = "renderer.set"
-args = { renderer = "maplibre" }
+name = "view.set_tab"
+args = { tab = "map" }
