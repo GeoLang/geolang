@@ -1,0 +1,8 @@
+id = "switch-to-leaflet"
+prompt = "switch to leaflet"
+notes = "Short form of tab-to-leaflet. Grok read it as renderer.set maplibre on 2026-08-29."
+
+[expect]
+action = "run"
+name = "view.set_tab"
+args = { tab = "map" }

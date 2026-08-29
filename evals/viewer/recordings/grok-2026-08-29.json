@@ -5,52 +5,14 @@
   "model": "grok",
   "tasks": [
     {
-      "id": "camera-fly-to-coordinates",
-      "calls": [
-        {
-          "action": "run",
-          "name": "camera.fly_to",
-          "lon": ["12.4813"],
-          "lat": ["41.8979"],
-          "height": ["800000"]
-        },
-        {
-          "action": "run",
-          "name": "camera.fly_to",
-          "lon": 12.4813,
-          "lat": 41.8979,
-          "height": 800000
-        }
-      ],
-      "expected_pass": false
-    },
-    {
-      "id": "camera-fly-to-height",
-      "calls": [
-        {
-          "action": "run",
-          "name": "camera.fly_to",
-          "lon": ["12.4813"],
-          "lat": ["41.8979"],
-          "height": ["800000"]
-        },
-        {
-          "action": "run",
-          "name": "camera.fly_to",
-          "lon": 12.4813,
-          "lat": 41.8979,
-          "height": 800000
-        }
-      ],
-      "expected_pass": false
-    },
-    {
       "id": "renderer-to-the-flat-map",
       "calls": [
         {
           "action": "run",
           "name": "renderer.set",
-          "renderer": {"renderer": "maplibre"}
+          "renderer": {
+            "renderer": "maplibre"
+          }
         }
       ],
       "expected_pass": false
@@ -58,23 +20,47 @@
     {
       "id": "renderer-named-by-value",
       "calls": [
-        {"action": "run", "name": "renderer.set", "renderer": "3d"},
-        {"action": "run", "name": "renderer.set", "renderer": ["cesium"]},
-        {"action": "run", "name": "renderer.set", "renderer": "cesium"}
+        {
+          "action": "run",
+          "name": "renderer.set",
+          "renderer": "3d"
+        },
+        {
+          "action": "run",
+          "name": "renderer.set",
+          "renderer": [
+            "cesium"
+          ]
+        },
+        {
+          "action": "run",
+          "name": "renderer.set",
+          "renderer": "cesium"
+        }
       ],
       "expected_pass": true
     },
     {
       "id": "map-to-2d",
       "calls": [
-        {"action": "run", "name": "view.set_tab", "tab": "map"}
+        {
+          "action": "run",
+          "name": "view.set_tab",
+          "tab": "map"
+        }
       ],
       "expected_pass": true
     },
     {
       "id": "change-to-3d",
       "calls": [
-        {"action": "run", "name": "view.set_tab", "tab": ["globe"]}
+        {
+          "action": "run",
+          "name": "view.set_tab",
+          "tab": [
+            "globe"
+          ]
+        }
       ],
       "expected_pass": false
     }
