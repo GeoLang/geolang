@@ -1,0 +1,8 @@
+id = "renderer-named-by-value"
+prompt = "change renderer to cesium"
+notes = "The value is spelled out in the prompt. A model that still sends a paraphrase such as '3d' fails the enum."
+
+[expect]
+action = "run"
+name = "renderer.set"
+args = { renderer = "cesium" }
