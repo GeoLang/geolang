@@ -174,3 +174,70 @@ def test_the_manifest_advertises_args_as_text():
 def test_arguments_that_are_not_an_object_are_refused(text):
     with pytest.raises(ValidationError):
         ViewerControlArgs(action="run", name="layers.set_visible", args=text)
+
+
+# ── the shapes a model writes a scalar in ────────────────────────────────
+
+# one value per declared scalar field, spelled the way the action wants it
+SCALAR_FIELD_VALUES = {
+    "lon": -0.09,
+    "lat": 51.51,
+    "height": 800000.0,
+    "heading": 90.0,
+    "pitch": -45.0,
+    "duration": 2.5,
+    "label": "Depot B",
+    "color": "#ff0000",
+    "url": "https://example.org/data/wards.geojson",
+    "attribute": "Classification",
+    "iso": "2026-06-01T00:00:00Z",
+    "name": "camera.fly_to",
+}
+
+FLOAT_FIELDS = [f for f, v in SCALAR_FIELD_VALUES.items() if isinstance(v, float)]
+
+
+def _shapes(value):
+    """Every way a model has been seen to write one scalar."""
+    written = [value, [value]]
+    if isinstance(value, float):
+        written += [str(value), [str(value)]]
+    return written
+
+
+def _field_shape_rows():
+    for field, value in SCALAR_FIELD_VALUES.items():
+        for written in _shapes(value):
+            yield field, written, value
+
+
+@pytest.mark.parametrize("field,written,plain", list(_field_shape_rows()))
+def test_a_scalar_field_reads_every_shape_a_model_writes_it_in(field, written, plain):
+    args = ViewerControlArgs(action="run", **{"name": "camera.fly_to", field: written})
+
+    assert getattr(args, field) == plain
+
+
+@pytest.mark.parametrize("field", sorted(SCALAR_FIELD_VALUES))
+def test_a_two_element_list_is_refused(field):
+    value = SCALAR_FIELD_VALUES[field]
+    with pytest.raises(ValidationError):
+        ViewerControlArgs(action="run", **{"name": "camera.fly_to", field: [value, value]})
+
+
+@pytest.mark.parametrize("field", FLOAT_FIELDS)
+def test_a_list_holding_something_that_is_not_a_number_is_refused(field):
+    with pytest.raises(ValidationError):
+        ViewerControlArgs(action="run", name="camera.fly_to", **{field: ["north"]})
+
+
+def test_a_field_written_as_an_object_naming_itself_is_read_as_its_value():
+    args = ViewerControlArgs(action="run", name="camera.fly_to", lon={"lon": ["2.35"]})
+
+    assert args.lon == 2.35
+
+
+def test_a_field_written_as_an_object_with_no_value_is_read_as_its_key():
+    args = ViewerControlArgs(action="run", name={"camera.fly_to": None})
+
+    assert args.name == "camera.fly_to"

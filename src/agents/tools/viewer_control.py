@@ -21,6 +21,23 @@ ViewerAction = Literal["run"]
 # is a way to hand its origin a payload instead
 ALLOWED_URL_SCHEMES = {"http", "https"}
 
+# the fields holding one number or one string, so a wrapper around that scalar
+# can be read off. args is not one of them: it carries an object
+SCALAR_FIELDS = (
+    "lon",
+    "lat",
+    "height",
+    "heading",
+    "pitch",
+    "duration",
+    "label",
+    "color",
+    "url",
+    "attribute",
+    "iso",
+    "name",
+)
+
 
 class ViewerControlArgs(BaseModel):
     # a run's parameters arrive as plain fields of the call, whatever the
@@ -68,6 +85,24 @@ class ViewerControlArgs(BaseModel):
     @classmethod
     def take_a_scalar_out_of_a_one_element_list(cls, value):
         # grok wraps a number or a string in a one-element list
+        if isinstance(value, list) and len(value) == 1:
+            return value[0]
+        return value
+
+    @field_validator(*SCALAR_FIELDS, mode="before")
+    @classmethod
+    def take_a_scalar_out_of_an_object_naming_it(cls, value, info):
+        """`{"renderer": "cesium"}` and `{"cesium": null}` both read as "cesium".
+
+        The viewer reads these two shapes for an action's own parameters, so the
+        fields the tool declares have to read them too.
+        """
+        if isinstance(value, dict) and len(value) == 1:
+            only_key, only_value = next(iter(value.items()))
+            if only_key == info.field_name:
+                value = only_value
+            elif only_value is None:
+                value = only_key
         if isinstance(value, list) and len(value) == 1:
             return value[0]
         return value
