@@ -33,11 +33,16 @@ GeoLang reads provider keys from environment variables. **Do not commit keys to
 export SIBYL_CLOUD_API_KEY="your-provider-key-here"
 ```
 
-sibyl sends that key as a bearer token to `SIBYL_CLOUD_API_BASE`, which defaults
-to x.ai. `SIBYL_CLOUD_MODELS` lists the cloud models offered in the viewer.
-`SIBYL_LOCAL_API_BASE` plus `SIBYL_LOCAL_MODELS` add local models on top, see
-[../sibyl/README.md](../sibyl/README.md) for the llama-server launch. Every
-model in either list is one entry in the viewer's model switch.
+That export is optional. sibyl sends a cloud key as a bearer token to
+`SIBYL_CLOUD_API_BASE`, which defaults to x.ai. `SIBYL_CLOUD_MODELS` lists the
+cloud models offered in the viewer. `SIBYL_LOCAL_API_BASE` plus
+`SIBYL_LOCAL_MODELS` add local models on top, see
+[../sibyl/README.md](../sibyl/README.md) for the llama-server launch. Settings
+in the viewer is the live path: it switches local/cloud and can paste a cloud
+key, base and model list. Those are stored in sibyl's sqlite, take effect on
+the next message, and override env on the next start. The key never comes back
+in `GET /models`. The agent starts with no key at all; a run then asks you to
+pick a model in Settings.
 
 ### Run both services
 

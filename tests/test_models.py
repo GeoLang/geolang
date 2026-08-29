@@ -69,3 +69,70 @@ def test_sibyl_being_down_is_a_503():
     assert listed.status_code == 503
     assert "unreachable" in listed.json()["detail"]
     assert switched.status_code == 503
+
+
+def test_setting_cloud_credentials_forwards_the_body_and_bearer():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = sibyl.put("/model/cloud").respond(204)
+
+        response = client.put(
+            "/model/cloud",
+            json={
+                "base": "https://api.anthropic.com/v1",
+                "key": "sk-ant-test",
+                "models": "claude-sonnet-4-5",
+            },
+            headers={"Authorization": "Bearer user-token"},
+        )
+
+    assert response.status_code == 204
+    assert json.loads(route.calls.last.request.content) == {
+        "base": "https://api.anthropic.com/v1",
+        "key": "sk-ant-test",
+        "models": "claude-sonnet-4-5",
+    }
+    assert route.calls.last.request.headers["authorization"] == "Bearer user-token"
+
+
+def test_invalid_cloud_credentials_stay_a_400():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.put("/model/cloud").respond(400, json={"error": "base must be an http or https URL"})
+
+        response = client.put("/model/cloud", json={"base": "not-a-url"})
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "base must be an http or https URL"}
+
+
+def test_upserting_a_provider_forwards_the_body_and_bearer():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = sibyl.put("/model/providers").respond(204)
+
+        response = client.put(
+            "/model/providers",
+            json={
+                "id": "anthropic",
+                "server": "cloud",
+                "base": "https://api.anthropic.com/v1",
+                "key": "sk-ant-test",
+                "models": "claude-sonnet-4-5",
+            },
+            headers={"Authorization": "Bearer user-token"},
+        )
+
+    assert response.status_code == 204
+    assert json.loads(route.calls.last.request.content)["id"] == "anthropic"
+    assert route.calls.last.request.headers["authorization"] == "Bearer user-token"
+
+
+def test_deleting_a_provider_forwards_the_id():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = sibyl.delete("/model/providers/anthropic").respond(204)
+
+        response = client.delete(
+            "/model/providers/anthropic",
+            headers={"Authorization": "Bearer user-token"},
+        )
+
+    assert response.status_code == 204
+    assert route.called

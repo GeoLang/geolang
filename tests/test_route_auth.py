@@ -81,6 +81,14 @@ GATED = [
     ("session_delete", "delete", "/sessions/s1", {}),
     ("models", "get", "/models", {}),
     ("model_set", "put", "/model", {"json": {"profile": "local"}}),
+    ("model_cloud", "put", "/model/cloud", {"json": {"models": "grok-4"}}),
+    (
+        "model_provider_upsert",
+        "put",
+        "/model/providers",
+        {"json": {"server": "cloud", "base": "https://api.x.ai/v1", "models": "grok-4"}},
+    ),
+    ("model_provider_delete", "delete", "/model/providers/cloud", {}),
     ("share_create", "post", "/share", {"json": {}}),
     ("workflow_approve", "post", "/workflow/approve", {"json": {"manifest_toml": ""}}),
 ]
@@ -162,6 +170,9 @@ def stubs(monkeypatch, tmp_path):
         sibyl.delete("/sessions/s1").respond(200, json={"deleted": "s1"})
         sibyl.get("/models").respond(200, json={"models": []})
         sibyl.put("/model").respond(200, json={"active": "local"})
+        sibyl.put("/model/cloud").respond(204)
+        sibyl.put("/model/providers").respond(204)
+        sibyl.delete("/model/providers/cloud").respond(204)
         yield
 
 

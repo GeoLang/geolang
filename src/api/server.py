@@ -1376,6 +1376,44 @@ async def set_model(request: Request):
     )
 
 
+@app.put("/model/cloud", dependencies=[Depends(platform_auth)])
+async def set_cloud_model(request: Request):
+    """Rewrite sibyl's default `cloud` provider. Key is write-only."""
+    return _sibyl_passthrough(
+        await sibyl_request(
+            "PUT",
+            "/model/cloud",
+            request.headers.get("authorization"),
+            json=await request.json(),
+        )
+    )
+
+
+@app.put("/model/providers", dependencies=[Depends(platform_auth)])
+async def upsert_model_provider(request: Request):
+    """Add or update a named cloud or local provider. Key is write-only."""
+    return _sibyl_passthrough(
+        await sibyl_request(
+            "PUT",
+            "/model/providers",
+            request.headers.get("authorization"),
+            json=await request.json(),
+        )
+    )
+
+
+@app.delete("/model/providers/{provider_id}", dependencies=[Depends(platform_auth)])
+async def delete_model_provider(provider_id: str, request: Request):
+    """Remove a named provider and its profiles."""
+    return _sibyl_passthrough(
+        await sibyl_request(
+            "DELETE",
+            f"/model/providers/{provider_id}",
+            request.headers.get("authorization"),
+        )
+    )
+
+
 @app.get("/debug/tools")
 def debug_tools():
     """Names of the tools geolang serves to sibyl."""

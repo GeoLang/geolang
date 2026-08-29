@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-08-28: `PUT /model/providers` and `DELETE /model/providers/{id}` are
+  proxied to sibyl so the viewer can keep several cloud APIs and local
+  servers. `PUT /model/cloud` still rewrites the default `cloud` provider.
+  Keys are write-only.
 - 2026-08-28: a workflow may run `spatial_join`. geodukt takes `join` as the
   other step, so eval task 10 is a real join rather than a negative
   "unavailable" case, and the agent no longer tells the model to leave it out
