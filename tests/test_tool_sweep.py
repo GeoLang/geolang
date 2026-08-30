@@ -15,6 +15,7 @@ importable: the platform image, which is where the README runs this suite. On a
 checkout without them the test skips rather than passes.
 """
 
+import ast
 import json
 import re
 from functools import lru_cache
@@ -24,6 +25,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from src.agents.tool_imports import missing_packages
 from src.api import server
 from src.core import utils
 from src.core.qgis_session import QgisUnavailable, qgis_session
@@ -80,8 +82,38 @@ def manifest_names() -> set[str]:
     return {tool["name"] for tool in client.get("/tools").json()["tools"]}
 
 
-def test_every_manifest_tool_has_sweep_arguments():
-    assert manifest_names() == set(SWEEP_ARGUMENTS)
+def tool_module_paths() -> dict[str, Path]:
+    """Every tool name and the module defining it, read without importing.
+
+    A tool the manifest left out cannot be imported here, so its name has to
+    come from the source.
+    """
+    paths = {}
+    for path in sorted((REPO_ROOT / "src" / "agents" / "tools").glob("*.py")):
+        for node in ast.parse(path.read_text()).body:
+            defines_tool = isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "TOOL_FUNCTION"
+                for target in node.targets
+            )
+            if defines_tool and isinstance(node.value, ast.Name):
+                paths[node.value.id] = path
+    return paths
+
+
+def test_the_manifest_offers_every_catalogue_tool_this_install_can_run():
+    """QGIS is absent outside the platform image, so pyqgis_api is absent too.
+
+    Anything else leaving the manifest is a tool that broke, not a tool this
+    install cannot satisfy.
+    """
+    names = manifest_names()
+    assert names <= set(SWEEP_ARGUMENTS)
+
+    paths = tool_module_paths()
+    for absent in set(SWEEP_ARGUMENTS) - names:
+        assert missing_packages(paths[absent].read_text()), (
+            f"{absent} is not in the manifest yet every package it imports is installed"
+        )
 
 
 @pytest.mark.parametrize("name", OFFLINE_TOOLS)
@@ -163,10 +195,14 @@ def test_a_failed_cleanup_does_not_fail_the_sweep(capsys):
 
 
 def test_api_reference_lists_every_tool_and_counts_them():
-    """The tool catalogue in the docs, checked against the loaded manifest."""
+    """The tool catalogue in the docs, checked against the whole catalogue.
+
+    Not against the manifest: that is what this install can run, which is fewer
+    tools wherever a dependency is absent.
+    """
     text = (REPO_ROOT / "docs" / "api_reference.md").read_text()
     catalogue = text.split("## Tool catalogue")[1].split("Adding a tool")[0]
-    names = manifest_names()
+    names = set(SWEEP_ARGUMENTS)
 
     stated = re.search(r"(\d+) tools live under", catalogue)
     assert stated and int(stated.group(1)) == len(names)
@@ -178,4 +214,4 @@ def test_readme_counts_the_tools():
     readme = (REPO_ROOT / "README.md").read_text()
 
     stated = re.search(r"(\d+) geospatial tools", readme)
-    assert stated and int(stated.group(1)) == len(manifest_names())
+    assert stated and int(stated.group(1)) == len(SWEEP_ARGUMENTS)

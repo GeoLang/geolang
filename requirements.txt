@@ -8,3 +8,5 @@ osmnx
 scikit-learn
 rasterio
 rasterstats
+requests
+scipy

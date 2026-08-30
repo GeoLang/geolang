@@ -69,9 +69,10 @@ uv run --with-requirements requirements.txt \
 ```
 
 Both files are needed. `requirements_client.txt` names none of the geospatial
-libraries, and tools import lazily, so with it alone the server starts and `GET
-/tools` still advertises 40 while roughly 25 of them fail at call time. `requests`
-is declared in neither file and arrives transitively through osmnx.
+libraries, so with it alone `GET /tools` lists only the tools whose imports
+resolve, about 23 of the 40. Every tool left out is named in the startup log with
+the packages it needs, and `pyqgis_api` goes the same way wherever the QGIS
+bindings are absent.
 
 `TOOL_EXEC_DIR` auto-detects the geolang repo root from `src/core/utils.py`, so
 no env var is needed in dev. Override it via the `TOOL_EXEC_DIR` env var if you

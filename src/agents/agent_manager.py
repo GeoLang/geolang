@@ -8,6 +8,8 @@ import pkgutil
 import sys
 from pathlib import Path
 
+from src.agents.tool_imports import missing_packages
+
 logger = logging.getLogger(__name__)
 
 CALLER_CODE_ATTRIBUTE = "TOOL_RUNS_CALLER_CODE"
@@ -253,6 +255,10 @@ def load_external_tools():
     Each tool module under ``src/agents/tools/`` exposes ``TOOL_FUNCTION`` and
     ``TOOL_SCHEMA`` (a pydantic model describing its arguments). Returns a list of
     ``(function, schema)`` pairs.
+
+    A tool whose imports this install cannot satisfy is left out and named in the
+    log, so nothing reaches the manifest that would raise ModuleNotFoundError
+    when called.
     """
     tools = []
     try:
@@ -262,11 +268,21 @@ def load_external_tools():
         else:
             package = importlib.import_module(package_name)
 
+        tools_directory = Path(package.__path__[0])
+
         for module_info in pkgutil.iter_modules(package.__path__):
             if module_info.name.startswith("_"):
                 continue
             full_name = f"{package_name}.{module_info.name}"
             try:
+                source = (tools_directory / f"{module_info.name}.py").read_text()
+                missing = missing_packages(source)
+                if missing:
+                    logger.warning(
+                        f"Tool {module_info.name} is not offered here: "
+                        f"{', '.join(missing)} not installed"
+                    )
+                    continue
                 if full_name in sys.modules:
                     module = importlib.reload(sys.modules[full_name])
                 else:

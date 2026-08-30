@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-08-30: `GET /tools` offers a tool only where its imports resolve. The
+  tools import their dependencies inside their function bodies, so a client-only
+  install advertised 16 tools that raised ModuleNotFoundError when called, and
+  `pyqgis_api` wherever the QGIS bindings are absent. Each tool left
+  out is named in the startup log with the packages it needs.
+  `src/agents/tool_imports.py` reads the requirement from the source: an import
+  a try catches ImportError around is optional, and so is one under a try
+  catching Exception unless that try is the tool's body-wide error wrapper.
+  `requests` and `scipy` are now pinned in `requirements.txt` rather than
+  arriving through osmnx and scikit-learn.
 - 2026-08-28: `PUT /model/providers` and `DELETE /model/providers/{id}` are
   proxied to sibyl so the viewer can keep several cloud APIs and local
   servers. `PUT /model/cloud` still rewrites the default `cloud` provider.
