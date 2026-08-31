@@ -20,8 +20,9 @@ RECORDING = json.loads(
 SNAPSHOT = json.loads((FIXTURE_DIR / "snapshot.json").read_text())
 TASKS = load_tasks(FIXTURE_DIR / "tasks")
 
-# the calls in this recording that answer their prompt outright
-PASSING_TASKS = {"renderer-named-by-value", "map-to-2d"}
+# the calls in this recording that answer their prompt outright. change-to-3d
+# wraps its scalar in an array, which the scorer unwraps the way the viewer does
+PASSING_TASKS = {"renderer-named-by-value", "map-to-2d", "change-to-3d"}
 
 SCORED = replay_recording(RECORDING["tasks"], TASKS, SNAPSHOT)
 

@@ -142,6 +142,19 @@ def call_target(call: dict) -> str:
     return f"{action} {call.get('name')}"
 
 
+def _unwrap_singleton(want, got):
+    """A lone scalar inside an array, read as the viewer reads it.
+
+    Mirrors the viewer's `unwrapSingleton`: only where a scalar is expected,
+    so an expected array keeps its one element.
+    """
+    if isinstance(want, (list, dict)):
+        return got
+    if isinstance(got, list) and len(got) == 1:
+        return got[0]
+    return got
+
+
 def score_call(task: ViewerTask, call: dict, groups) -> list:
     """The checks one viewer_control call earns against the task."""
     hit = call_target(call) == task.target
@@ -154,7 +167,7 @@ def score_call(task: ViewerTask, call: dict, groups) -> list:
     ]
     arguments = call_arguments(call)
     for key, want in task.args.items():
-        got = arguments.get(key)
+        got = _unwrap_singleton(want, arguments.get(key))
         ok = got is not None and (
             values_match(want, got, task.tolerance.get(key))
             or (key in IDENTIFIER_ARGUMENTS and _same_thing(want, got, groups))

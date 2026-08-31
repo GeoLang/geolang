@@ -62,7 +62,7 @@
           ]
         }
       ],
-      "expected_pass": false
+      "expected_pass": true
     }
   ]
 }
