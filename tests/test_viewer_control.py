@@ -57,6 +57,44 @@ def test_a_url_that_is_not_a_network_address_is_refused(url):
         ViewerControlArgs(action="run", name="data.import_url", url=url)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        ["javascript:alert(1)"],
+        {"url": "file:///etc/passwd"},
+        {"data:text/html,x": None},
+        42,
+    ],
+)
+def test_a_url_inside_a_wrapper_is_read_out_of_it_and_refused(url):
+    """url is no longer a declared field, so the guard reads the wrappers itself."""
+    with pytest.raises(ValidationError):
+        ViewerControlArgs(action="run", name="data.import_url", url=url)
+
+
+def test_a_url_that_is_json_text_but_not_an_object_is_still_refused():
+    """Only an object moves into args, so this one reaches the scheme check."""
+    with pytest.raises(ValidationError):
+        ViewerControlArgs(action="run", name="data.import_url", url='"javascript:alert(1)"')
+
+
+@pytest.mark.parametrize(
+    "url", ["javascript:alert(1)", "file:///etc/passwd", ["javascript:alert(1)"]]
+)
+def test_a_url_inside_the_argument_object_is_refused(url):
+    """The viewer reads args.url and fetches it, so this path is checked too."""
+    with pytest.raises(ValidationError):
+        ViewerControlArgs(action="run", name="data.import_url", args={"url": url})
+
+
+def test_a_url_written_into_url_as_an_argument_object_is_refused():
+    """The object moves into args, and the check follows it there."""
+    with pytest.raises(ValidationError):
+        ViewerControlArgs(
+            action="run", name="data.import_url", url='{"url": "javascript:alert(1)"}'
+        )
+
+
 @pytest.mark.parametrize("url", ["http://example.com/a.json", "https://example.com/a.json"])
 def test_an_http_url_is_accepted(url):
     assert ViewerControlArgs(action="run", name="data.import_url", url=url).url == url
@@ -111,8 +149,8 @@ def test_run_parameters_given_as_plain_fields_reach_the_viewer():
     }
 
 
-def test_run_parameters_the_schema_also_names_reach_the_viewer():
-    """lon and lat are fields of the tool as well as parameters of the action."""
+def test_run_parameters_written_under_the_old_field_names_reach_the_viewer():
+    """The tool no longer declares lon, lat or height, and still carries them."""
     assert _run_command(name="camera.fly_to", **PARIS, height=800) == {
         "action": "run",
         "params": {
@@ -137,13 +175,14 @@ def test_run_parameters_written_into_url_are_taken_as_the_arguments():
     }
 
 
-def test_a_scalar_written_as_a_one_element_list_is_read_as_the_scalar():
-    """grok wraps numbers in a list; the viewer then never sees the call."""
-    assert _run_command(name="camera.fly_to", lon=[12.48], lat=["41.9"], height=[800000]) == {
+def test_an_http_url_inside_the_argument_object_reaches_the_viewer():
+    assert _run_command(
+        name="data.import_url", args={"url": ["https://example.com/a.json"], "layer": "L1"}
+    ) == {
         "action": "run",
         "params": {
-            "name": "camera.fly_to",
-            "args": {"lon": 12.48, "lat": 41.9, "height": 800000},
+            "name": "data.import_url",
+            "args": {"url": "https://example.com/a.json", "layer": "L1"},
         },
     }
 
@@ -176,68 +215,23 @@ def test_arguments_that_are_not_an_object_are_refused(text):
         ViewerControlArgs(action="run", name="layers.set_visible", args=text)
 
 
-# ── the shapes a model writes a scalar in ────────────────────────────────
-
-# one value per declared scalar field, spelled the way the action wants it
-SCALAR_FIELD_VALUES = {
-    "lon": -0.09,
-    "lat": 51.51,
-    "height": 800000.0,
-    "heading": 90.0,
-    "pitch": -45.0,
-    "duration": 2.5,
-    "label": "Depot B",
-    "color": "#ff0000",
-    "url": "https://example.org/data/wards.geojson",
-    "attribute": "Classification",
-    "iso": "2026-06-01T00:00:00Z",
-    "name": "camera.fly_to",
-}
-
-FLOAT_FIELDS = [f for f, v in SCALAR_FIELD_VALUES.items() if isinstance(v, float)]
+# ── the shapes a model writes the action name in ─────────────────────────
 
 
-def _shapes(value):
-    """Every way a model has been seen to write one scalar."""
-    written = [value, [value]]
-    if isinstance(value, float):
-        written += [str(value), [str(value)]]
-    return written
+@pytest.mark.parametrize(
+    "written",
+    [
+        "camera.fly_to",
+        ["camera.fly_to"],
+        {"name": "camera.fly_to"},
+        {"name": ["camera.fly_to"]},
+        {"camera.fly_to": None},
+    ],
+)
+def test_the_name_is_read_out_of_every_shape_a_model_writes_it_in(written):
+    assert ViewerControlArgs(action="run", name=written).name == "camera.fly_to"
 
 
-def _field_shape_rows():
-    for field, value in SCALAR_FIELD_VALUES.items():
-        for written in _shapes(value):
-            yield field, written, value
-
-
-@pytest.mark.parametrize("field,written,plain", list(_field_shape_rows()))
-def test_a_scalar_field_reads_every_shape_a_model_writes_it_in(field, written, plain):
-    args = ViewerControlArgs(action="run", **{"name": "camera.fly_to", field: written})
-
-    assert getattr(args, field) == plain
-
-
-@pytest.mark.parametrize("field", sorted(SCALAR_FIELD_VALUES))
-def test_a_two_element_list_is_refused(field):
-    value = SCALAR_FIELD_VALUES[field]
+def test_a_name_written_as_a_two_element_list_is_refused():
     with pytest.raises(ValidationError):
-        ViewerControlArgs(action="run", **{"name": "camera.fly_to", field: [value, value]})
-
-
-@pytest.mark.parametrize("field", FLOAT_FIELDS)
-def test_a_list_holding_something_that_is_not_a_number_is_refused(field):
-    with pytest.raises(ValidationError):
-        ViewerControlArgs(action="run", name="camera.fly_to", **{field: ["north"]})
-
-
-def test_a_field_written_as_an_object_naming_itself_is_read_as_its_value():
-    args = ViewerControlArgs(action="run", name="camera.fly_to", lon={"lon": ["2.35"]})
-
-    assert args.lon == 2.35
-
-
-def test_a_field_written_as_an_object_with_no_value_is_read_as_its_key():
-    args = ViewerControlArgs(action="run", name={"camera.fly_to": None})
-
-    assert args.name == "camera.fly_to"
+        ViewerControlArgs(action="run", name=["camera.fly_to", "camera.set_pitch"])

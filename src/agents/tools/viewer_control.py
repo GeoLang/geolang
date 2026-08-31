@@ -21,22 +21,27 @@ ViewerAction = Literal["run"]
 # is a way to hand its origin a payload instead
 ALLOWED_URL_SCHEMES = {"http", "https"}
 
-# the fields holding one number or one string, so a wrapper around that scalar
-# can be read off. args is not one of them: it carries an object
-SCALAR_FIELDS = (
-    "lon",
-    "lat",
-    "height",
-    "heading",
-    "pitch",
-    "duration",
-    "label",
-    "color",
-    "url",
-    "attribute",
-    "iso",
-    "name",
-)
+
+def take_a_scalar_out_of_a_wrapper(value, field_name):
+    """`{"renderer": "cesium"}` and `{"cesium": null}` both read as "cesium".
+
+    The viewer reads these two shapes for an action's own parameters, and so does
+    a one-element list, so anything the tool still reads itself has to read them.
+    """
+    if isinstance(value, dict) and len(value) == 1:
+        only_key, only_value = next(iter(value.items()))
+        if only_key == field_name:
+            value = only_value
+        elif only_value is None:
+            value = only_key
+    if isinstance(value, list) and len(value) == 1:
+        return value[0]
+    return value
+
+
+def check_the_scheme_is_allowed(url):
+    if not isinstance(url, str) or urlparse(url).scheme not in ALLOWED_URL_SCHEMES:
+        raise ValueError("url must be an http or https address")
 
 
 class ViewerControlArgs(BaseModel):
@@ -45,22 +50,12 @@ class ViewerControlArgs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     action: ViewerAction = Field(..., description="Always 'run'.")
-    lon: Optional[float] = None
-    lat: Optional[float] = None
-    height: Optional[float] = Field(None, description="Camera height in metres, default 1000")
-    heading: Optional[float] = Field(None, description="Camera heading in degrees")
-    pitch: Optional[float] = Field(None, description="Camera pitch in degrees")
-    duration: Optional[float] = Field(None, description="Flight duration in seconds")
-    label: Optional[str] = Field(None, description="Marker or tileset label")
-    color: Optional[str] = Field(None, description="CSS colour, e.g. '#ff0000'")
-    url: Optional[str] = Field(None, description="http or https URL of a tileset or GeoJSON")
-    attribute: Optional[str] = Field(None, description="Attribute to classify by, default 'Classification'")
-    iso: Optional[str] = Field(None, description="ISO 8601 time for the time slider")
-    name: Optional[str] = Field(
-        None,
+    name: str = Field(
+        ...,
         description=(
-            "Required: one action from 'Viewer actions' in the system prompt, "
-            "spelled as that list spells it"
+            "The action to run: one name from 'Viewer actions' in the system prompt, "
+            "spelled as that list spells it, like 'camera.fly_to'. Never a value: for "
+            "'switch to satellite' the name is 'basemap.set', not 'satellite'."
         ),
     )
     # advertised as text, since a model given a bare object schema with no
@@ -68,8 +63,8 @@ class ViewerControlArgs(BaseModel):
     args: Optional[str] = Field(
         None,
         description=(
-            "Only for a parameter that cannot be a field of this call: JSON text of "
-            "an object, e.g. '{\"layer\": \"Parcels\"}'"
+            "Only for a parameter that cannot be a plain field of this call: JSON text "
+            "of an object, e.g. '{\"layer\": \"Parcels\"}'"
         ),
     )
 
@@ -81,23 +76,10 @@ class ViewerControlArgs(BaseModel):
             return value[0]
         return value
 
-    @field_validator(*SCALAR_FIELDS, mode="before")
+    @field_validator("name", mode="before")
     @classmethod
     def take_a_scalar_out_of_an_object_naming_it(cls, value, info):
-        """`{"renderer": "cesium"}` and `{"cesium": null}` both read as "cesium".
-
-        The viewer reads these two shapes for an action's own parameters, so the
-        fields the tool declares have to read them too.
-        """
-        if isinstance(value, dict) and len(value) == 1:
-            only_key, only_value = next(iter(value.items()))
-            if only_key == info.field_name:
-                value = only_value
-            elif only_value is None:
-                value = only_key
-        if isinstance(value, list) and len(value) == 1:
-            return value[0]
-        return value
+        return take_a_scalar_out_of_a_wrapper(value, info.field_name)
 
     @field_validator("args", mode="before")
     @classmethod
@@ -119,23 +101,38 @@ class ViewerControlArgs(BaseModel):
     @model_validator(mode="after")
     def take_run_arguments_written_into_url(self):
         # grok writes the run's argument object into url, whatever the schema says
-        if self.args is not None or self.url is None:
+        extra = self.model_extra
+        if extra is None or "url" not in extra:
+            return self
+        url = take_a_scalar_out_of_a_wrapper(extra["url"], "url")
+        extra["url"] = url
+        if self.args is not None or not isinstance(url, str):
             return self
         try:
-            decoded = json.loads(self.url)
+            decoded = json.loads(url)
         except json.JSONDecodeError:
             return self
         if isinstance(decoded, dict):
-            self.args = self.url
-            self.url = None
+            self.args = url
+            del extra["url"]
         return self
 
     @model_validator(mode="after")
-    def check_action_is_usable(self):
-        if self.name is None:
-            raise ValueError("run needs name")
-        if self.url is not None and urlparse(self.url).scheme not in ALLOWED_URL_SCHEMES:
-            raise ValueError("url must be an http or https address")
+    def check_the_url_is_a_network_address(self):
+        extra = self.model_extra or {}
+        if extra.get("url") is not None:
+            check_the_scheme_is_allowed(extra["url"])
+        if self.args is None:
+            return self
+        # data.import_url, data.load_tileset and sql.attach_url all read args.url
+        # and fetch it. none of them reads a url out of a nested object
+        decoded = json.loads(self.args)
+        if decoded.get("url") is None:
+            return self
+        url = take_a_scalar_out_of_a_wrapper(decoded["url"], "url")
+        check_the_scheme_is_allowed(url)
+        decoded["url"] = url
+        self.args = json.dumps(decoded)
         return self
 
 
@@ -158,8 +155,9 @@ def viewer_control(
 ) -> str:
     """Control the TileTopia 3D viewer: the command is sent to the frontend,
     which runs it. Always call with action='run', name set to an action listed
-    under 'Viewer actions' in the system prompt, and that action's own
-    parameters as further fields of the same call."""
+    under 'Viewer actions' in the system prompt, and that action's own parameters
+    as further top-level fields of the same call, named exactly as the catalogue
+    names them."""
     named = {
         "lon": lon, "lat": lat, "height": height,
         "heading": heading, "pitch": pitch, "duration": duration,
