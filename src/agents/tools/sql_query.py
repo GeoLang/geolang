@@ -15,9 +15,8 @@ class SqlQueryArgs(BaseModel):
         description=(
             "DuckDB SQL to run in the viewer. The spatial extension is loaded. "
             "Geometry is detected from a GEOMETRY column, a WKT column named "
-            "geom/geometry/wkt/shape, or a lon/lat numeric pair. "
-            "Example: SELECT name, pop_max, ST_Point(longitude, latitude) AS geom "
-            "FROM read_parquet('https://example.com/places.parquet') WHERE pop_max > 1000000"
+            "geom/geometry/wkt/shape, or a lon/lat numeric pair. Example: "
+            "SELECT name, ST_Point(lon, lat) AS geom FROM read_parquet('https://host/places.parquet')"
         ),
     )
     show_on_map: bool = Field(
@@ -41,13 +40,12 @@ def sql_query(
     fit: bool = True,
 ) -> str:
     """Run a DuckDB Spatial SQL query in the user's browser and optionally render
-    the result as a map layer. This is the escape hatch for a single ad-hoc
-    question over data already reachable from the viewer: attached layers, public
-    GeoParquet/CSV URLs via read_parquet/read_csv, or remote GeoJSON. For analysis
-    that transforms data in more than one step, use plan_workflow and run_workflow
-    instead: the user gets a reviewable plan and reusable output files, which raw
-    SQL leaves behind neither of. Do NOT use sql_query for large server-side
-    datasets, mutations, or results that must persist for collaborators."""
+    the result as a map layer. The escape hatch for one ad-hoc question over data
+    the viewer already reaches: attached layers, public GeoParquet/CSV URLs via
+    read_parquet/read_csv, or remote GeoJSON. For analysis of more than one step
+    use plan_workflow and run_workflow instead, which give the user a reviewable
+    plan and reusable output files. Not for large server-side datasets,
+    mutations, or results that must persist for collaborators."""
     import json
 
     cmd = {

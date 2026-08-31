@@ -106,10 +106,7 @@ def asset_readings(
 ) -> str:
     """
     Read what the sensors on the live map are reporting: every asset, whether it
-    is still reporting, and its latest value per reading kind. Filter by reading
-    kind, by one asset, by a value above or below a threshold, or to the assets
-    that have gone offline. Give `at` an RFC 3339 time for the state as of then
-    instead of now.
+    is still reporting, and its latest value per reading kind.
     Use this for questions about current or past conditions on the map, such as
     which assets are over 30 degrees right now, what the cold room was doing at
     3am, or which sensors have stopped reporting.

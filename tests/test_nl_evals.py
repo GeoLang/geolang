@@ -166,14 +166,25 @@ def test_metric_buffer_stays_in_lonlat_range():
         )
 
 
+def viewer_run_args(call_args: str) -> dict:
+    """One viewer_control run's parameters, from the fields and from args."""
+    parsed = parse_args(call_args)
+    if parsed.get("action") != "run":
+        return {}
+    nested = parse_args(parsed.get("args") or "")
+    return {"name": parsed.get("name"), **parsed, **nested}
+
+
 def test_marker_at_mount_fuji():
     res = run_prompt("Add a marker on the map at the summit of Mount Fuji.")
+    # the viewer names this action marker.add, but the catalogue is not in the
+    # prompt here, so accept whatever marker action the model reaches for
     markers = [
-        parse_args(a)
-        for a in res.calls("viewer_control")
-        if parse_args(a).get("action") == "add_marker"
+        args
+        for args in map(viewer_run_args, res.calls("viewer_control"))
+        if "marker" in (args.get("name") or "")
     ]
-    assert markers, f"no add_marker viewer_control call; called {[n for n, _ in res.tool_calls]}"
+    assert markers, f"no marker viewer_control run; called {[n for n, _ in res.tool_calls]}"
     m = markers[-1]
     assert 35.0 <= float(m.get("lat", 0)) <= 36.0, f"marker lat off Fuji: {m}"
     assert 138.0 <= float(m.get("lon", 0)) <= 139.5, f"marker lon off Fuji: {m}"

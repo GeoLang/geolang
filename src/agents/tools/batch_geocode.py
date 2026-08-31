@@ -7,33 +7,30 @@ class BatchGeocodeArgs(BaseModel):
     addresses: Optional[str] = Field(
         None,
         description=(
-            "Semicolon-separated list of addresses or place names to geocode. "
-            "E.g. '10 Downing Street, London; Buckingham Palace, London; Tower Bridge, London'. "
-            "Use this when the user pastes a list of locations or addresses."
+            "Addresses or place names separated by semicolons, e.g. "
+            "'10 Downing Street, London; Tower Bridge, London'. Use this when the "
+            "user pastes a list."
         ),
     )
     input_csv_path: Optional[str] = Field(
         None,
         description=(
-            "Path to a CSV file with an address/name column to geocode. "
-            "A filename in user_data/ or outputs/, not a path. "
-            "The tool auto-detects columns named: address, location, place, name, site."
+            "CSV holding the addresses, a filename in user_data/ or outputs/, not a "
+            "path. Columns named address, location, place, name or site are found "
+            "on their own."
         ),
     )
     address_column: Optional[str] = Field(
         None,
-        description="Column name containing addresses, if the auto-detection fails.",
+        description="Column holding the addresses, when it is not found on its own.",
     )
     label_column: Optional[str] = Field(
         None,
-        description=(
-            "Optional column to use as the point label/name in the output. "
-            "If omitted, the address value is used as the label."
-        ),
+        description="Column labelling each output point. Defaults to the address.",
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -45,15 +42,10 @@ def batch_geocode(
     output_filename: str = None,
 ) -> str:
     """
-    Geocode a list of addresses or place names to coordinates and save as a point GPKG.
-    Accepts either a semicolon-separated list or a CSV file path.
-
-    Use this when the user has a list of addresses (not coordinates) and wants to:
-    - Plot them on a map
-    - Find the nearest service, run a spatial join, etc.
-
-    Uses Nominatim (OpenStreetMap geocoder) — free, no API key needed.
-    Rate-limited to 1 request/second per OSM fair-use policy.
+    Geocode a list of addresses or place names and save them as a point GPKG,
+    ready to map or to feed a spatial tool. Takes either a semicolon-separated
+    list or a CSV. Geocodes through Nominatim at one address per second, so a
+    long list is slow.
     """
     import time
     import traceback

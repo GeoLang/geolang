@@ -21,15 +21,18 @@ class BufferClipDissolveArgs(BaseModel):
         None,
         description="Filename of a vector layer to clip to the buffer. Omit to save the buffer polygon itself.",
     )
-    center_lon: float = Field(..., description="Longitude of the buffer center point.")
-    center_lat: float = Field(..., description="Latitude of the buffer center point.")
+    center_lon: float
+    center_lat: float
     buffer_km: float = Field(..., description="Buffer radius in kilometres.")
     dissolve_field: Optional[str] = Field(
         None,
-        description="Field name to dissolve by after clipping (e.g. 'type', 'type_en'). Omit to skip dissolve. Ignored when no input_path is given.",
+        description=(
+            "Field to dissolve by after clipping. Omit to skip the dissolve, and "
+            "ignored without input_path."
+        ),
     )
     output_filename: str = Field(
-        ..., description="Output filename, e.g. 'paris_roads_300km.gpkg'."
+        ..., description="Output name, e.g. 'paris_roads_300km.gpkg'."
     )
 
 

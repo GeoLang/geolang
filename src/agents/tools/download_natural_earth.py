@@ -5,34 +5,29 @@ from src.core.utils import natural_earth_directory, tool_output_path
 
 class DownloadNaturalEarthArgs(BaseModel):
     scale: str = Field(
-        "110m", description="Resolution level. Must be one of: '10m', '50m', '110m'."
+        "110m", description="'10m', '50m', or '110m'."
     )
     # the name goes into the download url and into the file it is saved as, so a
     # separator in it would write the download outside the reference directory
     dataset: str = Field(
         "populated_places",
         pattern=r"^[a-z0-9_]+$",
-        description="Type of dataset to download, e.g. 'admin_0_countries'.",
+        description="Natural Earth dataset name, e.g. 'admin_0_countries'.",
     )
     filter_query: Optional[str] = Field(
         None,
         description=(
-            "Optional pandas query expression to filter the dataset to a regional subset. "
-            "Example values (use these literal strings as filter_query): "
-            "CONTINENT == 'Europe' for European countries, "
-            "CONTINENT == 'Africa' for African ones, "
-            "REGION_UN == 'Americas' for the Americas, "
-            "SUBREGION == 'Northern Europe' for a UN sub-region. "
-            "When set, the output is a GPKG of just the matching features in outputs/. "
-            "MUST be set whenever the user asks for a regional subset such as European "
-            "countries, African cities, etc."
+            "pandas query expression cutting the dataset to a subset, written "
+            "literally, e.g. CONTINENT == 'Europe', REGION_UN == 'Americas', "
+            "SUBREGION == 'Northern Europe'. Set it whenever the user asks for a "
+            "regional subset: the output is then a GPKG of just those features."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
         description=(
-            "Optional filename (without directory) for the filtered GPKG. Only used when "
-            "filter_query is set. Defaults to <dataset>_filtered.gpkg under outputs/."
+            "Name for the filtered GPKG, no directory. Only used with filter_query, "
+            "and defaults to <dataset>_filtered.gpkg."
         ),
     )
 

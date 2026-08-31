@@ -55,11 +55,10 @@ class RunWorkflowArgs(BaseModel):
 
 def run_workflow(manifest_toml: str) -> str:
     """Execute a geodukt pipeline manifest and report per-step feature counts and
-    the files it wrote. Only call this after plan_workflow and after the user has
-    approved that plan in the viewer. If the user asked for a change, revise the
-    manifest and call plan_workflow again instead of running it. A manifest
-    plan_workflow has not validated, and one the user has not approved, are
-    refused here rather than run."""
+    the files it wrote. Only call this after plan_workflow and after the user
+    approved that plan in the viewer: an unplanned or unapproved manifest is
+    refused here. If the user asked for a change, revise the manifest and call
+    plan_workflow again instead."""
     import json
 
     manifest, error = parse_manifest(manifest_toml)

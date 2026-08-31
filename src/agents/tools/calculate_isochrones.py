@@ -6,34 +6,31 @@ from src.core.utils import tool_output_path
 class CalculateIsochronesArgs(BaseModel):
     place_name: str = Field(
         ...,
-        description="Location to calculate isochrones from. E.g. '10 Downing Street, London' or 'Canary Wharf, London'.",
+        description="Place or address to start from, e.g. 'Canary Wharf, London'.",
     )
     travel_mode: str = Field(
         "walking",
-        description="Travel mode: 'walking', 'cycling', or 'driving'.",
+        description="'walking', 'cycling', or 'driving'.",
     )
     time_minutes: str = Field(
         "5,10,15",
-        description="Comma-separated travel time thresholds in minutes. E.g. '5,10,15' or '10,20,30'.",
+        description="Comma-separated time thresholds in minutes, e.g. '5,10,15'.",
     )
     road_detail: str = Field(
         "auto",
         description=(
-            "Road network detail level — controls download size and accuracy. "
-            "Choose based on travel mode and time:\n"
-            "  'full'         — all roads including residential. "
-            "Use for walking/cycling, or short drives (≤15 min).\n"
-            "  'major'        — motorways, trunk, primary, secondary only. "
-            "Use for driving 15–60 min. Good for logistics/HGV routing.\n"
-            "  'motorway'     — motorways and trunk roads only. "
-            "Use for long drives (>60 min) or inter-city coverage analysis.\n"
-            "  'auto'         — let the tool decide based on travel_mode and time_minutes "
-            "(default, safe choice when unsure)."
+            "How much of the road network to download, by mode and time:\n"
+            "  'full'      all roads including residential, for walking, cycling "
+            "or drives up to 15 min\n"
+            "  'major'     motorway, trunk, primary, secondary, for drives of 15 to "
+            "60 min and for logistics\n"
+            "  'motorway'  motorway and trunk only, for drives over 60 min\n"
+            "  'auto'      decided from travel_mode and time_minutes, safe when unsure"
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -57,15 +54,8 @@ def calculate_isochrones(
     output_filename: str = None,
 ) -> str:
     """
-    Calculate walk, cycle, or drive time isochrones (catchment areas) around a
-    location using OpenStreetMap road networks. Returns polygons showing how far
-    you can travel in each time threshold.
-
-    road_detail controls the network download size:
-      'full'     — all roads (walking/cycling or short drives ≤15 min)
-      'major'    — motorway/trunk/primary/secondary (driving 15–60 min, logistics)
-      'motorway' — motorway/trunk only (long drives >60 min, inter-city)
-      'auto'     — tool decides based on mode and time (default)
+    Walk, cycle, or drive time isochrones (catchment areas) around a location,
+    over OpenStreetMap road networks. Returns one polygon per time threshold.
     """
     import traceback
 

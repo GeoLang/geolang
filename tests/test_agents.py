@@ -1,11 +1,17 @@
 # Tests for agents
 """The tool manifest and executor sibyl calls: geolang runs tools in-process."""
+import json
+
 from fastapi.testclient import TestClient
 
 from src.agents.agent_manager import approval_route_only, load_external_tools
 from src.api import server
 
 client = TestClient(server.app)
+
+# the manifest goes out with every model turn, so prose in a docstring or a
+# Field description is paid for on each one. Roughly 10% over what it takes today
+MANIFEST_BYTE_CAP = 40_500
 
 
 def test_manifest_covers_every_tool_module():
@@ -18,6 +24,16 @@ def test_manifest_covers_every_tool_module():
     for tool in manifest:
         assert tool["description"], f"{tool['name']} has no docstring"
         assert tool["parameters"]["type"] == "object"
+
+
+def test_the_manifest_stays_under_the_byte_cap():
+    size = len(json.dumps(server.tool_manifest()))
+
+    assert size <= MANIFEST_BYTE_CAP, (
+        f"the tool manifest is {size} bytes, over the {MANIFEST_BYTE_CAP} cap. "
+        "Every model turn carries it, so trim a docstring or a Field description "
+        "rather than raising the cap."
+    )
 
 
 def test_the_approval_route_is_the_one_tool_left_off_the_manifest():

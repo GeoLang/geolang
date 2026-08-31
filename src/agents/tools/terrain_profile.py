@@ -6,28 +6,22 @@ from src.core.utils import tool_output_path
 class TerrainProfileArgs(BaseModel):
     start_place: str = Field(
         ...,
-        description=(
-            "Start point of the profile — place name or 'lat,lon' coordinates. "
-            "E.g. 'Fort William, Scotland' or '56.82,-5.11'."
-        ),
+        description="Start of the profile: a place name or 'lat,lon', e.g. '56.82,-5.11'.",
     )
     end_place: str = Field(
         ...,
-        description=(
-            "End point of the profile — place name or 'lat,lon' coordinates. "
-            "E.g. 'Ben Nevis summit' or '56.797,-5.003'."
-        ),
+        description="End of the profile: a place name or 'lat,lon'.",
     )
     n_samples: int = Field(
         50,
         description=(
-            "Number of elevation sample points along the transect. "
-            "More samples = smoother profile but slower. Range 10–100. Default 50."
+            "Elevation samples along the transect, 10 to 100. More is smoother and "
+            "slower."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension for the PNG chart. Auto-generated if omitted.",
+        description="Output PNG name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -38,17 +32,9 @@ def terrain_profile(
     output_filename: str = None,
 ) -> str:
     """
-    Generate an elevation cross-section / terrain profile between two locations.
-    Samples the SRTM 90m elevation grid at N points along the transect,
-    then plots a filled area chart showing the terrain profile.
-
-    Common uses:
-    - 'Show the elevation profile from Fort William to Ben Nevis'
-    - 'What is the terrain like between these two points?'
-    - 'Draw a cross-section through the Alps'
-    - 'Show me the terrain profile along this route'
-
-    Returns a PNG chart image. Call emit_ui_spec after with ui_type='image'.
+    Elevation cross-section between two locations, sampled from the SRTM 90m
+    grid along the straight line between them and plotted as an area chart.
+    Returns a PNG chart. Call emit_ui_spec after with ui_type='image'.
     """
     import traceback
     import re

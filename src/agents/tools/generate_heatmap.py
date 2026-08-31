@@ -7,31 +7,31 @@ class GenerateHeatmapArgs(BaseModel):
     input_path: str = Field(
         ...,
         description=(
-            "Path to a point GPKG layer to generate a density heatmap from. "
-            "A filename in outputs/ or user_data/, not a path."
+            "Point GPKG to build the density from. A filename in outputs/ or "
+            "user_data/, not a path."
         ),
     )
     place_name: str = Field(
         ...,
-        description="Human-readable label for the map title and output filename.",
+        description="Readable label for the map title and output filename.",
     )
     value_column: Optional[str] = Field(
         None,
         description=(
-            "Optional numeric column to weight the density by — e.g. 'population', 'sales'. "
-            "If omitted, each point contributes equally (count-based density)."
+            "Numeric column to weight the density by, e.g. 'population'. Each point "
+            "counts equally if omitted."
         ),
     )
     bandwidth_km: Optional[float] = Field(
         None,
         description=(
-            "Kernel bandwidth in kilometres. Controls smoothing — larger = smoother. "
-            "Auto-selected based on data extent if omitted."
+            "Kernel bandwidth in km, larger is smoother. Chosen from the data "
+            "extent if omitted."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output PNG filename without extension. Auto-generated if omitted.",
+        description="Output PNG name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -43,17 +43,10 @@ def generate_heatmap(
     output_filename: str = None,
 ) -> str:
     """
-    Generate a kernel density estimation (KDE) heatmap image from a point layer.
-    Shows where features are most concentrated — useful for demand mapping, hotspot
-    analysis, incident clustering, or visualising uneven distributions.
-
-    Use this when the user asks:
-    - 'Show me where crime is concentrated'
-    - 'Heatmap of restaurant density in Paris'
-    - 'Where is demand highest?'
-    - 'Show hotspots of [anything]'
-
-    Returns a PNG image path. Call emit_ui_spec with ui_type='image' afterwards.
+    Kernel density heatmap image from a point layer, showing where features are
+    concentrated. Use it when the user asks where something is densest, for
+    hotspots, or for a heatmap.
+    Returns a PNG path. Call emit_ui_spec after with ui_type='image'.
     """
     import traceback
 

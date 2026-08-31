@@ -103,25 +103,22 @@ def flood_score_from(elevations, water_dist_m=None):
 class AssessEnvironmentalRiskArgs(BaseModel):
     place_name: str = Field(
         ...,
-        description=(
-            "Place or address to assess. "
-            "E.g. 'Canary Wharf, London' or 'Leicester city centre'."
-        ),
+        description="Place or address to assess, e.g. 'Canary Wharf, London'.",
     )
     radius_km: float = Field(
         2.0,
-        description="Radius in km around the location to analyse (default 2km).",
+        description="Radius in km around the location to analyse.",
     )
     polygon_path: Optional[str] = Field(
         None,
         description=(
-            "Optional path to an existing polygon GPKG (e.g. an isochrone) to use "
-            "instead of a circular buffer. A filename in outputs/, not a path."
+            "Polygon GPKG, e.g. an isochrone, to assess instead of a circular "
+            "buffer. A filename in outputs/, not a path."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -132,19 +129,15 @@ def assess_environmental_risk(
     output_filename: str = None,
 ) -> str:
     """
-    Assess environmental risk factors for a location or area. Checks:
-    1. Flood risk: share of the sampled elevation grid below 5m/10m, amplified by
-       water proximity (OpenTopoData SRTM 90m grid)
-    2. Proximity to water bodies (rivers, coastline from OSM)
-    3. Green space / tree cover percentage (OSM landuse)
-    4. Industrial site proximity (OSM industrial landuse)
-    5. Major road proximity (noise/air pollution proxy)
+    Score environmental risk for an area: flood risk from the share of the
+    sampled SRTM grid below 5m and 10m amplified by water proximity, distance to
+    water, green space share, industrial land nearby, and major roads as a
+    noise and pollution proxy.
 
-    Returns a risk summary with scores and saves a polygon GPKG of the assessment
-    area (the radius_km buffer, or the supplied polygon) attributed with every
-    score, readable per feature with the Feature Picker.
-    Use this when the user asks about flood risk, environmental suitability,
-    pollution, or green space for a location.
+    Returns the scores and saves the assessment area as a polygon GPKG carrying
+    each score, readable per feature with the Feature Picker. Use this when the
+    user asks about flood risk, environmental suitability, pollution, or green
+    space for a location.
     """
     import time
     import traceback

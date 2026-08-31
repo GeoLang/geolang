@@ -12,27 +12,24 @@ class QueryZonalPopulationArgs(BaseModel):
     polygon_path: str = Field(
         ...,
         description=(
-            "Path to a polygon GPKG to sum population within — typically an isochrone. "
-            "A filename in outputs/, not a path. E.g. 'leicester_driv_isochrones.gpkg'."
+            "Polygon GPKG to sum population within, typically an isochrone. "
+            "A filename in outputs/, not a path."
         ),
     )
     place_name: str = Field(
         ...,
-        description="Human-readable label for the location (used in output text and filename).",
+        description="Readable label for the location, used in the output text and filename.",
     )
     ghsl_raster_path: Optional[str] = Field(
         None,
         description=(
-            "Path to a local GHSL GHS-POP GeoTIFF raster. "
-            "If omitted the tool looks for 'ghsl_pop.tif' in your own files or at the "
-            "project root. "
-            "Download from: https://ghsl.jrc.ec.europa.eu/ghs_pop2023.php "
-            "(R2023A epoch 2020, resolution 1km, Mollweide projection)."
+            "A local GHS-POP GeoTIFF. Defaults to 'ghsl_pop.tif' in the user's own "
+            "files or at the project root."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -43,13 +40,11 @@ def query_zonal_population(
     output_filename: str = None,
 ) -> str:
     """
-    Compute true grid-based population within a polygon (e.g. an isochrone) using
-    the GHSL GHS-POP raster dataset. Returns total population count and per-feature
-    breakdown. Requires a local GHS-POP GeoTIFF — download once from the GHSL portal
-    (free). Falls back to WorldPop API bounding-box estimate if no raster is found.
-
-    Use this when the user asks how many people live within a drive/walk time,
-    or wants accurate population catchment for a service area or depot.
+    Grid-based population within a polygon such as an isochrone, from the GHSL
+    GHS-POP raster. Returns the total and a per-feature breakdown. Needs a local
+    GHS-POP GeoTIFF, else it falls back to a WorldPop bounding-box estimate.
+    Use this when the user asks how many people live within a drive or walk
+    time, or wants accurate population catchment for a service area or depot.
     """
     import traceback
 

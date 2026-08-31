@@ -11,24 +11,23 @@ from typing import Optional
 
 class ListTilesetsArgs(BaseModel):
     search: Optional[str] = Field(
-        None, description="Optional name filter for hosted assets."
+        None, description="Name filter for hosted assets."
     )
     category: Optional[str] = Field(
         None,
         description=(
-            "Optional catalog category filter: terrain, buildings, imagery, "
-            "pointcloud, vector, or weather."
+            "Catalog category: terrain, buildings, imagery, pointcloud, vector, "
+            "or weather."
         ),
     )
 
 
 def list_tilesets(search: str = None, category: str = None) -> str:
     """
-    List 3D tilesets available from the platform's TileTopia service: hosted
-    assets (ingested 3D Tiles) and the open data catalog. Returns viewer-loadable
-    URLs. To display one, call viewer_control with action='run' and the viewer
-    action that adds a tileset from a url, with the listed url. Use this when the user asks what 3D layers, tilesets, terrain,
-    or buildings are available to show.
+    List the 3D tilesets the platform can show, hosted assets and the open data
+    catalog, with viewer-loadable URLs. To display one, call viewer_control with
+    action='run' and the viewer action that adds a tileset from a url. Use this
+    when the user asks what 3D layers, tilesets, terrain or buildings exist.
     """
     import os
     import traceback

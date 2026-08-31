@@ -31,43 +31,40 @@ class DownloadOSMDataArgs(BaseModel):
     place_name: Optional[str] = Field(
         None,
         description=(
-            "Place to download data for. Use a neighbourhood or city for best results. "
-            "For street addresses a 2km radius search is used automatically. "
-            "Examples: 'Marylebone, London', 'Islington, London', 'Manhattan, New York'. "
-            "Also accepts 'lat,lon'. Leave blank when using feature_name."
+            "Area to search, best as a neighbourhood or city, e.g. 'Marylebone, "
+            "London'. Also accepts 'lat,lon' or a street address, which searches a "
+            "radius. Leave blank when using feature_name."
         ),
     )
     feature_name: Optional[str] = Field(
         None,
         description=(
-            "Fetch one named OSM feature whole, ignoring any administrative boundary. "
-            "Use this for anything that crosses boundaries or that the user named "
-            "directly: 'River Thames', 'M25', 'Grand Union Canal', 'Pennine Way', "
-            "'Hyde Park'. A place_name query would cut such a feature off at the edge "
-            "of the place, so prefer feature_name whenever the user names the thing "
-            "itself rather than an area to search."
+            "One named OSM feature fetched whole, ignoring administrative "
+            "boundaries, e.g. 'River Thames', 'M25'. Prefer this whenever the user "
+            "names the thing itself rather than an area to search: a place_name "
+            "query cuts such a feature off at the edge of the place."
         ),
     )
     data_type: str = Field(
         ...,
         description=(
-            "What to download. Common values: buildings, roads, schools, hospitals, "
-            "parks, restaurants, shops, supermarkets, pharmacies, amenities, parking, "
-            "bus_stops. Or use OSM tag syntax like 'amenity=cafe' or 'shop=bakery'. "
-            "With feature_name this only picks between same-named features."
+            "What to download: buildings, roads, schools, hospitals, parks, "
+            "restaurants, shops, supermarkets, pharmacies, amenities, parking, "
+            "bus_stops, or OSM tag syntax like 'amenity=cafe'. With feature_name it "
+            "only picks between same-named features."
         ),
     )
     radius_m: Optional[int] = Field(
         None,
         description=(
-            "Search radius in metres around a 'lat,lon' place_name or a geocoded "
-            "address. Defaults to 1000 (2000 for roads). Ignored when place_name is "
-            "an area that geocodes to a boundary."
+            "Search radius in metres around a 'lat,lon' or address place_name, "
+            "default 1000 and 2000 for roads. Ignored when place_name geocodes to a "
+            "boundary."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -150,13 +147,9 @@ def download_osm_data(
     output_filename: str = None,
 ) -> str:
     """
-    Download OpenStreetMap data for any place and save as GeoPackage.
+    Download OpenStreetMap data for a place and save it as a GeoPackage.
     Returns the output path and feature count. Use this whenever the user asks
     for real-world data like buildings, roads, amenities, parks, or shops.
-
-    Pass feature_name instead of place_name to fetch one named feature whole. A
-    place_name search only returns what falls inside that place's boundary, so a
-    river or a motorway comes back cut off at the edge.
     """
     import traceback
 

@@ -6,10 +6,8 @@ class ExportToGPKGArgs(BaseModel):
     dataset_path: str = Field(
         ..., description="Filename of the input shapefile or layer"
     )
-    output_filename: str = Field(
-        ..., description="Name of output file (e.g. 'output.gpkg')"
-    )
-    layer_name: str = Field("layer", description="Name of the layer inside the GPKG")
+    output_filename: str = Field(..., description="Output name, e.g. 'output.gpkg'")
+    layer_name: str = Field("layer", description="Layer name inside the GPKG")
 
 
 def export_to_gpkg(

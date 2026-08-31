@@ -21,15 +21,15 @@ class PtolemyQueryArgs(BaseModel):
             "min_lon, min_lat, max_lon, max_lat)."
         ),
     )
-    dataset_id: Optional[str] = Field(None, description="Dataset UUID for list_branches.")
-    branch_id: Optional[str] = Field(None, description="Branch UUID for export and query_bbox.")
-    min_lon: Optional[float] = Field(None, description="Bounding box west edge.")
-    min_lat: Optional[float] = Field(None, description="Bounding box south edge.")
-    max_lon: Optional[float] = Field(None, description="Bounding box east edge.")
-    max_lat: Optional[float] = Field(None, description="Bounding box north edge.")
-    limit: int = Field(1000, description="Maximum number of features to fetch.")
+    dataset_id: Optional[str] = Field(None, description="Dataset UUID.")
+    branch_id: Optional[str] = Field(None, description="Branch UUID.")
+    min_lon: Optional[float] = None
+    min_lat: Optional[float] = None
+    max_lon: Optional[float] = None
+    max_lat: Optional[float] = None
+    limit: int = Field(1000, description="Most features to fetch.")
     output_filename: Optional[str] = Field(
-        None, description="Output filename without extension. Auto-generated if omitted."
+        None, description="Output name, no extension. Auto-generated if omitted."
     )
 
 
@@ -45,11 +45,9 @@ def ptolemy_query(
     output_filename: str = None,
 ) -> str:
     """
-    Query the Ptolemy geodatabase: list its datasets and branches, export a
-    branch's features to GPKG, or fetch features in a bounding box.
-    Use this when the user refers to data stored in the platform geodatabase
-    (shared/versioned layers), not for ad-hoc downloads (use download_osm_data
-    or download_natural_earth_dataset for those).
+    Query the Ptolemy geodatabase. Use this when the user refers to data stored
+    in the platform geodatabase, its shared versioned layers, and not for ad-hoc
+    downloads: download_osm_data and download_natural_earth_dataset serve those.
     """
     import os
     import traceback

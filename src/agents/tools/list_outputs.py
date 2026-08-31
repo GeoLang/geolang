@@ -8,9 +8,8 @@ class ListOutputsArgs(BaseModel):
 
 def list_outputs() -> str:
     """
-    List all files in the outputs directory. Call this when the user refers to
-    a previous result, asks to 'use the file from before', or when you need to
-    find a file path from an earlier step in the workflow.
+    List the files in the outputs directory. Call this when the user refers to
+    a previous result, or when you need a filename from an earlier step.
     """
     import os
 

@@ -7,28 +7,27 @@ class SpatialJoinArgs(BaseModel):
     points_path: str = Field(
         ...,
         description=(
-            "Path to the layer whose features you want to tag/filter — typically points "
-            "but can be any geometry. A filename in outputs/, not a path. "
-            "E.g. 'restaurants.gpkg', 'outputs/schools.gpkg'."
+            "Layer whose features are tagged or filtered, usually points but any "
+            "geometry works. A filename in outputs/, not a path."
         ),
     )
     polygons_path: str = Field(
         ...,
         description=(
-            "Path to the polygon layer to join against — e.g. an isochrone, "
-            "flood zone, or admin boundary. A filename in outputs/, not a path."
+            "Polygon layer joined against, e.g. an isochrone or admin boundary. "
+            "A filename in outputs/, not a path."
         ),
     )
     how: str = Field(
         "inner",
         description=(
-            "Join type: 'inner' keeps only points that fall inside a polygon (default); "
-            "'left' keeps ALL points and adds polygon attributes (NaN if no match)."
+            "'inner' keeps only points inside a polygon; 'left' keeps every point "
+            "and adds the polygon attributes, NaN where nothing matched."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -39,16 +38,9 @@ def spatial_join(
     output_filename: str = None,
 ) -> str:
     """
-    Spatially join two layers — attach polygon attributes to point features that fall
-    inside the polygon, or filter points to only those inside a boundary.
-
-    Common uses:
-    - 'Which schools fall inside the flood zone?'
-    - 'Which restaurants are within the 15-min isochrone?'
-    - 'Tag each hospital with the district it belongs to.'
-
-    Use how='inner' to keep only matching features (default).
-    Use how='left' to keep all features and add polygon attributes where they match.
+    Join two layers by location: attach a polygon's attributes to the points
+    inside it, or filter points to those inside a boundary. Answers questions
+    like which schools fall inside the flood zone.
     """
     import os
     import traceback

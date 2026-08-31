@@ -5,17 +5,16 @@ from src.core.utils import natural_earth_dataset_paths
 class GeocodePlaceArgs(BaseModel):
     place_name: str = Field(
         ...,
-        description="Name of a city, town, or place to look up (e.g. 'Paris', 'London', 'Tokyo').",
+        description="City, town, or place to look up, e.g. 'Tokyo'.",
     )
 
 
 def geocode_place(place_name: str) -> str:
     """
-    Look up the coordinates of a named place. Tries the platform's geokode
-    service first (precise addresses within its loaded extract), then the
-    Natural Earth populated places dataset, then Nominatim (OpenStreetMap) for
-    landmarks and anything else. Returns longitude, latitude, and country.
-    Call this whenever the user mentions a location by name.
+    Look up a named place, returning longitude, latitude and country. Tries the
+    platform's geokode service, then Natural Earth populated places, then
+    Nominatim for landmarks and anything else. Call this whenever the user
+    mentions a location by name.
     """
     import os
     import traceback

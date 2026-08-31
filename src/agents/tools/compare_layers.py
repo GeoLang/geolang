@@ -7,28 +7,26 @@ class CompareLayersArgs(BaseModel):
     layer_a_path: str = Field(
         ...,
         description=(
-            "Path to the first polygon layer (e.g. old isochrone, flood zone, district boundary). "
-            "A filename in outputs/ or user_data/, not a path."
+            "First polygon layer. A filename in outputs/ or user_data/, not a path."
         ),
     )
     layer_b_path: str = Field(
         ...,
         description=(
-            "Path to the second polygon layer to compare against. "
-            "A filename in outputs/ or user_data/, not a path."
+            "Second polygon layer. A filename in outputs/ or user_data/, not a path."
         ),
     )
     layer_a_label: str = Field(
         "Layer A",
-        description="Human-readable label for layer A (e.g. '15-min walk', 'Flood Zone', '2020 boundary').",
+        description="Readable label for layer A, e.g. '15-min walk'.",
     )
     layer_b_label: str = Field(
         "Layer B",
-        description="Human-readable label for layer B (e.g. '30-min walk', 'Industrial Zone', '2024 boundary').",
+        description="Readable label for layer B, e.g. '30-min walk'.",
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename prefix without extension. Auto-generated if omitted.",
+        description="Output name prefix, no extension. Auto-generated if omitted.",
     )
 
 
@@ -40,24 +38,10 @@ def compare_layers(
     output_filename: str = None,
 ) -> str:
     """
-    Spatially compare two polygon layers and compute:
-    - Intersection: area covered by BOTH layers
-    - Only in A: area in A but not B
-    - Only in B: area in B but not A
-    - Union: total combined area
-    - Overlap percentage between the two layers
-
-    Saves three GPKGs: intersection, only-in-A, only-in-B — ready to display
-    as a three-layer map showing agreement and differences.
-
-    Common uses:
-    - 'Compare the 15-minute and 30-minute isochrones'
-    - 'What area is in the flood zone but not the industrial zone?'
-    - 'How much do these two catchment areas overlap?'
-    - 'Show what changed between the 2020 and 2024 boundaries'
-    - 'Which parts of district A overlap with district B?'
-
-    Call emit_ui_spec after with all three output layers.
+    Compare two polygon layers: how much they overlap, what is in one but not
+    the other, and their combined area. Reports the union area and overlap
+    percentage, and saves three GPKGs, intersection, only-in-A and only-in-B.
+    Call emit_ui_spec after with all three layers.
     """
     import traceback
     import re

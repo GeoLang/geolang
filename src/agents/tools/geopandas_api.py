@@ -15,22 +15,22 @@ class GeopandasArgs(BaseModel):
     )
     filter_query: Optional[str] = Field(
         None,
-        description="Pandas query expression for the filter function. Example: CONTINENT == 'Europe'",
+        description="pandas query for filter, e.g. CONTINENT == 'Europe'",
     )
     dataset_path: Optional[str] = Field(
         None,
-        description="Filename of a layer in outputs/, user_data/ or a natural earth set (e.g. 'ne_110m_populated_places.shp')",
+        description="Filename of a layer in outputs/, user_data/ or a natural earth set",
     )
     point_coords: Optional[List[float]] = Field(
         None, description="[lon, lat] for proximity_analysis"
     )
-    distance_m: Optional[float] = Field(5000, description="Buffer distance in meters")
-    how: Optional[str] = Field(None, description="For sjoin (e.g., 'inner', 'left')")
+    distance_m: Optional[float] = Field(5000, description="Buffer distance in metres")
+    how: Optional[str] = Field(None, description="sjoin: 'inner' or 'left'")
     predicate: Optional[str] = Field(
-        None, description="For sjoin (e.g., 'intersects', 'within')"
+        None, description="sjoin: 'intersects' or 'within'"
     )
     output_path: Optional[str] = Field(
-        None, description="Output filename for the filter function"
+        None, description="Output filename for filter"
     )
 
 

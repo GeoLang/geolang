@@ -6,23 +6,23 @@ from src.core.utils import tool_output_path
 class ComputeRouteArgs(BaseModel):
     origin: str = Field(
         ...,
-        description="Starting location name or address. E.g. 'King's Cross, London'.",
+        description="Start, as a place name or address, e.g. 'King's Cross, London'.",
     )
     destination: str = Field(
         ...,
-        description="Destination location name or address. E.g. 'Heathrow Airport'.",
+        description="End, as a place name or address.",
     )
     travel_mode: str = Field(
         "driving",
-        description="Travel mode: 'driving', 'cycling', or 'walking'.",
+        description="'driving', 'cycling', or 'walking'.",
     )
     alternatives: bool = Field(
         False,
-        description="If true, request up to 3 alternative routes for comparison.",
+        description="Ask for up to 3 alternative routes to compare.",
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -34,14 +34,11 @@ def compute_route(
     output_filename: str = None,
 ) -> str:
     """
-    Compute a route between two locations. Tries the platform's itinera routing
-    engine first (routes on the loaded OSM extract), falling back to the public
-    Valhalla engine for coverage outside it or when alternatives are requested.
-    Returns travel time, distance, turn-by-turn summary, and saves the route
-    geometry as a GPKG linestring. Optionally returns up to 3 alternative routes.
-
-    Use this when the user asks for directions, travel time between places,
-    route comparison, or optimal path. Works for driving, cycling, and walking.
+    Route between two locations, over the platform's itinera engine where the
+    loaded OSM extract covers them and public Valhalla otherwise. Returns travel
+    time, distance and a turn-by-turn summary, and saves the route as a GPKG
+    linestring. Use this for directions, travel time between places, route
+    comparison, or the best path.
     """
     import os
     import traceback

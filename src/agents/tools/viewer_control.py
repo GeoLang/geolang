@@ -44,30 +44,23 @@ class ViewerControlArgs(BaseModel):
     # catalogue entry names them, so the schema has to admit fields not listed here
     model_config = ConfigDict(extra="allow")
 
-    action: ViewerAction = Field(
-        ...,
-        description=(
-            "Always 'run'. It runs one of the actions listed under 'Viewer actions' "
-            "in the system prompt: give its name in 'name', and that action's own "
-            "parameters as further fields of this call"
-        ),
-    )
-    lon: Optional[float] = Field(None, description="Longitude")
-    lat: Optional[float] = Field(None, description="Latitude")
-    height: Optional[float] = Field(None, description="Camera height in metres (default 1000)")
+    action: ViewerAction = Field(..., description="Always 'run'.")
+    lon: Optional[float] = None
+    lat: Optional[float] = None
+    height: Optional[float] = Field(None, description="Camera height in metres, default 1000")
     heading: Optional[float] = Field(None, description="Camera heading in degrees")
     pitch: Optional[float] = Field(None, description="Camera pitch in degrees")
     duration: Optional[float] = Field(None, description="Flight duration in seconds")
-    label: Optional[str] = Field(None, description="Label text for marker or tileset")
-    color: Optional[str] = Field(None, description="CSS colour string, e.g. '#ff0000'")
-    url: Optional[str] = Field(None, description="http or https URL for tileset or GeoJSON")
-    attribute: Optional[str] = Field(None, description="Attribute name for classification (default 'Classification')")
-    iso: Optional[str] = Field(None, description="ISO 8601 date string for time slider")
+    label: Optional[str] = Field(None, description="Marker or tileset label")
+    color: Optional[str] = Field(None, description="CSS colour, e.g. '#ff0000'")
+    url: Optional[str] = Field(None, description="http or https URL of a tileset or GeoJSON")
+    attribute: Optional[str] = Field(None, description="Attribute to classify by, default 'Classification'")
+    iso: Optional[str] = Field(None, description="ISO 8601 time for the time slider")
     name: Optional[str] = Field(
         None,
         description=(
-            "Required: the name of one action listed under 'Viewer actions' in the "
-            "system prompt, spelled exactly as that list spells it"
+            "Required: one action from 'Viewer actions' in the system prompt, "
+            "spelled as that list spells it"
         ),
     )
     # advertised as text, since a model given a bare object schema with no
@@ -75,9 +68,8 @@ class ViewerControlArgs(BaseModel):
     args: Optional[str] = Field(
         None,
         description=(
-            "Only when the action's parameters cannot be given as fields of this "
-            "call: JSON text of an object holding them, e.g. "
-            "'{\"layer\": \"Parcels\", \"visible\": false}'"
+            "Only for a parameter that cannot be a field of this call: JSON text of "
+            "an object, e.g. '{\"layer\": \"Parcels\"}'"
         ),
     )
 
@@ -164,13 +156,10 @@ def viewer_control(
     args: str = None,
     **parameters,
 ) -> str:
-    """Control the TileTopia 3D viewer. The command is sent to the viewer
-    frontend which executes it.
-    Always call this with action='run', name set to one of the actions listed
-    under 'Viewer actions' in the system prompt, and that action's parameters as
-    further fields of the same call, spelled as the entry spells them, e.g.
-    action='run', name=<an entry from that list>, plus its parameters. Only pass
-    args when a parameter cannot be given as a field of this call."""
+    """Control the TileTopia 3D viewer: the command is sent to the frontend,
+    which runs it. Always call with action='run', name set to an action listed
+    under 'Viewer actions' in the system prompt, and that action's own
+    parameters as further fields of the same call."""
     named = {
         "lon": lon, "lat": lat, "height": height,
         "heading": heading, "pitch": pitch, "duration": duration,

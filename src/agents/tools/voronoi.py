@@ -7,30 +7,27 @@ class VoronoiArgs(BaseModel):
     input_path: str = Field(
         ...,
         description=(
-            "Path to the point layer to generate Voronoi polygons from — "
-            "e.g. hospital locations, depot sites, store locations. "
+            "Point layer to build the polygons from, e.g. depot sites. "
             "A filename in outputs/ or user_data/, not a path."
         ),
     )
     boundary_path: Optional[str] = Field(
         None,
         description=(
-            "Optional polygon layer to clip the Voronoi diagram to — "
-            "e.g. a city boundary, region, or isochrone. "
-            "A filename in outputs/, not a path. "
-            "If omitted, a convex hull of the input points is used."
+            "Polygon layer to clip the diagram to, e.g. a city boundary. A filename "
+            "in outputs/, not a path. Defaults to the convex hull of the points."
         ),
     )
     label_col: Optional[str] = Field(
         None,
         description=(
-            "Column from input_path to use as the label for each Voronoi cell "
-            "(e.g. 'name', 'hospital_name'). Auto-detected if omitted."
+            "Column of input_path labelling each cell, e.g. 'name'. Auto-detected "
+            "if omitted."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -41,19 +38,10 @@ def voronoi(
     output_filename: str = None,
 ) -> str:
     """
-    Generate Voronoi (Thiessen) polygons from a point layer. Each polygon
-    defines the area closest to one input point — ideal for defining service
-    catchment zones, trade areas, or nearest-facility boundaries.
-
-    Common uses:
-    - 'Draw catchment zones for each hospital'
-    - 'Which areas are closest to each of my stores?'
-    - 'Create Voronoi regions for weather stations'
-    - 'Define trade areas for each retail location'
-    - 'Show nearest-depot zones for logistics'
-
-    Returns a polygon GPKG with one cell per input point, labelled with
-    the point's name/attributes. Call emit_ui_spec after with ui_type='map'.
+    Voronoi (Thiessen) polygons from a point layer: one cell per point, each
+    covering the area closest to it. Use for catchment zones, trade areas, or
+    nearest-facility boundaries. Returns a polygon GPKG carrying each point's
+    attributes. Call emit_ui_spec after with ui_type='map'.
     """
     import os
     import traceback

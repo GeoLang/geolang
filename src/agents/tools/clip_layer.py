@@ -9,19 +9,18 @@ class ClipLayerArgs(BaseModel):
     )
     clip_path: str = Field(
         ...,
-        description="Filename of the polygon layer to clip by (e.g. an isochrone or boundary).",
+        description="Filename of the polygon layer to clip by, e.g. an isochrone.",
     )
     output_filename: str = Field(
         ...,
-        description="Output filename without extension, e.g. 'restaurants_within_isochrone'.",
+        description="Output name, no extension.",
     )
 
 
 def clip_layer(input_path: str, clip_path: str, output_filename: str) -> str:
     """
-    Clip one spatial layer by another polygon layer. Use this to extract features
-    that fall within a boundary — e.g. restaurants within an isochrone, buildings
-    within a catchment area, or points within an administrative boundary.
+    Clip one spatial layer by a polygon layer, keeping the features inside the
+    boundary: restaurants within an isochrone, points within an admin area.
     """
     import traceback
 

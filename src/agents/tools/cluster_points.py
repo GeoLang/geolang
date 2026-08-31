@@ -7,42 +7,38 @@ class ClusterPointsArgs(BaseModel):
     input_path: str = Field(
         ...,
         description=(
-            "Path to the point layer to cluster. "
-            "A filename in outputs/ or user_data/, not a path."
+            "Point layer to cluster. A filename in outputs/ or user_data/, not a path."
         ),
     )
     method: str = Field(
         "dbscan",
         description=(
-            "Clustering algorithm: 'dbscan' (density-based, auto-detects number of clusters, "
-            "good for irregular shapes and noise) or 'kmeans' (requires n_clusters, "
-            "good for roughly equal-sized spherical clusters). Default 'dbscan'."
+            "'dbscan' finds the cluster count itself and handles irregular shapes "
+            "and noise; 'kmeans' needs n_clusters and suits roughly equal spherical "
+            "clusters."
         ),
     )
     n_clusters: Optional[int] = Field(
         None,
-        description=(
-            "Number of clusters for k-means. Required when method='kmeans'. "
-            "Ignored for DBSCAN (which auto-detects cluster count)."
-        ),
+        description="Cluster count, required for kmeans and ignored for dbscan.",
     )
     eps_km: float = Field(
         0.5,
         description=(
-            "DBSCAN only: maximum distance in km between two points to be in the same cluster. "
-            "Smaller = tighter clusters. Default 0.5km."
+            "dbscan only: greatest distance in km between two points of one cluster. "
+            "Smaller is tighter."
         ),
     )
     min_samples: int = Field(
         3,
         description=(
-            "DBSCAN only: minimum number of points required to form a cluster. "
-            "Points in groups smaller than this are labelled noise (-1). Default 3."
+            "dbscan only: fewest points forming a cluster. Smaller groups are "
+            "labelled noise (-1)."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -55,18 +51,10 @@ def cluster_points(
     output_filename: str = None,
 ) -> str:
     """
-    Cluster a point layer using DBSCAN (density-based) or k-means.
-    Adds a 'cluster_id' column to each point and saves a new GPKG.
-    Also saves cluster hull polygons as a separate GPKG for visualisation.
-
-    Common uses:
-    - 'Find clusters of crime incidents'
-    - 'Group customer locations into 5 zones'
-    - 'Identify hotspot areas from event data'
-    - 'Detect natural groupings in my point data'
-
-    DBSCAN labels noise points as cluster -1 (shown separately).
-    Call emit_ui_spec after with both the point and hull layers.
+    Cluster a point layer with DBSCAN or k-means, to find hotspots or group
+    locations into zones. Saves the points with a 'cluster_id' column as one
+    GPKG and the cluster hull polygons as another.
+    Call emit_ui_spec after with both layers.
     """
     import os
     import traceback

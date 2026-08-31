@@ -11,25 +11,22 @@ from src.core.utils import (
 class DownloadPopulationGridArgs(BaseModel):
     place_name: str = Field(
         ...,
-        description=(
-            "Place or address to centre the population query on. "
-            "E.g. 'M1 Junction 24, Kegworth, UK' or 'Trinity Bellwoods Park, Toronto'."
-        ),
+        description="Place or address to centre the query on, e.g. 'Kegworth, UK'.",
     )
     radius_km: float = Field(
         10.0,
-        description="Radius in km around the location to query population for.",
+        description="Radius in km around the location to count population within.",
     )
     clip_layer_path: Optional[str] = Field(
         None,
         description=(
-            "Optional path to a polygon GPKG to clip population to (e.g. an isochrone). "
-            "A filename in outputs/, not a path. If provided, returns total population inside the polygon."
+            "Polygon GPKG, e.g. an isochrone, to count population inside instead of "
+            "the radius. A filename in outputs/, not a path."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -40,14 +37,12 @@ def download_population_grid(
     output_filename: str = None,
 ) -> str:
     """
-    Estimate population within a radius or polygon. The count is a zonal sum of the
-    local GHS-POP (Global Human Settlement Population) raster inside the queried area,
-    so it always matches the area that gets rendered. Falls back to the WorldPop REST
-    API when no local raster is present. Returns total population count and saves a
-    polygon GPKG of the queried area (the radius bbox, or the clip polygon when given)
-    attributed with the population estimate.
-    Use this when the user asks about population catchment, how many people live within
-    a drive/walk time, or demographic coverage of a service area.
+    Estimate population within a radius or polygon, as a zonal sum of the local
+    GHS-POP raster over the queried area, so the count matches the area drawn.
+    Falls back to the WorldPop API when no local raster is present. Returns the
+    total and saves the queried area as a polygon GPKG carrying the estimate.
+    Use this for population catchment, how many people live within a drive or
+    walk time, or the demographic coverage of a service area.
     """
     import os
     import json

@@ -7,43 +7,39 @@ class ScoreSitesArgs(BaseModel):
     sites: str = Field(
         ...,
         description=(
-            "Semicolon-separated list of site names to evaluate. Each site will be geocoded. "
-            "IMPORTANT: Use semicolons (;) to separate sites, not commas. "
-            "Example: 'Shoreditch London; Kings Cross London; Brixton London'"
+            "Site names to evaluate, each geocoded, separated by semicolons and not "
+            "commas: 'Shoreditch London; Brixton London'"
         ),
     )
     criteria: str = Field(
         "population,amenities,transport,flood_risk,green_space",
         description=(
-            "Comma-separated scoring criteria. Available:\n"
-            "  population    — population within 2km (GHSL/WorldPop)\n"
-            "  amenities     — count of shops, cafes, restaurants within 1km\n"
-            "  transport     — count of bus stops and transit stations within 1km\n"
-            "  flood_risk    — elevation-based flood risk (lower elevation = lower score)\n"
-            "  green_space   — green space coverage percentage within 1km\n"
-            "  competition   — count of competing businesses (fewer = higher score)\n"
-            "Default: population,amenities,transport,flood_risk,green_space"
+            "Comma-separated criteria:\n"
+            "  population   population within 2km (GHSL/WorldPop)\n"
+            "  amenities    shops, cafes, restaurants within 1km\n"
+            "  transport    bus stops and transit stations within 1km\n"
+            "  flood_risk   elevation-based, lower elevation scores lower\n"
+            "  green_space  green space share within 1km\n"
+            "  competition  competing businesses, fewer scores higher"
         ),
     )
     weights: Optional[str] = Field(
         None,
         description=(
-            "Optional comma-separated weights matching the criteria order. "
-            "E.g. '3,2,2,1,1' to weight population 3x. "
-            "If omitted, all criteria are weighted equally."
+            "Comma-separated weights in criteria order, e.g. '3,2,2,1,1'. Equal "
+            "weights if omitted."
         ),
     )
     competition_type: Optional[str] = Field(
         None,
         description=(
-            "OSM data type for competition criterion. Uses download_osm_data syntax. "
-            "E.g. 'supermarkets', 'pharmacies', 'amenity=cafe'. "
-            "Only needed if 'competition' is in criteria."
+            "What counts as competition, in download_osm_data syntax, e.g. "
+            "'supermarkets' or 'amenity=cafe'. Only for the competition criterion."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -58,13 +54,9 @@ def score_sites(
     output_filename: str = None,
 ) -> str:
     """
-    Multi-criteria site scoring and ranking. Evaluates multiple locations
-    against weighted criteria and produces a ranked comparison table with
-    normalised scores (0-100). Saves results as a point GPKG.
-
-    Pass sites as a semicolon-separated list of place names (use ; not , between sites).
-    Use this when the user wants to compare locations, rank sites,
-    or find the best location based on multiple factors.
+    Rank locations against weighted criteria, scored 0-100 and saved as a
+    point GPKG with a comparison table. Use this when the user wants to compare
+    or rank sites, or find the best location on several factors.
     """
     import traceback
 

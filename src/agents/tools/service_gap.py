@@ -12,53 +12,43 @@ class ServiceGapArgs(BaseModel):
     place_name: str = Field(
         ...,
         description=(
-            "Place or region name to analyse — e.g. 'Leeds city centre', 'Manhattan'. "
-            "Used as the study area if no boundary_path is given."
+            "Place to analyse, e.g. 'Leeds city centre'. The study area unless "
+            "boundary_path is given."
         ),
     )
     service_path: str = Field(
         ...,
         description=(
-            "Path to the service facility layer (points or polygons) — "
-            "e.g. hospitals, GP surgeries, schools. "
-            "A filename in outputs/ or user_data/, not a path. "
-            "Can also be an OSM type keyword like 'hospitals', 'schools', 'pharmacies' "
-            "to download automatically."
+            "Service facility layer (points or polygons), a filename in outputs/ or "
+            "user_data/, not a path. Also accepts an OSM keyword like 'hospitals' or "
+            "'schools' to download it instead."
         ),
     )
     service_radius_km: float = Field(
         1.0,
-        description=(
-            "Catchment radius in km — a location is 'served' if it is within this "
-            "distance of a service facility. Default 1km."
-        ),
+        description="Catchment radius in km: a cell is served within this distance of a facility.",
     )
     boundary_path: Optional[str] = Field(
         None,
         description=(
-            "Optional boundary polygon (GPKG) to clip the analysis to. "
-            "A filename in outputs/, not a path. If omitted, a bounding box around "
-            "place_name is used."
+            "Boundary polygon (GPKG) to clip to, a filename in outputs/, not a path. "
+            "Defaults to a bounding box around place_name."
         ),
     )
     grid_resolution_m: int = Field(
         500,
-        description=(
-            "Grid cell size in metres. Smaller = finer detail but slower. "
-            "Recommended: 250–1000m. Default 500m."
-        ),
+        description="Grid cell size in metres, 250 to 1000. Smaller is finer and slower.",
     )
     population_weight: bool = Field(
         False,
         description=(
-            "If True, weight gap cells by population density using a population raster "
-            "(ghsl_pop.tif) in your user_data/ or at the project root. Requires "
-            "that file to exist."
+            "Weight gap cells by population from ghsl_pop.tif in user_data/ or the "
+            "project root. Needs that file."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -72,22 +62,11 @@ def service_gap(
     output_filename: str = None,
 ) -> str:
     """
-    Identify service gaps — areas that are under-served or have no access to a
-    given service facility (hospitals, schools, parks, etc.) within a specified
-    catchment radius.
+    Find areas under-served by a facility type (hospitals, schools, parks).
 
-    Creates a grid over the study area and classifies each cell as:
-    - SERVED: within service_radius_km of at least one facility
-    - UNDERSERVED: 1–3× the radius away
-    - GAP: more than 3× the radius away
-
-    Common uses:
-    - 'Where in Leeds has no GP surgery within 1km?'
-    - 'Show service gaps for schools in Manchester'
-    - 'Find underserved areas for pharmacies in central London'
-    - 'Which parts of the city lack park access within 500m?'
-
-    Returns a polygon GPKG with service gap classification per cell.
+    Grids the study area and classifies each cell: SERVED within
+    service_radius_km of a facility, UNDERSERVED 1 to 3x the radius, GAP
+    beyond 3x. Returns a polygon GPKG, one row per cell.
     Call emit_ui_spec after with ui_type='map'.
     """
     import traceback

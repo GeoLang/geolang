@@ -7,21 +7,20 @@ class GetAdminBoundaryArgs(BaseModel):
     place_name: str = Field(
         ...,
         description=(
-            "Name of the administrative area to fetch — e.g. 'Leicester', 'Greater London', "
-            "'Bavaria', 'New York State', 'France'. Be as specific as needed to avoid ambiguity."
+            "Administrative area to fetch, e.g. 'Greater London'. Be specific "
+            "enough to avoid ambiguity."
         ),
     )
     admin_level: Optional[int] = Field(
         None,
         description=(
-            "OSM administrative level (2–10). Lower = larger area. "
-            "2=country, 4=state/province, 6=county/district, 8=city/municipality. "
-            "Leave blank to accept whatever OSM returns for the place name."
+            "OSM admin level 2 to 10, lower being larger: 2 country, 4 state, "
+            "6 county, 8 city. Omit to take whatever OSM returns for the name."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -31,17 +30,10 @@ def get_admin_boundary(
     output_filename: str = None,
 ) -> str:
     """
-    Fetch the administrative boundary polygon for a place (country, region, city, district)
-    from OpenStreetMap. Returns a polygon GPKG that can be used as a clip mask or
-    analysis area.
-
-    Use this when the user asks to:
-    - 'Show me the boundary of Leicester / Greater London / Bavaria'
-    - 'Clip data to the city of Paris'
-    - 'Get the outline of England'
-    - 'Find all hospitals within the county of Kent'
-
-    Falls back to a geocoded point + convex-hull approach if OSM boundary is unavailable.
+    Administrative boundary polygon for a country, region, city or district,
+    from OpenStreetMap. Returns a polygon GPKG usable as a clip mask or analysis
+    area. Falls back to a convex hull around a geocoded point when OSM has no
+    boundary for the place.
     """
     import traceback
 

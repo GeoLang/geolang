@@ -6,24 +6,19 @@ from src.core.utils import tool_output_path
 class QueryElevationArgs(BaseModel):
     place_name: str = Field(
         ...,
-        description=(
-            "Place or address to query elevation for. "
-            "E.g. 'M1 Junction 24, Kegworth, UK' or 'Canary Wharf, London'."
-        ),
+        description="Place or address to query, e.g. 'Canary Wharf, London'.",
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension for the point GPKG. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
 def query_elevation(place_name: str, output_filename: str = None) -> str:
     """
-    Get the elevation (metres above sea level) for a location using the
-    OpenTopoData API (SRTM 90m dataset, free, no API key required).
-    Also returns flood-risk context: locations below 10m are at potential
-    flood risk; below 5m are high risk. Saves a point GPKG with elevation
-    attribute for use in further spatial analysis.
+    Elevation in metres above sea level for one location, from the SRTM 90m
+    grid. Also reports flood-risk context: below 10m is potential risk, below
+    5m is high. Saves a point GPKG carrying the elevation.
     """
     import traceback
 

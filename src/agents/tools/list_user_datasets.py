@@ -9,9 +9,9 @@ class ListUserDatasetsArgs(BaseModel):
 
 def list_user_datasets() -> str:
     """
-    List all datasets the user has uploaded, including filenames, geometry type,
-    row count, CRS, and column names. Call this whenever the user refers to their
-    own data or a specific dataset by name.
+    List the datasets the user has uploaded, with filename, geometry type, row
+    count, CRS and column names. Call this whenever the user refers to their own
+    data or names a dataset.
     """
     try:
         catalogue = load_catalogue()

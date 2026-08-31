@@ -7,43 +7,38 @@ class AggregateByRegionArgs(BaseModel):
     regions_path: str = Field(
         ...,
         description=(
-            "Path to the polygon layer defining the regions to aggregate by — "
-            "e.g. districts, boroughs, counties, isochrone zones. "
+            "Polygon layer defining the regions, e.g. districts or isochrone zones. "
             "A filename in outputs/ or user_data/, not a path."
         ),
     )
     features_path: str = Field(
         ...,
         description=(
-            "Path to the layer whose values you want to aggregate — "
-            "e.g. population points, schools, shops, crime incidents. "
-            "A filename in outputs/ or user_data/, not a path."
+            "Layer whose values are aggregated, e.g. population points or crime "
+            "incidents. A filename in outputs/ or user_data/, not a path."
         ),
     )
     agg_columns: Optional[str] = Field(
         None,
         description=(
-            "Comma-separated list of numeric columns from features_path to aggregate. "
-            "E.g. 'population,income'. If omitted, feature COUNT per region is returned."
+            "Comma-separated numeric columns of features_path, e.g. "
+            "'population,income'. Feature count per region if omitted."
         ),
     )
     agg_func: str = Field(
         "sum",
-        description=(
-            "Aggregation function: 'sum', 'mean', 'count', 'max', 'min'. Default 'sum'. "
-            "Use 'count' when you just want the number of features per region."
-        ),
+        description="'sum', 'mean', 'count', 'max', or 'min'.",
     )
     region_label_col: Optional[str] = Field(
         None,
         description=(
-            "Column in regions_path to use as the region label in results — "
-            "e.g. 'name', 'NAME', 'district'. Auto-detected if omitted."
+            "Column of regions_path labelling each region, e.g. 'name'. "
+            "Auto-detected if omitted."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -56,19 +51,12 @@ def aggregate_by_region(
     output_filename: str = None,
 ) -> str:
     """
-    Aggregate point or polygon features by region — count, sum, or average a
-    numeric column (e.g. population, sales, incidents) per administrative area.
+    Count, sum, or average a numeric column of point or polygon features per
+    region, such as population by district or hospitals per county.
 
-    Common uses:
-    - 'Total population by district'
-    - 'Count of hospitals per county'
-    - 'Average house price by borough'
-    - 'Number of schools in each catchment zone'
-    - 'Sum of crime incidents by neighbourhood'
-
-    Returns a polygon GPKG with aggregated values per region. Call emit_ui_spec
-    after with ui_type='map' to draw it. The aggregated column is an attribute on
-    each region, which the Feature Picker panel shows on click.
+    Returns a polygon GPKG carrying the aggregate as an attribute of each
+    region, which the Feature Picker panel shows on click. Call emit_ui_spec
+    after with ui_type='map'.
     """
     import os
     import traceback

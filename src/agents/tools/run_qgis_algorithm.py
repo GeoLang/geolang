@@ -100,24 +100,20 @@ def confined_parameters(params, parameter_types, command_line_names=frozenset())
 class RunQGISAlgorithmArgs(BaseModel):
     algorithm_id: str = Field(
         ...,
-        description=(
-            "QGIS processing algorithm ID, e.g. 'native:buffer', 'native:clip', "
-            "'native:dissolve', 'qgis:reprojectlayer', 'native:fixgeometries'"
-        ),
+        description="QGIS algorithm ID, e.g. 'native:buffer' or 'native:clip'.",
     )
     parameters: str = Field(
         ...,
         description=(
-            "JSON string of algorithm input parameters. Common keys: "
-            "INPUT (the layer to read), OUTPUT (the file to write), DISTANCE "
-            "(for buffer), OVERLAY (for clip/intersection). A layer is named by "
-            "its filename alone, never by a path. Example: "
-            '{"INPUT": "ne_110m_populated_places.shp", "DISTANCE": 1000}'
+            "JSON object of algorithm parameters. Common keys: INPUT (layer to "
+            "read), OUTPUT (file to write), DISTANCE (buffer), OVERLAY (clip or "
+            "intersection). A layer is named by its filename alone, never a path. "
+            'Example: {"INPUT": "places.shp", "DISTANCE": 1000}'
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename (e.g. 'result.gpkg'), with no directory part. Saved to your outputs directory. Auto-generated if omitted.",
+        description="Output name with extension, no directory. Auto-generated if omitted.",
     )
 
 

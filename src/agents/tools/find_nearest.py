@@ -7,33 +7,31 @@ class FindNearestArgs(BaseModel):
     origins_path: str = Field(
         ...,
         description=(
-            "Path to the layer whose features you want to find neighbours FOR — "
-            "e.g. your sites, hospitals, or user-uploaded points. "
+            "Layer whose features get neighbours found for them, e.g. your sites. "
             "A filename in outputs/ or user_data/, not a path."
         ),
     )
     targets_path: str = Field(
         ...,
         description=(
-            "Path to the layer to search for nearest features IN — "
-            "e.g. bus stops, schools, restaurants. "
+            "Layer searched for the nearest features, e.g. bus stops. "
             "A filename in outputs/ or user_data/, not a path."
         ),
     )
     k: int = Field(
         1,
-        description="Number of nearest targets to find per origin feature (default 1, max 10).",
+        description="Nearest targets per origin, at most 10.",
     )
     max_distance_km: Optional[float] = Field(
         None,
         description=(
-            "Optional maximum search radius in km. Origins with no target within this "
-            "distance are excluded from results (or flagged if keep_unmatched=True)."
+            "Search radius in km. Origins with no target inside it are dropped from "
+            "the results."
         ),
     )
     output_filename: Optional[str] = Field(
         None,
-        description="Output filename without extension. Auto-generated if omitted.",
+        description="Output name, no extension. Auto-generated if omitted.",
     )
 
 
@@ -45,17 +43,10 @@ def find_nearest(
     output_filename: str = None,
 ) -> str:
     """
-    For each feature in the origins layer, find the k nearest features in the
-    targets layer and report the distance. Adds distance_m and target attributes
-    to the origins and saves as a GPKG.
-
-    Common uses:
-    - 'Find the nearest hospital to each of my sites'
-    - 'How far is each school from the nearest bus stop?'
-    - 'Find the 3 nearest restaurants to each hotel'
-    - 'Which GP surgery is closest to each care home?'
-
-    Distances are straight-line (Euclidean in metres after projection).
+    For each feature of the origins layer, find the k nearest features of the
+    targets layer. Saves the origins as a GPKG with distance_m and the target's
+    attributes added. Distances are straight-line metres after projection, not
+    travel distances.
     """
     import os
     import traceback

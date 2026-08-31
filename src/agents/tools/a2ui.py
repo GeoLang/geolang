@@ -54,35 +54,32 @@ def recent_output_layers() -> list[tuple[str, str, str, str]]:
 class EmitUISpecArgs(BaseModel):
     ui_type: str = Field(
         ...,
-        description=("Type of UI to render: 'map', 'image', or 'table'."),
+        description="'map', 'image', or 'table'.",
     )
     center_lon: Optional[float] = Field(
         None,
-        description="Map center longitude. Required for type 'map'.",
+        description="Map centre. Required for 'map'.",
     )
     center_lat: Optional[float] = Field(
         None,
-        description="Map center latitude. Required for type 'map'.",
+        description="Map centre. Required for 'map'.",
     )
     zoom: Optional[int] = Field(
         13,
-        description="Map zoom level (default 13).",
+        description="Map zoom level.",
     )
     layers: Optional[str] = Field(
         None,
         description=(
-            "Semicolon-separated list of layer specs for type 'map'. "
-            "Each layer: 'name|file_path|color|shade_by'. "
-            "Example: 'Isochrones|outputs/london_isochrones.gpkg|#3388ff;Cafes|outputs/cafes.gpkg|#ff0000'. "
-            "Color is optional (default #3388ff). "
-            "shade_by is optional: one column name in that file worth colouring by "
-            "(e.g. 'Gaps|outputs/gaps.gpkg|#ff6b35|gap_score'), which shades the layer "
-            "by that column instead of drawing it in one colour."
+            "Semicolon-separated layers for 'map', each 'name|file_path|color|"
+            "shade_by', e.g. 'Cafes|outputs/cafes.gpkg|#ff0000'. color defaults to "
+            "#3388ff. shade_by is one column of that file to shade by instead of "
+            "drawing the layer in one colour."
         ),
     )
     image_path: Optional[str] = Field(
         None,
-        description="Path to image file. Required for type 'image'. E.g. 'outputs/map.png'.",
+        description="Required for 'image', e.g. 'outputs/map.png'.",
     )
     title: Optional[str] = Field(
         None,
@@ -90,13 +87,13 @@ class EmitUISpecArgs(BaseModel):
     )
     columns: Optional[str] = Field(
         None,
-        description="Semicolon-separated column names for type 'table'. E.g. 'Name;Score;Rank'.",
+        description="Semicolon-separated column names for 'table', e.g. 'Name;Score;Rank'.",
     )
     rows: Optional[str] = Field(
         None,
         description=(
-            "Table rows for type 'table'. Rows separated by '||', cells by '|'. "
-            "Example: 'London|85|1||Paris|72|2||Berlin|68|3'."
+            "Rows for 'table', separated by '||' with cells by '|', e.g. "
+            "'London|85|1||Paris|72|2'."
         ),
     )
 
@@ -112,10 +109,8 @@ def emit_ui_spec(
     columns: str = None,
     rows: str = None,
 ) -> str:
-    """Emit a UI specification for the client to render. Call this after generating any map, image, or table output.
-    For maps: provide ui_type='map', center_lon, center_lat, zoom, and layers (semicolon-separated).
-    For images: provide ui_type='image', image_path, and title.
-    For tables: provide ui_type='table', title, columns, and rows."""
+    """Emit a UI specification for the client to render. Call this after
+    producing any map, image, or table output."""
 
     try:
         if ui_type == "map":

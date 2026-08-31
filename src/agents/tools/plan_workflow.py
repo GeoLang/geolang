@@ -40,13 +40,10 @@ class PlanWorkflowArgs(BaseModel):
             "[[sink]] (name, input, format, path). 'input' names an earlier step. "
             f"Formats: {SUPPORTED_FORMATS}. Call list_workflow_operations for the "
             "operation names and their parameters. Example:\n"
-            '[project]\nname = "depot-catchment"\n\n'
-            '[[source]]\nname = "depots"\nformat = "geojson"\n'
-            'path = "outputs/depots.geojson"\n\n'
-            '[[transform]]\nname = "catchment"\ninput = "depots"\n'
-            'operation = "buffer"\ndistance = 500.0\n\n'
-            '[[sink]]\nname = "out"\ninput = "catchment"\n'
-            'format = "gpkg"\npath = "outputs/depot_catchment.gpkg"'
+            '[project]\nname = "catchment"\n\n'
+            '[[source]]\nname = "depots"\nformat = "geojson"\npath = "outputs/depots.geojson"\n\n'
+            '[[transform]]\nname = "buffered"\ninput = "depots"\noperation = "buffer"\ndistance = 500.0\n\n'
+            '[[sink]]\nname = "out"\ninput = "buffered"\nformat = "gpkg"\npath = "outputs/catchment.gpkg"'
         ),
     )
     title: Optional[str] = Field(
@@ -60,12 +57,11 @@ class PlanWorkflowArgs(BaseModel):
 
 def plan_workflow(manifest_toml: str, title: str = None) -> str:
     """Validate a multi-step geoprocessing workflow and show the user the plan
-    before anything runs. Compose the pipeline as a geodukt TOML manifest, call
-    this, present the returned steps in plain language, and only call
-    run_workflow with the same manifest once the user approves. Use this instead
-    of chaining buffer_clip_dissolve, clip_layer and friends by hand whenever a
-    request needs several chained operations over files. spatial_join takes a
-    second input named by join, which is an earlier step."""
+    before anything runs. Present the returned steps in plain language, then
+    call run_workflow with the same manifest once the user approves. Use this
+    instead of chaining buffer_clip_dissolve, clip_layer and friends by hand
+    whenever a request needs several chained operations over files.
+    spatial_join takes a second input named by join, an earlier step."""
     import json
 
     manifest, error = parse_manifest(manifest_toml)
