@@ -36,6 +36,12 @@ def test_the_manifest_stays_under_the_byte_cap():
     )
 
 
+def test_a_parameter_named_title_survives_schema_slimming():
+    manifest = {t["name"]: t for t in server.tool_manifest()}
+
+    assert "title" in manifest["plan_workflow"]["parameters"]["properties"]
+
+
 def test_the_approval_route_is_the_one_tool_left_off_the_manifest():
     """It records the user pressing approve, so nothing the model can call has it."""
     left_off = {f.__name__ for f, _ in load_external_tools() if approval_route_only(f)}

@@ -112,8 +112,13 @@ def _slim_schema(node):
         node.pop("title", None)
         if "default" in node and node["default"] is None:
             del node["default"]
-        for child in node.values():
-            _slim_schema(child)
+        for key, child in node.items():
+            # properties and $defs keys are parameter names, a parameter named title must survive
+            if key in ("properties", "$defs") and isinstance(child, dict):
+                for schema in child.values():
+                    _slim_schema(schema)
+            else:
+                _slim_schema(child)
     elif isinstance(node, list):
         for child in node:
             _slim_schema(child)
