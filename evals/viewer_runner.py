@@ -129,6 +129,10 @@ def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
 
     results = []
     captured = {}
+    # one line per finished task, so a killed run keeps the scores it earned
+    progress = Path(args.out) / "viewer-progress.jsonl"
+    progress.parent.mkdir(parents=True, exist_ok=True)
+    progress.write_text("")
     user_session = active_session_id()
     eval_sessions = []
     try:
@@ -149,6 +153,8 @@ def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
                     captured[task.id] = (calls, result)
                 samples.append(result)
             results.append(TaskSamples(task.id, samples))
+            with progress.open("a") as fh:
+                fh.write(json.dumps(results[-1].as_dict()) + "\n")
     finally:
         restore_session(user_session)
         delete_sessions(eval_sessions)
