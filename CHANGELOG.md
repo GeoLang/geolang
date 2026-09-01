@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- 2026-08-31: the viewer eval covers `live.watch_region`, 72 tasks. The
+  catalogue fixture is recopied from viewtopia.
+
 ### Changed
 - 2026-08-30: `GET /tools` offers a tool only where its imports resolve. The
   tools import their dependencies inside their function bodies, so a client-only
