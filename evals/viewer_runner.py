@@ -6,8 +6,10 @@
 
 The viewer state and the action catalogue are fixtures under evals/viewer/, sent
 to sibyl exactly the way `/chat/agui` sends the live ones, so what the model is
-told here is what it is told in the viewer. geodukt is not involved: this eval
-only reads viewer_control calls, so an unreachable geodukt does not skip it.
+told here is what it is told in the viewer. A call the viewer would refuse, and
+a read action's result, go back as the next user message the way the viewer
+sends them, from evals/viewer/reads_results.json. geodukt is not involved: this
+eval only reads viewer_control calls, so an unreachable geodukt does not skip it.
 """
 
 import argparse
@@ -31,6 +33,7 @@ from evals.runner import (
     start_eval_session,
 )
 from evals.scoring import TaskSamples, aggregate
+from evals.viewer_replies import MAXIMUM_FOLLOW_UPS, pending_reply
 from evals.viewer_scoring import VIEWER_CONTROL_TOOL, load_tasks, score_calls
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -52,8 +55,8 @@ def viewer_skip_reason(allow_cloud: bool) -> str:
     return ""
 
 
-def capture_calls(prompt: str, system_prompt: str) -> list:
-    """Every viewer_control call of one run, arguments decoded.
+def turn_calls(message: str, system_prompt: str) -> list:
+    """Every viewer_control call of one turn, arguments decoded.
 
     A call whose arguments will not parse is dropped: the viewer could not have
     run it either, so it is not an answer. A run cut short keeps the calls it
@@ -61,7 +64,7 @@ def capture_calls(prompt: str, system_prompt: str) -> list:
     answered.
     """
     calls = []
-    for event in run_events({"system_prompt": system_prompt, "message": prompt}):
+    for event in run_events({"system_prompt": system_prompt, "message": message}):
         if event.get("kind") != "tool_call":
             continue
         if str(event.get("name") or "") != VIEWER_CONTROL_TOOL:
@@ -73,6 +76,28 @@ def capture_calls(prompt: str, system_prompt: str) -> list:
         if isinstance(arguments, dict):
             calls.append(arguments)
     return calls
+
+
+def capture_calls(
+    prompt: str, system_prompt: str, catalogue: list, reads_results: dict
+) -> list:
+    """Every viewer_control call the prompt drew, over the whole reply loop.
+
+    The viewer answers a failed call and a read action's result as the next user
+    message, and the model carries on from there, so scoring only the first turn
+    scores a conversation the viewer never has. Each reply goes into the same
+    session as its own message, at most twice, as the viewer sends them.
+    """
+    calls = turn_calls(prompt, system_prompt)
+    every_call = list(calls)
+    for _ in range(MAXIMUM_FOLLOW_UPS):
+        reply = pending_reply(calls, catalogue, reads_results)
+        if reply is None:
+            break
+        print(f"  follow-up: {reply}", file=sys.stderr)
+        calls = turn_calls(reply, system_prompt)
+        every_call += calls
+    return every_call
 
 
 def load_fixture(path):
@@ -125,6 +150,7 @@ def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
     from src.api.viewer_state import system_prompt_for
 
     catalogue = load_fixture(args.catalogue)
+    reads_results = load_fixture(args.reads_results)
     system_prompt = system_prompt_for({"viewer": snapshot, "actions": catalogue})
 
     results = []
@@ -147,7 +173,9 @@ def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
                 print(f"running {label}", file=sys.stderr)
                 # a fresh session per run, so one sample cannot bias the next
                 eval_sessions.append(start_eval_session(f"viewer eval {task.id} {run}"))
-                calls = capture_calls(task.prompt, system_prompt)
+                calls = capture_calls(
+                    task.prompt, system_prompt, catalogue, reads_results
+                )
                 result = score_calls(task, calls, snapshot)
                 if run == 1:
                     captured[task.id] = (calls, result)
@@ -166,6 +194,9 @@ def main(argv=None) -> int:
     parser.add_argument("--tasks", default=str(FIXTURE_DIR / "tasks"))
     parser.add_argument("--snapshot", default=str(FIXTURE_DIR / "snapshot.json"))
     parser.add_argument("--catalogue", default=str(FIXTURE_DIR / "catalogue.json"))
+    parser.add_argument(
+        "--reads-results", default=str(FIXTURE_DIR / "reads_results.json")
+    )
     parser.add_argument(
         "--only", nargs="+", metavar="ID", help="run just these task ids"
     )

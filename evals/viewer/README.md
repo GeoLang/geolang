@@ -11,6 +11,11 @@ cp tests/unit/fixtures/viewer-snapshot.json ../geolang/evals/viewer/snapshot.jso
 cp tests/unit/fixtures/action-catalogue.json ../geolang/evals/viewer/catalogue.json
 ```
 
+`reads_results.json` is written here, not copied: it is what each `[reads]`
+action answers, since the harness runs no viewer. A run sends that text back as
+the next user message, the way the viewer does, so the model is scored on the
+same conversation. Every catalogue entry marked `reads` needs an entry.
+
 Run the eval with `python -m evals.viewer_runner --repeat 3`. One run is a poor
 estimate of a score.
 

@@ -1,0 +1,9 @@
+{
+  "analysis.cross_section": "2.33 km of ground: lowest 8 m, highest 41 m, 33 m of climb and 12 m of descent.",
+  "analysis.terrain_profile": "2.33 km of ground: lowest 8 m, highest 41 m, 33 m of climb and 12 m of descent.",
+  "dataset.list": "2 datasets. Road Network: main, widening. Sensor Sites: main.",
+  "find_feature": "2 matches. Sensors: name \"Kingsway substation\" at -0.1284, 51.5061. Parcels: name \"Kingsway Yard\" at -0.1279, 51.5064.",
+  "live.list": "2 live maps: Riverside Live, Harbour Sensors.",
+  "project.list": "2 projects: Riverside Widening, Harbour Redevelopment.",
+  "stac.search": "2 items in Sentinel-2 Level-2A.\nS2B_31UDQ_20260801_0_L2A, 2026-08-01, visual (raster), thumbnail (raster)\nS2A_31UDQ_20260730_0_L2A, 2026-07-30, visual (raster)"
+}

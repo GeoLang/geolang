@@ -7,11 +7,13 @@ names an action the viewer's catalogue offers.
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 import respx
 
 from evals import viewer_runner
 from evals.scoring import aggregate
+from evals.viewer_replies import MAXIMUM_FOLLOW_UPS
 from evals.viewer_runner import capture_calls, viewer_skip_reason
 from evals.viewer_scoring import (
     ViewerTask,
@@ -24,6 +26,7 @@ FIXTURE_DIR = Path(__file__).resolve().parent.parent / "evals" / "viewer"
 TASKS_DIR = FIXTURE_DIR / "tasks"
 SNAPSHOT = json.loads((FIXTURE_DIR / "snapshot.json").read_text())
 CATALOGUE = json.loads((FIXTURE_DIR / "catalogue.json").read_text())
+READS_RESULTS = json.loads((FIXTURE_DIR / "reads_results.json").read_text())
 
 HIDE_PARCELS = ViewerTask(
     {
@@ -53,6 +56,10 @@ FLY_TO_PARIS = ViewerTask(
 
 def run_call(name, **args):
     return {"action": "run", "name": name, "args": args}
+
+
+def _capture(prompt):
+    return capture_calls(prompt, "a system prompt", CATALOGUE, READS_RESULTS)
 
 
 # ── the checks a call earns ──────────────────────────────────────────────
@@ -275,11 +282,13 @@ def test_only_viewer_control_calls_are_captured():
     )
     with respx.mock(base_url=viewer_runner.runner.SIBYL) as sibyl:
         route = sibyl.post("/runs").respond(200, content=body)
-        calls = capture_calls("hide the parcels layer", "a system prompt")
+        calls = _capture("hide the parcels layer")
 
     assert score_calls(HIDE_PARCELS, calls, SNAPSHOT).score == 1.0
     sent = json.loads(route.calls.last.request.content)
     assert sent == {"system_prompt": "a system prompt", "message": "hide the parcels layer"}
+    # a change is not answered, so the prompt was the only message
+    assert len(route.calls) == 1
 
 
 def test_a_call_whose_arguments_will_not_parse_is_dropped():
@@ -289,7 +298,79 @@ def test_a_call_whose_arguments_will_not_parse_is_dropped():
     )
     with respx.mock(base_url=viewer_runner.runner.SIBYL) as sibyl:
         sibyl.post("/runs").respond(200, content=body)
-        assert capture_calls("hide the parcels layer", "a system prompt") == []
+        assert _capture("hide the parcels layer") == []
+
+
+# ── the replies the viewer sends back ────────────────────────────────────
+
+
+def _turn(*calls):
+    events = [
+        {"kind": "tool_call", "name": "viewer_control", "args": json.dumps(call)}
+        for call in calls
+    ]
+    return httpx.Response(200, content=_ndjson(*events, {"kind": "done"}))
+
+
+def _messages(route):
+    return [json.loads(call.request.content)["message"] for call in route.calls]
+
+
+def test_a_read_result_goes_back_and_the_next_call_is_captured_too():
+    """The find-then-fly pair the viewer has and the harness used to lose."""
+    with respx.mock(base_url=viewer_runner.runner.SIBYL) as sibyl:
+        route = sibyl.post("/runs").mock(
+            side_effect=[
+                _turn(run_call("find_feature", query="old brewery")),
+                _turn(run_call("camera.fly_to", lon=-0.1284, lat=51.5061)),
+            ]
+        )
+        calls = _capture("fly to the old brewery")
+
+    assert [c["name"] for c in calls] == ["find_feature", "camera.fly_to"]
+    assert _messages(route)[1].startswith("Result of find_feature: ")
+
+
+def test_a_refused_call_goes_back_as_the_failure_the_viewer_reports():
+    with respx.mock(base_url=viewer_runner.runner.SIBYL) as sibyl:
+        route = sibyl.post("/runs").mock(
+            side_effect=[
+                _turn(run_call("find_feature")),
+                _turn(run_call("find_feature", query="Kingsway substation")),
+                _turn(),
+            ]
+        )
+        calls = _capture("where is the Kingsway substation?")
+
+    assert len(calls) == 2
+    assert _messages(route)[1] == (
+        "find_feature failed: find_feature: query is required"
+    )
+    assert _messages(route)[2].startswith("Result of find_feature: ")
+
+
+def test_the_reply_loop_stops_after_two_follow_ups():
+    """A read whose answer draws another read must not run the model forever."""
+    reading = run_call("dataset.list")
+    with respx.mock(base_url=viewer_runner.runner.SIBYL) as sibyl:
+        route = sibyl.post("/runs").mock(side_effect=lambda request: _turn(reading))
+        calls = _capture("which datasets have versions I can look at?")
+
+    assert len(route.calls) == 1 + MAXIMUM_FOLLOW_UPS
+    assert len(calls) == 1 + MAXIMUM_FOLLOW_UPS
+
+
+def test_a_turn_that_only_changed_the_viewer_ends_the_run():
+    with respx.mock(base_url=viewer_runner.runner.SIBYL) as sibyl:
+        route = sibyl.post("/runs").mock(
+            side_effect=[
+                _turn(run_call("find_feature", query="Kingsway substation")),
+                _turn(run_call("layers.set_color", layer="Parcels", color="#ff8800")),
+            ]
+        )
+        _capture("colour the parcel around the Kingsway substation")
+
+    assert len(route.calls) == 2
 
 
 # ── when the eval can run at all ─────────────────────────────────────────

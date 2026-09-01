@@ -108,17 +108,27 @@ def call_action(call: dict) -> str:
 RUN_CALL_FIELDS = {"action", "name", "args", "url"}
 
 
+def read_arguments(value):
+    """The arguments as an object, or None when they cannot be read as one.
+
+    Mirrors the viewer's `readArguments`: nothing at all is an empty object, and
+    so is empty text, but text that will not decode is a call the viewer refuses.
+    """
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        if value.strip() == "":
+            return {}
+        try:
+            return read_arguments(json.loads(value))
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
 def _object_text(value) -> dict:
     """`value` decoded as an object, or {} when it is not one."""
-    if isinstance(value, dict):
-        return value
-    if not isinstance(value, str):
-        return {}
-    try:
-        decoded = json.loads(value)
-    except json.JSONDecodeError:
-        return {}
-    return decoded if isinstance(decoded, dict) else {}
+    return read_arguments(value) or {}
 
 
 def call_arguments(call: dict) -> dict:

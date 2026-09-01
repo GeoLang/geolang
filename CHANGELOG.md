@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nights running.
 
 ### Added
+- 2026-09-01: the viewer eval answers the model's calls the way the viewer
+  does. A call the viewer would refuse comes back as `<name> failed: <message>`
+  and a `[reads]` action's result as `Result of <name>: <text>`, each as its own
+  message into the same session, at most twice per task. The result texts are a
+  new fixture, `evals/viewer/reads_results.json`, one per catalogue entry marked
+  `reads`. Tasks that read before they act were scored on a first turn the
+  viewer never leaves the model in.
 - 2026-08-31: the viewer eval covers `live.watch_region`, 72 tasks. The
   catalogue fixture is recopied from viewtopia.
 
