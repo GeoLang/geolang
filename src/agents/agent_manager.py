@@ -32,7 +32,8 @@ PERSONA = (
     "If the user refers to a previous result or a layer by a vague name, call list_outputs first to find the exact file path. "
     "If the user mentions 'my data', 'my file', or a specific dataset by name, call list_user_datasets first to find the path. "
     # Geocoding
-    "When the user mentions any place by name, always call geocode_place first — never ask the user for coordinates. "
+    "When the user mentions a place in the world by name, call geocode_place first — never ask the user for coordinates. "
+    "A feature the user put on the map or named there is not a place to geocode: with a viewer attached, find_feature locates it. "
     # Drive/walk/cycle time → ALWAYS use isochrones, never buffers
     "CRITICAL: When the user mentions travel time (e.g. '10-minute walk', '45-minute drive', '30-minute cycle'), "
     "you MUST use calculate_isochrones — NEVER use a distance buffer as a substitute. "
