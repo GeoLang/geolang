@@ -52,17 +52,36 @@ TOKEN_HINT = (
 )
 
 
+UNKNOWN_PROFILE = "unknown"
+
+# the profile id every run of this sweep pins, so switching sibyl's active
+# profile mid-sweep cannot move which model the sweep measures
+_pinned_profile_id = ""
+
+
 def active_profile() -> tuple:
     """(profile id, model name, server) from sibyl, ("unknown", "", "") when it cannot say."""
     try:
         body = httpx.get(f"{SIBYL}/models", timeout=5).json()
     except Exception:
-        return "unknown", "", ""
-    active = body.get("active") or "unknown"
+        return UNKNOWN_PROFILE, "", ""
+    active = body.get("active") or UNKNOWN_PROFILE
     for profile in body.get("profiles") or []:
         if profile.get("id") == active:
             return active, profile.get("model") or "", profile.get("server") or ""
     return active, "", ""
+
+
+def pin_active_profile() -> tuple:
+    """Read the active profile once and pin every later run of this sweep to it.
+
+    Returns what active_profile() returns, so the report names the profile that
+    was pinned rather than whatever is active by the time it is written.
+    """
+    global _pinned_profile_id
+    profile, model, server = active_profile()
+    _pinned_profile_id = "" if profile == UNKNOWN_PROFILE else profile
+    return profile, model, server
 
 
 def geodukt_reachable() -> str:
@@ -186,9 +205,12 @@ def run_events(body: dict):
     problem with the stack rather than with one prompt.
     """
     timeout = httpx.Timeout(connect=10.0, read=RUN_READ_TIMEOUT, write=30.0, pool=10.0)
+    sent = run_body(body)
+    if _pinned_profile_id:
+        sent = {**sent, "profile": _pinned_profile_id}
     try:
         with httpx.Client(timeout=timeout) as client:
-            with client.stream("POST", f"{SIBYL}/runs", json=run_body(body)) as response:
+            with client.stream("POST", f"{SIBYL}/runs", json=sent) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if not line.strip():
@@ -383,7 +405,7 @@ def main(argv=None) -> int:
         if reason:
             print(f"SKIP: {reason}")
             return 0
-        profile, model, _ = active_profile()
+        profile, model, _ = pin_active_profile()
         mode = "stack"
         if not args.no_fixtures:
             created = ensure_fixtures(tasks)

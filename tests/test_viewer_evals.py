@@ -414,3 +414,43 @@ def test_the_cloud_profile_needs_opting_in():
     with _stack(profile="cloud"):
         assert "cloud profile" in viewer_skip_reason(allow_cloud=False)
         assert viewer_skip_reason(allow_cloud=True) == ""
+
+
+# ── the profile a sweep pins ─────────────────────────────────────────────
+
+
+@pytest.fixture
+def unpinned():
+    """The pin is module state, so it must not leak into the next test."""
+    yield
+    viewer_runner.runner._pinned_profile_id = ""
+
+
+def test_every_run_of_a_sweep_carries_the_profile_pinned_at_the_start(unpinned):
+    with _stack() as mock:
+        route = mock.post(f"{viewer_runner.runner.SIBYL}/runs").mock(
+            side_effect=[
+                _turn(run_call("find_feature", query="old brewery")),
+                _turn(run_call("camera.fly_to", lon=-0.1284, lat=51.5061)),
+            ]
+        )
+        profile, model, _ = viewer_runner.runner.pin_active_profile()
+        _capture("fly to the old brewery")
+
+    assert (profile, model) == ("local:some-model", "some-model")
+    assert len(route.calls) == 2
+    for call in route.calls:
+        assert json.loads(call.request.content)["profile"] == "local:some-model"
+
+
+def test_a_sweep_that_cannot_read_the_profile_sends_no_field(unpinned):
+    with respx.mock(base_url=viewer_runner.runner.SIBYL) as sibyl:
+        sibyl.get("/models").mock(side_effect=httpx.ConnectError("sibyl is down"))
+        assert (
+            viewer_runner.runner.pin_active_profile()[0]
+            == viewer_runner.runner.UNKNOWN_PROFILE
+        )
+        route = sibyl.post("/runs").respond(200, content=_ndjson({"kind": "done"}))
+        _capture("hide the parcels layer")
+
+    assert "profile" not in json.loads(route.calls.last.request.content)

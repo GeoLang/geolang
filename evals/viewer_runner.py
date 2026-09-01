@@ -26,6 +26,7 @@ from evals.runner import (
     active_session_id,
     delete_sessions,
     markdown_report,
+    pin_active_profile,
     restore_session,
     run_events,
     service_up,
@@ -261,7 +262,7 @@ def main(argv=None) -> int:
         if reason:
             print(f"SKIP: {reason}")
             return 0
-        profile, model, _ = active_profile()
+        profile, model, _ = pin_active_profile()
         results, captured = run_against_the_stack(args, tasks, snapshot)
         mode = "stack"
         if args.record:
