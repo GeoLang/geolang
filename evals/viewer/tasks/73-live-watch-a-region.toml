@@ -1,0 +1,12 @@
+id = "live-watch-a-region"
+prompt = "watch the ndvi_2026 layer on the live map: take the mean every 900 seconds and warn me when it falls under 0.3"
+notes = "Layer, reducer, interval and both threshold halves are all given, and no area is, so the watch takes the drawn region."
+
+[expect]
+action = "run"
+name = "live.watch_region"
+args = { layer = "ndvi_2026", reducer = "mean", interval_seconds = 900.0, threshold_op = "lt", threshold_value = 0.3 }
+
+[tolerance]
+interval_seconds = 0.5
+threshold_value = 0.01
