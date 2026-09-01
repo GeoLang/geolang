@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import geopandas as gpd
 import pandas as pd
 import pytest
-from shapely.geometry import LineString
+from shapely.geometry import LineString, box
 
 from src.agents.tools.download_osm_data import download_osm_data
 from src.core import utils
@@ -55,6 +55,31 @@ class _RecordingOsmnx:
     def features_from_point(self, point, tags=None, dist=None):
         self.point_calls.append({"point": point, "tags": tags, "dist": dist})
         return self.frame
+
+
+class _RoadsOsmnx:
+    """Answers geocode_to_gdf with a fixed boundary and records graph requests."""
+
+    def __init__(self, boundary, frame):
+        self.boundary = boundary
+        self.frame = frame
+        self.graph_calls = []
+
+    def geocode_to_gdf(self, place_name):
+        return self.boundary
+
+    def graph_from_place(self, place_name, network_type=None):
+        self.graph_calls.append((place_name, network_type))
+        return "graph"
+
+    def graph_to_gdfs(self, G, nodes=False):
+        return self.frame
+
+
+def _boundary(degrees):
+    return gpd.GeoDataFrame(
+        geometry=[box(LON, LAT, LON + degrees, LAT + degrees)], crs="EPSG:4326"
+    )
 
 
 def _nominatim(hits, calls=None):
@@ -206,6 +231,33 @@ def test_a_named_feature_prefers_the_hit_matching_the_requested_tag(monkeypatch,
 
     assert "relation 2263653" in result
     assert _read_output("thames").geometry.iloc[0].geom_type == "LineString"
+
+
+def test_roads_for_an_oversized_place_are_refused(monkeypatch, outputs):
+    # a 1 degree square, thousands of km2
+    fake = _RoadsOsmnx(_boundary(1.0), _features([1, 2]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+
+    result = download_osm_data(
+        data_type="roads", place_name="London", output_filename="roads"
+    )
+
+    assert "capped at 50 km2" in result
+    assert fake.graph_calls == [], "the graph download must not start"
+
+
+def test_roads_for_a_district_sized_place_download(monkeypatch, outputs):
+    # about 20 km2, under the cap
+    fake = _RoadsOsmnx(_boundary(0.05), _features([1, 2]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+
+    result = download_osm_data(
+        data_type="roads", place_name="Camden", output_filename="roads"
+    )
+
+    assert fake.graph_calls == [("Camden", "all")]
+    assert len(_read_output("roads")) == 2
+    assert "Downloaded 2 roads features" in result
 
 
 def test_neither_a_place_nor_a_feature_is_refused(monkeypatch, outputs):

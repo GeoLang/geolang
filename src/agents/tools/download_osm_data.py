@@ -25,6 +25,8 @@ DEFAULT_RADIUS_M = 1000
 # road networks need more reach than point features before the graph connects up
 DEFAULT_ROADS_RADIUS_M = 2000
 ADDRESS_FALLBACK_RADIUS_M = 2000
+# a larger area's all-roads Overpass response OOMs the 4 GiB executor
+MAX_ROADS_PLACE_AREA_KM2 = 50
 
 
 class DownloadOSMDataArgs(BaseModel):
@@ -279,6 +281,18 @@ def download_osm_data(
                 warnings.simplefilter("always")
                 if dt == "roads":
                     try:
+                        boundary = ox.geocode_to_gdf(place_name)
+                        area_km2 = float(
+                            boundary.to_crs(boundary.estimate_utm_crs()).area.sum()
+                        ) / 1e6
+                        if area_km2 > MAX_ROADS_PLACE_AREA_KM2:
+                            return (
+                                f"'{place_name}' covers {area_km2:,.0f} km2 and a "
+                                f"full roads download is capped at "
+                                f"{MAX_ROADS_PLACE_AREA_KM2} km2. Pass a "
+                                "district-sized place_name, or 'lat,lon' with "
+                                "radius_m."
+                            )
                         G = ox.graph_from_place(place_name, network_type="all")
                     except Exception:
                         lat, lon = ox.geocode(place_name)
