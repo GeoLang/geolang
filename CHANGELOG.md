@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catalogue fixture is recopied from viewtopia.
 
 ### Changed
+- 2026-09-01: `geocode_place` is described as a lookup of world place names and
+  addresses, and points a feature on the user's map at `find_feature`.
+  `sql_query` says that attaching a remote CSV or Parquet URL as a table is the
+  viewer action `sql.attach_url`. The viewer instructions put `find_feature`
+  ahead of any geocoding tool for what the person named on the map. In
+  transcripts "where is the Kingsway substation?" went to `geocode_place` and
+  `download_osm_data`, and an attach went out as a DuckDB `ATTACH` statement.
 - 2026-08-30: `GET /tools` offers a tool only where its imports resolve. The
   tools import their dependencies inside their function bodies, so a client-only
   install advertised 16 tools that raised ModuleNotFoundError when called, and

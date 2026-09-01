@@ -44,8 +44,11 @@ def sql_query(
     the viewer already reaches: attached layers, public GeoParquet/CSV URLs via
     read_parquet/read_csv, or remote GeoJSON. For analysis of more than one step
     use plan_workflow and run_workflow instead, which give the user a reviewable
-    plan and reusable output files. Not for large server-side datasets,
-    mutations, or results that must persist for collaborators."""
+    plan and reusable output files. Attaching a remote CSV or Parquet URL as a
+    table the user can then query by name is the viewer action sql.attach_url,
+    run through viewer_control, not a statement written here. Not for large
+    server-side datasets, mutations, or results that must persist for
+    collaborators."""
     import json
 
     cmd = {

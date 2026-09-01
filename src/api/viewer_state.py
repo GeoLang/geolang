@@ -28,7 +28,8 @@ INSTRUCTIONS = (
     "as the next user message beginning 'Result of <name>:', so carry on from "
     "there. When the person names a feature on the map that the viewer state does "
     "not locate, run find_feature first and only then the action that needs its "
-    "coordinates."
+    "coordinates. For anything the person put on the map or named there, "
+    "find_feature comes before any geocoding tool."
 )
 
 
