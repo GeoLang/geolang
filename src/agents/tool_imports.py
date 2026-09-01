@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import ast
 import sys
+from importlib.machinery import PathFinder
 from importlib.util import find_spec
 from pathlib import Path
+
+from src.core.qgis_session import QGIS_SYSTEM_PATHS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -96,7 +99,15 @@ def required_packages(source: str) -> set[str]:
     }
 
 
+def _installed(name: str) -> bool:
+    """On the default path, or the system paths qgis_session bridges at call time."""
+    if find_spec(name) is not None:
+        return True
+    system_paths = [path for path in QGIS_SYSTEM_PATHS if Path(path).is_dir()]
+    return PathFinder().find_spec(name, system_paths) is not None
+
+
 def missing_packages(source: str) -> list[str]:
     """The required packages that are not installed, named as you install them."""
-    missing = [name for name in required_packages(source) if find_spec(name) is None]
+    missing = [name for name in required_packages(source) if not _installed(name)]
     return sorted(DISTRIBUTION_NAMES.get(name, name) for name in missing)

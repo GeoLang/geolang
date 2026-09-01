@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-01: the import filter probes the QGIS system paths too. `qgis` is
+  importable only after `qgis_session` appends `/usr/lib/python3/dist-packages`
+  to `sys.path`, so `find_spec` missed it in the platform image and the
+  manifest dropped `pyqgis_api` there, failing the nightly tool sweep two
+  nights running.
+
 ### Added
 - 2026-08-31: the viewer eval covers `live.watch_region`, 72 tasks. The
   catalogue fixture is recopied from viewtopia.
