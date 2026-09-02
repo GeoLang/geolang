@@ -57,10 +57,6 @@ The shared reference data those tools legitimately read is not an exemption. `ge
 
 QGIS starts once per process. A `QgsApplication` can be built once: building another after `exitQgis()` dies with SIGSEGV, so while each QGIS tool owned its own init and teardown, whichever of them ran second killed the executor and every tool called after that reported it unreachable. [`src/core/qgis_session.py`](../src/core/qgis_session.py) builds the application on first use, bridges the system QGIS python paths onto `sys.path`, adds the native algorithm provider, initialises the processing plugin, and never calls `exitQgis`. A start that failed is remembered and re-raised, because retrying it would build the second application. It sits in core rather than beside the tools because the tool loader imports tool modules under a second package name and reloads them, so a session held there would exist once per import name.
 
-## 🔴 Rotate the API keys that were once committed to `docker-compose.yml`
-
-`XAI_API_KEY` and `OPENAI_API_KEY` were committed as literals and are still in the git history. Treat them as leaked and rotate them at the provider console. Compose reads them from `.env` now. A `gitleaks` pre-commit hook would stop the next one.
-
 ## CORS is origin-listed once the gate is on
 
 `cors_origins()` in [`server.py`](../src/api/server.py) reads `CORS_ORIGINS` as a comma-separated list. With `PLATFORM_JWT_SECRET` set the variable is required and `*` is refused, so a gated deployment cannot serve a wildcard to credentialed requests. The wildcard survives only under `GEOLANG_ALLOW_UNAUTHENTICATED`, which is the standalone stack.
