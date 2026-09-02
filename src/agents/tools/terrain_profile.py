@@ -254,3 +254,4 @@ def terrain_profile(
 
 TOOL_FUNCTION = terrain_profile
 TOOL_SCHEMA = TerrainProfileArgs
+TOOL_SUPERSEDED_BY = ("analysis.terrain_profile", "analysis.cross_section")

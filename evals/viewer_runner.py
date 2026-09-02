@@ -56,16 +56,23 @@ def viewer_skip_reason(allow_cloud: bool) -> str:
     return ""
 
 
-def turn_calls(message: str, system_prompt: str) -> list:
+def turn_calls(message: str, request: dict, transcript, label: str) -> list:
     """Every viewer_control call of one turn, arguments decoded.
+
+    `request` is the run body less its message: the system prompt, and the
+    tools the catalogue supersedes.
 
     A call whose arguments will not parse is dropped: the viewer could not have
     run it either, so it is not an answer. A run cut short keeps the calls it
     made before it went, since a model that answered and then rambled on still
-    answered.
+    answered. With a transcript file, every event of the turn is written to it
+    as one JSON line under the run's label.
     """
     calls = []
-    for event in run_events({"system_prompt": system_prompt, "message": message}):
+    for event in run_events({**request, "message": message}):
+        if transcript is not None:
+            transcript.write(json.dumps({"run": label, "message": message, **event}) + "\n")
+            transcript.flush()
         if event.get("kind") != "tool_call":
             continue
         if str(event.get("name") or "") != VIEWER_CONTROL_TOOL:
@@ -80,7 +87,12 @@ def turn_calls(message: str, system_prompt: str) -> list:
 
 
 def capture_calls(
-    prompt: str, system_prompt: str, catalogue: list, reads_results: dict
+    prompt: str,
+    request: dict,
+    catalogue: list,
+    reads_results: dict,
+    transcript=None,
+    label: str = "",
 ) -> list:
     """Every viewer_control call the prompt drew, over the whole reply loop.
 
@@ -89,14 +101,14 @@ def capture_calls(
     scores a conversation the viewer never has. Each reply goes into the same
     session as its own message, at most twice, as the viewer sends them.
     """
-    calls = turn_calls(prompt, system_prompt)
+    calls = turn_calls(prompt, request, transcript, label)
     every_call = list(calls)
     for _ in range(MAXIMUM_FOLLOW_UPS):
         reply = pending_reply(calls, catalogue, reads_results)
         if reply is None:
             break
         print(f"  follow-up: {reply}", file=sys.stderr)
-        calls = turn_calls(reply, system_prompt)
+        calls = turn_calls(reply, request, transcript, label)
         every_call += calls
     return every_call
 
@@ -141,18 +153,27 @@ def replay_recording(entries: list, tasks: list, snapshot: dict) -> list:
         task = by_id.get(entry["id"])
         if task is None:
             raise ValueError(f"recording names {entry['id']}, which no task defines")
-        scored.append((entry, score_calls(task, entry["calls"], snapshot)))
+        scored.append((entry, score_calls(task, entry["calls"], task.snapshot_for(snapshot))))
     return scored
+
+
+def run_request(snapshot: dict, catalogue: list) -> dict:
+    """The run body one task's turns share: what `/chat/agui` sends, less the message."""
+    # imported late so loading a task never needs the persona or the tools
+    from src.api.viewer_state import hidden_tools, system_prompt_for
+
+    state = {"viewer": snapshot, "actions": catalogue}
+    request = {"system_prompt": system_prompt_for(state)}
+    hidden = hidden_tools(state)
+    if hidden:
+        request["without_tools"] = hidden
+    return request
 
 
 def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
     """(one TaskSamples per task, {task id: (calls, first run's score)})."""
-    # imported late so loading a task never needs the persona or the tools
-    from src.api.viewer_state import system_prompt_for
-
     catalogue = load_fixture(args.catalogue)
     reads_results = load_fixture(args.reads_results)
-    system_prompt = system_prompt_for({"viewer": snapshot, "actions": catalogue})
 
     results = []
     captured = {}
@@ -162,8 +183,11 @@ def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
     progress.write_text("")
     user_session = active_session_id()
     eval_sessions = []
+    transcript = open(args.transcripts, "a") if args.transcripts else None
     try:
         for task in tasks:
+            task_snapshot = task.snapshot_for(snapshot)
+            request = run_request(task_snapshot, catalogue)
             samples = []
             for run in range(1, args.repeat + 1):
                 label = (
@@ -175,9 +199,14 @@ def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
                 # a fresh session per run, so one sample cannot bias the next
                 eval_sessions.append(start_eval_session(f"viewer eval {task.id} {run}"))
                 calls = capture_calls(
-                    task.prompt, system_prompt, catalogue, reads_results
+                    task.prompt,
+                    request,
+                    catalogue,
+                    reads_results,
+                    transcript,
+                    f"{task.id} {run}/{args.repeat}",
                 )
-                result = score_calls(task, calls, snapshot)
+                result = score_calls(task, calls, task_snapshot)
                 if run == 1:
                     captured[task.id] = (calls, result)
                 samples.append(result)
@@ -185,6 +214,8 @@ def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
             with progress.open("a") as fh:
                 fh.write(json.dumps(results[-1].as_dict()) + "\n")
     finally:
+        if transcript is not None:
+            transcript.close()
         restore_session(user_session)
         delete_sessions(eval_sessions)
     return results, captured
@@ -215,6 +246,12 @@ def main(argv=None) -> int:
         metavar="N",
         help="run each task N times and report the mean, the range and which "
         "tasks were flaky. Sampling makes one run a poor estimate of a score",
+    )
+    parser.add_argument(
+        "--transcripts",
+        metavar="PATH",
+        help="append every event of every run to PATH as JSON lines, so a "
+        "failed task can be read back rather than guessed at",
     )
     parser.add_argument(
         "--record",

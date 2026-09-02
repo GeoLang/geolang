@@ -57,7 +57,7 @@ from src.api.live_document import (
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.api.outputs_retention import sweep_outputs_periodically
-from src.api.viewer_state import system_prompt_for
+from src.api.viewer_state import hidden_tools, system_prompt_for
 from src.core.auth import (
     MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
     SECRET_ENV,
@@ -482,6 +482,9 @@ async def agent_event_stream(
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
     body = {"system_prompt": system_prompt_for(state), "message": message}
+    hidden = hidden_tools(state)
+    if hidden:
+        body["without_tools"] = hidden
     if user_token:
         body["user_token"] = user_token
     if thread_id:

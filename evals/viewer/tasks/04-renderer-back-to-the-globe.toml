@@ -6,3 +6,6 @@ notes = "The 3d globe is the globe tab. renderer.set would also show it, but the
 action = "run"
 name = "view.set_tab"
 args = { tab = "globe" }
+
+[snapshot]
+tab = "map"

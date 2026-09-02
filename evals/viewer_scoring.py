@@ -38,10 +38,15 @@ class ViewerTask:
         self.name = expect.get("name")
         self.args = dict(expect.get("args") or {})
         self.tolerance = dict(data.get("tolerance") or {})
+        self.snapshot = dict(data.get("snapshot") or {})
         if not self.action:
             raise ValueError(f"task {self.id} expects no action")
         if self.action == RUN_ACTION and not self.name:
             raise ValueError(f"task {self.id} runs an action with no name")
+
+    def snapshot_for(self, shared: dict) -> dict:
+        """The viewer state this task is asked from."""
+        return {**shared, **self.snapshot}
 
     @property
     def target(self) -> str:

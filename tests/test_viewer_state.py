@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from src.agents.agent_manager import PERSONA
 from src.api import server
-from src.api.viewer_state import system_prompt_for
+from src.api.viewer_state import hidden_tools, system_prompt_for
 
 SET_VISIBLE = {
     "name": "layers.set_visible",
@@ -128,6 +128,25 @@ def test_the_instructions_name_the_tool_call_and_the_read_answer():
     assert "find_feature" in prompt
 
 
+# ── tools a viewer action supersedes ─────────────────────────────────────
+
+TERRAIN_PROFILE = {"name": "analysis.terrain_profile", "description": "Read the ground"}
+TRAVEL_TIME = {"name": "analysis.travel_time", "description": "Draw travel bands"}
+
+
+def test_a_catalogue_offering_the_action_hides_the_tool_it_supersedes():
+    assert hidden_tools(_state(TERRAIN_PROFILE)) == ["terrain_profile"]
+    assert set(hidden_tools(_state(TERRAIN_PROFILE, TRAVEL_TIME))) == {
+        "calculate_isochrones",
+        "terrain_profile",
+    }
+
+
+def test_a_catalogue_without_the_action_hides_nothing():
+    assert hidden_tools(_state(SET_VISIBLE)) == []
+    assert hidden_tools(None) == []
+
+
 # ── the state reaches the run ────────────────────────────────────────────
 
 
@@ -167,6 +186,26 @@ def test_chat_agui_puts_the_viewers_catalogue_in_the_system_prompt():
         assert response.status_code == 200
 
     assert _sibyl_body(route)["system_prompt"] == system_prompt_for(_state(SET_VISIBLE))
+
+
+def test_chat_agui_leaves_out_the_tools_the_catalogue_supersedes():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = _done_run(sibyl)
+        TestClient(server.app).post(
+            "/chat/agui", json=dict(AGUI_BODY, state=_state(TERRAIN_PROFILE))
+        )
+
+    assert _sibyl_body(route)["without_tools"] == ["terrain_profile"]
+
+
+def test_chat_agui_sends_no_exclusion_when_nothing_is_superseded():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = _done_run(sibyl)
+        TestClient(server.app).post(
+            "/chat/agui", json=dict(AGUI_BODY, state=_state(SET_VISIBLE))
+        )
+
+    assert "without_tools" not in _sibyl_body(route)
 
 
 def test_a_run_with_no_state_sends_the_persona():

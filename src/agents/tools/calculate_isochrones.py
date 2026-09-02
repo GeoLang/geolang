@@ -253,3 +253,4 @@ def calculate_isochrones(
 
 TOOL_FUNCTION = calculate_isochrones
 TOOL_SCHEMA = CalculateIsochronesArgs
+TOOL_SUPERSEDED_BY = ("analysis.travel_time",)

@@ -1,10 +1,15 @@
 # Tests for agents
 """The tool manifest and executor sibyl calls: geolang runs tools in-process."""
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.agents.agent_manager import approval_route_only, load_external_tools
+from src.agents.agent_manager import (
+    approval_route_only,
+    load_external_tools,
+    superseded_by,
+)
 from src.api import server
 
 client = TestClient(server.app)
@@ -47,6 +52,21 @@ def test_the_approval_route_is_the_one_tool_left_off_the_manifest():
     left_off = {f.__name__ for f, _ in load_external_tools() if approval_route_only(f)}
 
     assert left_off == {"approve_workflow"}
+
+
+def test_every_superseding_action_is_one_the_viewer_offers():
+    """A tool names viewer actions from viewtopia, which this repo only sees
+    through the eval's catalogue fixture."""
+    catalogue = json.loads(
+        (Path(__file__).resolve().parent.parent / "evals" / "viewer" / "catalogue.json").read_text()
+    )
+    offered = {entry["name"] for entry in catalogue}
+    named = {
+        action for func, _ in load_external_tools() for action in superseded_by(func)
+    }
+
+    assert named
+    assert named <= offered, named - offered
 
 
 def test_executor_runs_a_tool_and_returns_a_string():

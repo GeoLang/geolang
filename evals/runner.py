@@ -22,8 +22,9 @@ from evals.scoring import TaskSamples, aggregate, load_tasks, score_manifest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GEOLANG = os.environ.get("NL_EVAL_GEOLANG", "http://localhost:8080")
 SIBYL = os.environ.get("NL_EVAL_SIBYL", "http://localhost:8090")
-# httpx waits this long per chunk, so it only fires on a stalled stream
-RUN_READ_TIMEOUT = 90.0
+# httpx waits this long per chunk, so it only fires on a stalled stream. a cold
+# llama-server slot reads the 18k-token viewer prompt for about 100 s in silence
+RUN_READ_TIMEOUT = 180.0
 
 
 def service_up(url: str) -> bool:

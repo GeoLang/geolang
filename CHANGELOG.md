@@ -15,6 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nights running.
 
 ### Added
+- 2026-09-01: a tool module can declare `TOOL_SUPERSEDED_BY`, the viewer
+  actions that do its job on the map. `/chat/agui` sends sibyl the names of
+  the offered tools whose action the run's catalogue lists as `without_tools`,
+  and the viewer eval sends the same. `terrain_profile` names
+  `analysis.terrain_profile` and `analysis.cross_section`,
+  `calculate_isochrones` names `analysis.travel_time`: Qwen3.5 took the tool in
+  six of six runs with both on offer, after two rounds of prose saying not to.
+- 2026-09-01: a viewer eval task can carry a `[snapshot]` table whose fields
+  replace the shared snapshot's for that task. `change-to-3d` and
+  `renderer-back-to-the-globe` are asked from the map tab, as their notes
+  always said; the shared snapshot sits on the globe tab, where `renderer.set
+  cesium` was a defensible answer the scorer marked zero.
+- 2026-09-01: `evals.viewer_runner --transcripts PATH` appends every event of
+  every run as JSON lines, labelled by task and run. The report keeps only the
+  best call per run, so a task that scored zero could only be guessed at.
 - 2026-09-01: the viewer eval answers the model's calls the way the viewer
   does. A call the viewer would refuse comes back as `<name> failed: <message>`
   and a `[reads]` action's result as `Result of <name>: <text>`, each as its own
@@ -26,6 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catalogue fixture is recopied from viewtopia.
 
 ### Changed
+- 2026-09-01: the viewer instructions end with one precedence rule: a listed
+  action that does what the person asked is called before any other tool,
+  whatever a persona rule says about that kind of request, and `find_feature`
+  comes before `geocode_place` for "where is X" and for anything named that is
+  not a town, a city or a street address. Qwen3.5 transcripts against the
+  trimmed manifest sent an elevation question and a cross section to the
+  `terrain_profile` tool, travel-time bands to `calculate_isochrones`, a STAC
+  search to `sql_query`, a branch comparison to `list_outputs` and
+  `ptolemy_query`, and "where is the Kingsway substation?" to `geocode_place`.
+- 2026-09-01: the eval harness waits 180 s per chunk instead of 90. sibyl sends
+  nothing until a model turn ends, and a cold llama-server slot on hercules
+  spends about 100 s reading the 18k-token viewer prompt, so a run whose slot
+  was evicted was cut short before its first event and scored zero.
 - 2026-09-01: `geocode_place` is described as a lookup of world place names and
   addresses, and points a feature on the user's map at `find_feature`.
   `sql_query` says that attaching a remote CSV or Parquet URL as a table is the

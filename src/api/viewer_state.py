@@ -7,7 +7,7 @@ on this run rather than a list kept here. No catalogue means the plain persona.
 
 import json
 
-from src.agents.agent_manager import PERSONA
+from src.agents.agent_manager import PERSONA, load_external_tools, superseded_by
 
 STATE_HEADING = "Viewer state:"
 ACTIONS_HEADING = "Viewer actions:"
@@ -28,9 +28,27 @@ INSTRUCTIONS = (
     "as the next user message beginning 'Result of <name>:', so carry on from "
     "there. When the person names a feature on the map that the viewer state does "
     "not locate, run find_feature first and only then the action that needs its "
-    "coordinates. For anything the person put on the map or named there, "
-    "find_feature comes before any geocoding tool."
+    "coordinates. For 'where is X' and for any named thing that is not a town, "
+    "a city or a street address, find_feature comes first and geocode_place only "
+    "when it finds nothing. A listed action that does what the person asked is "
+    "called before any other tool, whatever a rule above says about that kind "
+    "of request: those rules are for what no listed action covers."
 )
+
+
+def hidden_tools(state) -> list:
+    """The agent tools a run with this catalogue does without.
+
+    A tool names the viewer actions that do its job on the map, and a model
+    given both takes the tool, whatever the prompt says. With the action
+    offered, the tool is not.
+    """
+    offered = {entry["name"] for entry in catalogue_of(state)}
+    return [
+        func.__name__
+        for func, _ in load_external_tools()
+        if offered.intersection(superseded_by(func))
+    ]
 
 
 def catalogue_of(state) -> list:

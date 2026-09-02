@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 CALLER_CODE_ATTRIBUTE = "TOOL_RUNS_CALLER_CODE"
 APPROVAL_ROUTE_ATTRIBUTE = "TOOL_APPROVAL_ROUTE_ONLY"
+SUPERSEDED_BY_ATTRIBUTE = "TOOL_SUPERSEDED_BY"
 USER_APPROVAL_ATTRIBUTE = "TOOL_NEEDS_USER_APPROVAL"
 
 # Ensure the tools/ package (under src/agents/tools/) is importable by name.
@@ -303,6 +304,13 @@ def runs_caller_code(func) -> bool:
     """Whether the tool hands a caller-written argument to something that
     executes it, declared by the tool module as ``TOOL_RUNS_CALLER_CODE = True``."""
     return bool(getattr(inspect.getmodule(func), CALLER_CODE_ATTRIBUTE, False))
+
+
+def superseded_by(func) -> tuple:
+    """The viewer actions that do this tool's job on the map, declared by the
+    tool module as ``TOOL_SUPERSEDED_BY = ("analysis.travel_time",)``. A run
+    whose catalogue offers one of them leaves the tool out."""
+    return tuple(getattr(inspect.getmodule(func), SUPERSEDED_BY_ATTRIBUTE, ()))
 
 
 def approval_route_only(func) -> bool:

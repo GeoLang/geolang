@@ -59,7 +59,7 @@ def run_call(name, **args):
 
 
 def _capture(prompt):
-    return capture_calls(prompt, "a system prompt", CATALOGUE, READS_RESULTS)
+    return capture_calls(prompt, {"system_prompt": "a system prompt"}, CATALOGUE, READS_RESULTS)
 
 
 # ── the checks a call earns ──────────────────────────────────────────────
@@ -199,6 +199,33 @@ def test_a_run_outside_its_tolerance_fails_that_argument():
     )
 
     assert [c.name for c in result.failures] == ["lon = 2.35"]
+
+
+# ── a task asked from a different viewer state ───────────────────────────
+
+
+def test_a_task_snapshot_replaces_top_level_fields_of_the_shared_one():
+    task = ViewerTask(
+        {
+            "id": "change-to-3d",
+            "prompt": "change to 3d",
+            "expect": {"action": "run", "name": "view.set_tab", "args": {"tab": "globe"}},
+            "snapshot": {"tab": "map"},
+        }
+    )
+
+    asked_from = task.snapshot_for(SNAPSHOT)
+
+    assert asked_from["tab"] == "map"
+    assert asked_from["layers"] == SNAPSHOT["layers"]
+    assert HIDE_PARCELS.snapshot_for(SNAPSHOT) == SNAPSHOT
+
+
+def test_the_tab_tasks_are_asked_from_the_map_tab():
+    by_id = {task.id: task for task in load_tasks(TASKS_DIR)}
+
+    for task_id in ("change-to-3d", "renderer-back-to-the-globe"):
+        assert by_id[task_id].snapshot == {"tab": "map"}, task_id
 
 
 # ── the snapshot's own names ─────────────────────────────────────────────
