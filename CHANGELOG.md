@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- 2026-09-02: the `/tools` manifest for `viewer_control` lists `action`, `name`
+  and `args` and nothing else. It used to carry lon, lat, height, heading,
+  pitch, duration, label, color, url, attribute and iso as fields of their own,
+  left over from the fixed action list, and local models filled those instead
+  of the catalogue action's parameters: a `layers.remove` run arrived with lat,
+  lon and height and no `layer`. A twelve-task check on Qwen3.5 scored 0.64
+  against 0.17 for the same tasks before the trim.
+
 ### Fixed
 - 2026-09-01: the import filter probes the QGIS system paths too. `qgis` is
   importable only after `qgis_session` appends `/usr/lib/python3/dist-packages`

@@ -21,6 +21,8 @@ An `Authorization: Bearer <jwt>` header is forwarded to sibyl as the run's `user
 
 The body's `state` is the viewer's own, in two parts: `viewer`, an opaque snapshot of what is on screen (camera, renderer, basemap, layers, project, dataset, live document, history, picked feature), and `actions`, the catalogue of named actions that viewer can run. Each catalogue entry has a `name`, a `description`, JSON Schema `parameters`, and the flags `reads` and `destructive`. [`src/api/viewer_state.py`](../src/api/viewer_state.py) renders both into the run's system prompt as a `Viewer state:` line of compact JSON and a `Viewer actions:` line per action, so the model answers about the map in front of the asker and can name one of these actions back. A `state` with no `actions` list sends the persona unchanged.
 
+A tool whose job one of the offered actions already does is left out of the run. The tool module names those actions in `TOOL_SUPERSEDED_BY`, and `/chat/agui` sends their tool names to sibyl as `without_tools`, so the model is not given both. `calculate_isochrones` names `analysis.travel_time`. `terrain_profile` names `analysis.terrain_profile` and `analysis.cross_section`.
+
 The model calls one of them with `viewer_control(action='run', name=..., layer=..., visible=...)`, the action's parameters as plain fields of the call (the schema admits fields it does not list). JSON text of the parameter object in `args` is accepted too, and so is that text written into `url`, which is where grok puts it. Either way the call emits `__VIEWER_CMD__:{"action": "run", "params": {"name": "<catalogue name>", "args": {...}}}` for the viewer to execute. An action marked `reads` answers a question rather than changing the map: the viewer sends the answer back as the next run's user message, whose text is `Result of <name>: <text>`. An action marked `destructive` is one the viewer asks the person to confirm before running.
 
 ## Sessions
@@ -76,13 +78,15 @@ User-uploaded files for the agent to operate on. Uploads are one directory per c
 
 ## Tools
 
-sibyl reads the manifest, picks a tool, and posts the arguments back for GeoLang to execute in-process.
+sibyl reads the manifest, picks a tool, and posts the arguments back for GeoLang to run, in the API process or in the isolated executor when `GEOLANG_EXECUTOR_URL` is set.
 
 ### `GET /tools`
 ```json
 { "tools": [ { "name": "geocode_place", "description": "…", "parameters": { "type": "object", ... } } ] }
 ```
 `parameters` is the JSON schema of the module's `TOOL_SCHEMA`. Modules without one are skipped.
+
+A tool is offered only where the packages it needs are installed. The tools import their dependencies inside their function bodies, so [`src/agents/tool_imports.py`](../src/agents/tool_imports.py) reads each module's source instead: an import a `try` catches `ImportError` around is optional, and so is one under a `try` catching `Exception` unless that `try` is the tool's body-wide error wrapper. `qgis` counts as installed when it resolves on the QGIS system paths `qgis_session` bridges onto `sys.path` at call time. Each tool left out is named in the startup log with the packages it needs. With `requirements_client.txt` alone, which names none of the geospatial libraries, 23 of the 40 are offered.
 
 ### `POST /tools/{name}`
 Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>" }`. `404` for an unknown tool. Bad arguments and tool exceptions come back as `200` with a `result` starting with ❌, so the agent can read the failure and recover. Calls can take minutes.
@@ -152,7 +156,7 @@ Add `X-Agora-Document` and a call's map effects also land in a live [agora](http
 } } }
 ```
 
-What travels: the layers of an `__UI_SPEC__` map become `layers/<id>` entries, and a `fly_to` or `set_view` from `__VIEWER_CMD__` becomes one presence viewport, which peers following the agent match. Other markers are ignored. A layer's colour becomes `styleOverrides.color`, but only on an entry that carries no overrides yet, so a member's own restyle survives a re-run.
+What travels: the layers of an `__UI_SPEC__` map become `layers/<id>` entries, and a `__VIEWER_CMD__` naming the catalogue action `camera.fly_to` with `lon` and `lat` becomes one presence viewport, which peers following the agent match. Other markers are ignored. A layer's colour becomes `styleOverrides.color`, but only on an entry that carries no overrides yet, so a member's own restyle survives a re-run.
 
 A layer's features ride inside the document while they fit under 48KiB, and above that are written to `GET /live-data/{token}`, which every member fetches. That route needs no bearer: a share link guest has none, and the 32-byte token in the URL is the whole credential.
 
@@ -195,7 +199,7 @@ Every step of a `__PLAN__` payload carries `runs_caller_code`. It is true when t
 
 **Export & discovery** — `export_to_gpkg`, `list_user_datasets`, `list_outputs`, `list_qgis_algorithms`, `check_qgis_status`, `run_qgis_algorithm`.
 
-**Escape hatches** — `geopandas_api` (arbitrary GeoPandas), `pyqgis_api` (arbitrary PyQGIS), `viewer_control` (raw viewer commands, and `action='run'` for one the viewer listed in the run's `state`), `emit_ui_spec` (structured map hints).
+**Escape hatches** — `geopandas_api` (arbitrary GeoPandas), `pyqgis_api` (arbitrary PyQGIS), `viewer_control` (whose only `action` is `run`, which names one entry of the viewer's own action catalogue), `emit_ui_spec` (structured map hints).
 
 Adding a tool is a single file: drop a module into `src/agents/tools/` exporting `TOOL_FUNCTION` and `TOOL_SCHEMA`. No restart needed. See [architecture.md](architecture.md#tool-manifest-and-execution).
 

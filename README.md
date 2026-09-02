@@ -11,6 +11,7 @@
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
 - 40 geospatial tools served to sibyl over HTTP, and 38 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
+- A chat run offers fewer than 40 when the viewer's action catalogue already covers a tool. A tool module names the viewer actions that do its job on the map in `TOOL_SUPERSEDED_BY`, and `/chat/agui` sends sibyl those tool names as `without_tools`. `calculate_isochrones` names `analysis.travel_time`, `terrain_profile` names `analysis.terrain_profile` and `analysis.cross_section`
 - Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan, the user presses approve in the viewer, and `run_workflow` executes it. Both halves are checked rather than trusted to the persona: `run_workflow` refuses a manifest `plan_workflow` never validated, and one the approve button never posted to `POST /workflow/approve`
 - AG-UI event stream for ViewTopia
 
@@ -165,6 +166,37 @@ To add one, drop a task file in `evals/tasks/` and a reference answer named
 `<task id>.toml` in `evals/reference/`. A test asserts every reference answer
 scores 1.0, which is what keeps a task from expecting something impossible.
 
+## Viewer evals
+
+Measures whether a model maps a chat prompt onto one of the viewer's own
+actions instead of reaching for a tool. 72 tasks under `evals/viewer/tasks/`,
+one TOML file each, scored on the `viewer_control` calls the run made.
+
+The viewer state and the action catalogue are fixtures, `evals/viewer/snapshot.json`
+and `evals/viewer/catalogue.json`, copied from viewtopia's own test fixtures and
+sent to sibyl exactly the way `/chat/agui` sends the live ones. A task can carry
+a `[snapshot]` table whose fields replace the shared snapshot's for that task.
+A call the viewer would refuse comes back as the next user message, and so does
+a `reads` action's result, taken from `evals/viewer/reads_results.json`. geodukt
+is not involved, so an unreachable geodukt does not skip the run.
+
+```bash
+# needs geolang api and sibyl. One run is a poor estimate of a score
+python -m evals.viewer_runner --repeat 3
+
+# read back what a failed task actually did
+python -m evals.viewer_runner --transcripts evals/reports/transcripts.jsonl
+
+# no model and no network: score a recording against the current tasks
+python -m evals.viewer_runner --replay evals/viewer/recordings/grok-2026-08-29.json
+```
+
+`--record PATH` writes the calls each task drew so they can be replayed later.
+`tests/test_viewer_replay.py` replays the checked-in recording and fails when
+any recorded score moves, which is what makes this eval a CI gate. Refresh the
+two fixtures from viewtopia rather than editing them, as
+[`evals/viewer/README.md`](evals/viewer/README.md) sets out.
+
 ## Platform Integration
 
 When running as part of the full GeoLang platform (via `viewtopia/docker-compose.platform.yml`),
@@ -205,7 +237,7 @@ Gated deployments must also name the browser origins allowed to call the API in
 while the gate is on, because a wildcard plus credentials means any page a
 signed-in user visits can spend their token here.
 
-Gated: `POST /tools/{name}` and `POST /chat/agui`, the file writers `/upload`,
+Gated: `POST /tools/{name}`, `POST /chat/agui` and `POST /workflow/approve`, the file writers `/upload`,
 `/draw`, `/export-pdf` and `/export-png`, the sibyl proxies `/sessions*`,
 `/models` and `/model`, and the reads `/datasets`, `/outputs/{file}`,
 `/download/{file}`, `/geojson/{file}` and `/stats/{file}`. Creating a share is

@@ -21,9 +21,9 @@ The agent loop runs in **sibyl** (Rust, `../sibyl`, port 8090). GeoLang keeps th
 
 The contract in both directions:
 
-- `GET /tools` on geolang returns `{"tools": [{"name", "description", "parameters"}]}`, built from the modules under `src/agents/tools/`. `parameters` is `TOOL_SCHEMA.model_json_schema()`.
+- `GET /tools` on geolang returns `{"tools": [{"name", "description", "parameters"}]}`, built from the modules under `src/agents/tools/` whose third-party imports this install can satisfy. `parameters` is `TOOL_SCHEMA.model_json_schema()`. [`src/agents/tool_imports.py`](../src/agents/tool_imports.py) reads the requirement off the module source, since the tools import their dependencies inside their function bodies, and counts `qgis` as present when it resolves on the QGIS system paths `qgis_session` bridges onto `sys.path`.
 - `POST /tools/{name}` with `{"args": {...}}` runs the tool and returns `{"result": "<string>"}`. Validation errors and exceptions come back as `200` with a ❌ result so the agent can recover. The routes are sync `def`, so FastAPI runs them in its threadpool, tools block for minutes.
-- `POST /runs` on sibyl takes `{"system_prompt", "message"}` and streams NDJSON events (`text`, `tool_call`, `tool_return`, `error`, `done`). `agent_event_stream` normalises those into the `(kind, payload)` tuples the AG-UI renderer consumes.
+- `POST /runs` on sibyl takes `{"system_prompt", "message"}`, plus `user_token`, `thread_id`, `document` and `without_tools` where the request has them, and streams NDJSON events (`text`, `tool_call`, `tool_return`, `error`, `done`). `agent_event_stream` normalises those into the `(kind, payload)` tuples the AG-UI renderer consumes.
 
 `PLATFORM_JWT_SECRET` is required to start. With it, every route that runs code, writes a file, or reads back a session or a user's data requires a live HS256 platform token and answers `401` otherwise. `/health`, the `GET /tools` manifest, the static viewer, reading a share by id and reading a live layer by its token stay open. `GEOLANG_ALLOW_UNAUTHENTICATED=1` opens all of it, and is the only way to get there.
 
@@ -61,13 +61,13 @@ QGIS starts once per process. A `QgsApplication` can be built once: building ano
 
 `XAI_API_KEY` and `OPENAI_API_KEY` were committed as literals and are still in the git history. Treat them as leaked and rotate them at the provider console. Compose reads them from `.env` now. A `gitleaks` pre-commit hook would stop the next one.
 
-## ✅ Tighten CORS for any non-dev deployment (done 2026-08)
+## CORS is origin-listed once the gate is on
 
 `cors_origins()` in [`server.py`](../src/api/server.py) reads `CORS_ORIGINS` as a comma-separated list. With `PLATFORM_JWT_SECRET` set the variable is required and `*` is refused, so a gated deployment cannot serve a wildcard to credentialed requests. The wildcard survives only under `GEOLANG_ALLOW_UNAUTHENTICATED`, which is the standalone stack.
 
-## ✅ Audit the `viewer_control` and `sql_query` tool surface (done 2026-08)
+## The `viewer_control` and `sql_query` tool surface
 
-`viewer_control`'s `action` is a `Literal` closed over what viewtopia's command registry implements, `sql_query` is not among them, actions that need coordinates or a url are refused without them, and `url` must be `http` or `https`. Verified on the viewtopia side that a command url only ever reaches `fetch()` and `Cesium3DTileset.fromUrl()`, never the DOM, so the scheme check is the whole exposure.
+`viewer_control`'s `action` is a `Literal` over the single value `run`, so the tool names one entry of the catalogue the viewer sent and holds no list of action names of its own to drift from it. `sql_query` is not reachable that way. A `url` argument must be `http` or `https`. On the viewtopia side a command url only ever reaches `fetch()` and `Cesium3DTileset.fromUrl()`, never the DOM, so the scheme check is the whole exposure.
 
 `/mcp` no longer offers `sql_query` at all, so what is left is the `/chat` path, where the SQL's author and the browser running it are the same person. A tool module declares itself with `TOOL_RUNS_CALLER_CODE = True` and the MCP endpoint drops it from both the manifest and the call path.
 
@@ -95,14 +95,15 @@ So the token is the security boundary and the only one. It should be scoped shor
 
 ## 🟡 Move route bodies into `APIRouter` modules (Phase B of the split)
 
-`server.py` is still ~990 lines, mostly route bodies. Reasonable next refactor:
+`server.py` is ~1500 lines, mostly route bodies. Reasonable next refactor:
 
 ```
 src/api/
 ├── server.py            # app factory, lifespan, middleware, mount static — ~150 lines
 ├── routes/
 │   ├── chat.py          # /chat/agui
-│   ├── sessions.py      # /sessions/*
+│   ├── workflow.py      # /workflow/approve
+│   ├── sessions.py      # /sessions/*, /models, /model/*
 │   ├── datasets.py      # /datasets, /upload, /stats/*, /geojson/*
 │   ├── outputs.py       # /outputs/*, /download/*
 │   ├── share.py         # /share/*
@@ -111,10 +112,6 @@ src/api/
 ```
 
 The old blocker (a mutable `agent_id` global) is gone with the sibyl split, so the routes can move as-is. ~half a day of work.
-
-## 🟡 Replace deprecated `@app.on_event("startup")` with lifespan
-
-FastAPI deprecated the event hooks in favour of the `lifespan` context manager. The current code works but emits a deprecation warning under newer FastAPI versions. Wrap the existing startup body in an `@asynccontextmanager` and pass it to `FastAPI(lifespan=...)`.
 
 ## 🟡 Real health check
 
@@ -158,23 +155,6 @@ Many tools under [`src/agents/tools/`](../src/agents/tools/) parse semicolon-sep
 
 ## 🟡 The PERSONA prompt overlaps with tool docstrings
 
-The PERSONA constant is ~9 KB and embeds tool-routing instructions ("when the user mentions travel time, use `calculate_isochrones`…"). Many of these are also in the tool docstrings, which sibyl sends as the tool descriptions. The result is duplicated guidance — costs tokens every turn and risks divergence when a tool is updated but PERSONA isn't.
+The PERSONA constant is ~18 KB and embeds tool-routing instructions ("when the user mentions travel time, use `calculate_isochrones`…"). Many of these are also in the tool docstrings, which sibyl sends as the tool descriptions. The result is duplicated guidance — costs tokens every turn and risks divergence when a tool is updated but PERSONA isn't.
 
 **Plan:** keep PERSONA narrow (role, output style, error-recovery rules) and push routing hints into tool docstrings. Audit by removing one routing rule at a time and verifying behaviour.
-
-## ✅ Surface the `sql_query` tool to the agent (done 2026-07)
-
-`src/agents/tools/sql_query.py` emits the `sql_query` viewer command per the sketch in `viewer_integration.md`, with the "when NOT to use" guidance in the docstring and PERSONA. Landed together with the platform-service tools (`ptolemy_query`, `list_tilesets`), geokode-first `geocode_place`, itinera-first `compute_route`, and the QGIS sys.path fix that makes `run_qgis_algorithm` actually work (321 algorithms).
-
----
-
-## Done (recently)
-
-Keep a short history at the bottom so we can see the trajectory without diving into git.
-
-- **2026-06**: Split `server.py` (1481 → 1043 lines). Extracted `core/utils.py`, `agents/agent_manager.py`, `agents/workflows.py`. Tool source unchanged — the agent sandbox sees identical code. Path issue uncovered: `TOOL_EXEC_DIR` default `~/src/geolang` was wrong for `GeoLang/geolang` checkouts; fixed by auto-detecting the repo root.
-- **2026-06**: Added `viewer_integration.md` documenting the SSE `viewer_cmd` protocol and the upcoming `sql_query` tool that pairs with ViewTopia's DuckDB-WASM integration.
-- **2026-06**: Populated `architecture.md` and `api_reference.md` (were empty stubs).
-- **2026-07**: Replaced the embedded agent-memory server with sibyl. Deleted the tool registration and sandbox machinery, the tool-exec venv entrypoint, `.agent_id`, and `.sessions.json`. Tools now run in-process behind `/tools`. The image is a plain `python:3.11-slim-bookworm` with QGIS.
-- **2026-07**: Added pytest coverage for the AG-UI renderers, the sibyl run stream, the session proxies, and the tool manifest/executor.
-- **2026-08**: Split tool execution out of the API process into `src/api/executor.py`, behind `GEOLANG_EXECUTOR_URL`. The platform stack runs it as `geolang-executor`: no published port, no `PLATFORM_JWT_SECRET`, no `.env`, all capabilities dropped, memory/CPU/process limits.
