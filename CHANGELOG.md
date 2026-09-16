@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-16: two viewer eval fixtures that asked for something other than what
+  they scored. `scenario-compare-within-25-metres` said "pairing features
+  within 25 metres", which reads as a nearest-neighbour job and drew
+  `find_nearest` and `plan_workflow`, so it now asks for each feature's
+  coverage reaching 25 metres, which is what `scenario.compare`'s `distance`
+  does. The `find_feature` result text in `evals/viewer/reads_results.json`
+  answered every query with two Kingsway matches, so `find-before-flying` was
+  told about a substation when it asked for the old brewery, and it now carries
+  an Old Brewery match as well. Unscored until a model server is back.
 - 2026-09-02: the `/tools` manifest for `viewer_control` lists `action`, `name`
   and `args` and nothing else. It used to carry lon, lat, height, heading,
   pitch, duration, label, color, url, attribute and iso as fields of their own,

@@ -1,5 +1,5 @@
 id = "scenario-compare-within-25-metres"
-prompt = "compare road network main with widening, pairing features within 25 metres"
+prompt = "compare road network main with widening, with each feature's coverage reaching 25 metres"
 notes = "The optional distance is in metres and must not be converted."
 
 [expect]
