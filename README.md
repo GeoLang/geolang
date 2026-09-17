@@ -1,6 +1,6 @@
 # GeoLang
 
-**AI-powered geospatial agent**: a natural language interface to GIS operations. The agent loop runs in [sibyl](../sibyl), a separate Rust service. GeoLang owns the tools, the persona, and the viewer protocol.
+**AI-powered geospatial agent**: a natural language interface to GIS operations. The agent loop runs in [sibyl](https://github.com/GeoLang/sibyl), a separate Rust service. GeoLang owns the tools, the persona, and the viewer protocol.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
@@ -12,7 +12,7 @@
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
 - 40 geospatial tools served to sibyl over HTTP, and 38 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
 - A chat run offers fewer than 40 when the viewer's action catalogue already covers a tool. A tool module names the viewer actions that do its job on the map in `TOOL_SUPERSEDED_BY`, and `/chat/agui` sends sibyl those tool names as `without_tools`. `calculate_isochrones` names `analysis.travel_time`, `terrain_profile` names `analysis.terrain_profile` and `analysis.cross_section`
-- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](../geodukt) TOML manifest, `plan_workflow` validates it and streams the plan, the user presses approve in the viewer, and `run_workflow` executes it. Both halves are checked rather than trusted to the persona: `run_workflow` refuses a manifest `plan_workflow` never validated, and one the approve button never posted to `POST /workflow/approve`
+- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](https://github.com/GeoLang/geodukt) TOML manifest, `plan_workflow` validates it and streams the plan, the user presses approve in the viewer, and `run_workflow` executes it. Both halves are checked rather than trusted to the persona: `run_workflow` refuses a manifest `plan_workflow` never validated, and one the approve button never posted to `POST /workflow/approve`
 - AG-UI event stream for ViewTopia
 
 ---
@@ -38,7 +38,7 @@ That export is optional. sibyl sends a cloud key as a bearer token to
 `SIBYL_CLOUD_API_BASE`, which defaults to x.ai. `SIBYL_CLOUD_MODELS` lists the
 cloud models offered in the viewer. `SIBYL_LOCAL_API_BASE` plus
 `SIBYL_LOCAL_MODELS` add local models on top, see
-[../sibyl/README.md](../sibyl/README.md) for the llama-server launch. Settings
+[sibyl's README](https://github.com/GeoLang/sibyl) for the llama-server launch. Settings
 in the viewer is the live path: it switches local/cloud and can paste a cloud
 key, base and model list. Those are stored in sibyl's sqlite, take effect on
 the next message, and override env on the next start. The key never comes back
@@ -69,10 +69,10 @@ uv run --with-requirements requirements.txt \
 # → http://localhost:8080/
 ```
 
-Both files are needed. `requirements_client.txt` names none of the geospatial
-libraries, so with it alone `GET /tools` lists only the tools whose imports
-resolve, about 23 of the 40. Every tool left out is named in the startup log with
-the packages it needs, and `pyqgis_api` goes the same way wherever the QGIS
+Both files are needed. `requirements_client.txt` names geopandas but not osmnx,
+rasterio, rasterstats, scikit-learn, scipy or matplotlib, so with it alone
+`GET /tools` lists 23 of the 40. Every tool left out is named in the startup log
+with the packages it needs, and `pyqgis_api` goes the same way wherever the QGIS
 bindings are absent.
 
 `TOOL_EXEC_DIR` auto-detects the geolang repo root from `src/core/utils.py`, so
@@ -86,7 +86,7 @@ want outputs elsewhere.
 - [`docs/architecture.md`](docs/architecture.md) — process topology, SSE event vocabulary, tool manifest flow
 - [`docs/api_reference.md`](docs/api_reference.md) — all HTTP endpoints and the tool catalogue
 - [`docs/viewer_integration.md`](docs/viewer_integration.md) — `viewer_cmd` protocol for ViewTopia (including `sql_query` for in-browser DuckDB)
-- [`docs/DESIGN.md`](docs/DESIGN.md) — open improvements, known sharp edges, decision log
+- [`docs/DESIGN.md`](docs/DESIGN.md) — why the current design is shaped the way it is, and the improvements still open
 
 ## Tests
 

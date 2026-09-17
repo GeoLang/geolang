@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-16: documentation corrections. `requirements_client.txt` names
+  geopandas, so the README and `api_reference.md` no longer say it names none of
+  the geospatial libraries. `api_reference.md` listed three of the four tools
+  that carry a downstream scope, leaving out `asset_readings` and its
+  `agora:read`. `DESIGN.md` put the PERSONA constant at ~18 KB, it is ~15 KB.
+  The README's `../sibyl` and `../geodukt` links and the `blob/main` viewtopia
+  links in `architecture.md` and `viewer_integration.md` both answer 404 on
+  GitHub, and now point at the repository and at `blob/master`.
 - 2026-09-16: two viewer eval fixtures that asked for something other than what
   they scored. `scenario-compare-within-25-metres` said "pairing features
   within 25 metres", which reads as a nearest-neighbour job and drew

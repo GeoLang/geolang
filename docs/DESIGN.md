@@ -151,6 +151,6 @@ Many tools under [`src/agents/tools/`](../src/agents/tools/) parse semicolon-sep
 
 ## 🟡 The PERSONA prompt overlaps with tool docstrings
 
-The PERSONA constant is ~18 KB and embeds tool-routing instructions ("when the user mentions travel time, use `calculate_isochrones`…"). Many of these are also in the tool docstrings, which sibyl sends as the tool descriptions. The result is duplicated guidance — costs tokens every turn and risks divergence when a tool is updated but PERSONA isn't.
+The PERSONA constant is ~15 KB and embeds tool-routing instructions ("when the user mentions travel time, use `calculate_isochrones`…"). Many of these are also in the tool docstrings, which sibyl sends as the tool descriptions. The result is duplicated guidance — costs tokens every turn and risks divergence when a tool is updated but PERSONA isn't.
 
 **Plan:** keep PERSONA narrow (role, output style, error-recovery rules) and push routing hints into tool docstrings. Audit by removing one routing rule at a time and verifying behaviour.

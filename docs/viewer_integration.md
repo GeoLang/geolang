@@ -1,8 +1,8 @@
 # Viewer Integration — ViewTopia Commands
 
-The GeoLang agent emits **viewer commands** over the `/chat/agui` SSE channel. ViewTopia listens for `viewer_cmd` events and dispatches them by `action` name to handlers registered in [`viewtopia/src/viewer/commands.ts`](https://github.com/GeoLang/viewtopia/blob/main/src/viewer/commands.ts).
+The GeoLang agent emits **viewer commands** over the `/chat/agui` SSE channel. ViewTopia listens for `viewer_cmd` events and dispatches them by `action` name to handlers registered in [`viewtopia/src/viewer/commands.ts`](https://github.com/GeoLang/viewtopia/blob/master/src/viewer/commands.ts).
 
-This doc covers commands that the agent server is responsible for emitting. The frontend side is documented in [`viewtopia/docs/duckdb-wasm.md`](https://github.com/GeoLang/viewtopia/blob/main/docs/duckdb-wasm.md).
+This doc covers commands that the agent server is responsible for emitting. The frontend side is documented in [`viewtopia/docs/duckdb-wasm.md`](https://github.com/GeoLang/viewtopia/blob/master/docs/duckdb-wasm.md).
 
 ## SSE event shape
 
