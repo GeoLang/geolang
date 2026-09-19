@@ -55,8 +55,8 @@ def aggregate_by_region(
     region, such as population by district or hospitals per county.
 
     Returns a polygon GPKG carrying the aggregate as an attribute of each
-    region, which the Feature Picker panel shows on click. Call emit_ui_spec
-    after with ui_type='map'.
+    region, which the Feature Info panel (Inspect on the toolbar) shows on
+    click. Call emit_ui_spec after with ui_type='map'.
     """
     import os
     import traceback

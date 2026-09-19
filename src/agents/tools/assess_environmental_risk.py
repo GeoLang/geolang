@@ -135,9 +135,9 @@ def assess_environmental_risk(
     noise and pollution proxy.
 
     Returns the scores and saves the assessment area as a polygon GPKG carrying
-    each score, readable per feature with the Feature Picker. Use this when the
-    user asks about flood risk, environmental suitability, pollution, or green
-    space for a location.
+    each score, readable per feature in the Feature Info panel (Inspect on the
+    toolbar). Use this when the user asks about flood risk, environmental
+    suitability, pollution, or green space for a location.
     """
     import time
     import traceback
@@ -470,8 +470,8 @@ def assess_environmental_risk(
         parts.append(
             f"Saved to outputs/{output_filename}.gpkg. "
             f"That layer is the {area_km2} km2 assessment area polygon attributed "
-            f"with every score (overall_risk is 0-10), which the Feature Picker "
-            f"panel shows when the user clicks it. "
+            f"with every score (overall_risk is 0-10), which the Feature Info "
+            f"panel (Inspect on the toolbar) shows when the user clicks it. "
             f"Center: lon={lon:.4f}, lat={lat:.4f}"
         )
         return "\n".join(parts)
