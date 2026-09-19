@@ -260,6 +260,32 @@ def test_roads_for_a_district_sized_place_download(monkeypatch, outputs):
     assert "Downloaded 2 roads features" in result
 
 
+def test_buildings_for_an_oversized_place_are_refused(monkeypatch, outputs):
+    # the City of Toronto, whose buildings killed the 4 GiB executor
+    fake = _RoadsOsmnx(_boundary(1.0), _features([1, 2]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+
+    result = download_osm_data(
+        data_type="buildings", place_name="Toronto", output_filename="buildings"
+    )
+
+    assert "capped at 50 km2" in result
+    assert "radius_m" in result
+
+
+def test_a_radius_with_a_place_name_searches_around_its_centre(monkeypatch, outputs):
+    fake = _RecordingOsmnx(_features([1, 2]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+
+    download_osm_data(
+        data_type="buildings", place_name="Toronto", radius_m=2000, output_filename="x"
+    )
+
+    assert fake.place_calls == [], "a radius must skip the place boundary"
+    assert fake.point_calls[0]["point"] == (LAT, LON)
+    assert fake.point_calls[0]["dist"] == 2000
+
+
 def test_neither_a_place_nor_a_feature_is_refused(monkeypatch, outputs):
     monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx(_features([1])))
 

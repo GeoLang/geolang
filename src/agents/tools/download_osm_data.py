@@ -25,8 +25,8 @@ DEFAULT_RADIUS_M = 1000
 # road networks need more reach than point features before the graph connects up
 DEFAULT_ROADS_RADIUS_M = 2000
 ADDRESS_FALLBACK_RADIUS_M = 2000
-# a larger area's all-roads Overpass response OOMs the 4 GiB executor
-MAX_ROADS_PLACE_AREA_KM2 = 50
+# a larger area's Overpass response OOMs the 4 GiB executor
+MAX_PLACE_AREA_KM2 = 50
 
 
 class DownloadOSMDataArgs(BaseModel):
@@ -59,9 +59,9 @@ class DownloadOSMDataArgs(BaseModel):
     radius_m: Optional[int] = Field(
         None,
         description=(
-            "Search radius in metres around a 'lat,lon' or address place_name, "
-            "default 1000 and 2000 for roads. Ignored when place_name geocodes to a "
-            "boundary."
+            "Search radius in metres around the centre of place_name, default "
+            "1000 and 2000 for roads. When given, the place boundary is skipped, "
+            "so pass it to stay within one district of a large city."
         ),
     )
     output_filename: Optional[str] = Field(
@@ -139,6 +139,14 @@ def _named_feature_gdf(feature_name: str, tags: dict):
 
     label = f"{chosen.get('osm_type')} {chosen.get('osm_id')}"
     return gdf.reset_index(drop=True), label
+
+
+def _place_area_km2(ox, place_name):
+    try:
+        boundary = ox.geocode_to_gdf(place_name)
+    except Exception:
+        return None
+    return float(boundary.to_crs(boundary.estimate_utm_crs()).area.sum()) / 1e6
 
 
 def download_osm_data(
@@ -238,6 +246,11 @@ def download_osm_data(
             if _coord_m:
                 _lat, _lon = float(_coord_m.group(1)), float(_coord_m.group(2))
                 place_name = f"{_lat},{_lon}"  # normalise for output filename
+            elif radius_m:
+                _lat, _lon = ox.geocode(place_name)
+            else:
+                _lat = _lon = None
+            if _lat is not None:
                 # Skip place-boundary attempt, go straight to point+radius
                 if dt == "roads":
                     radius = radius_m or DEFAULT_ROADS_RADIUS_M
@@ -279,27 +292,21 @@ def download_osm_data(
             # warning, which is the difference between a fast call and a slow one
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
+                area_km2 = _place_area_km2(ox, place_name)
+                if area_km2 is not None and area_km2 > MAX_PLACE_AREA_KM2:
+                    return (
+                        f"'{place_name}' covers {area_km2:,.0f} km2 and a full "
+                        f"{data_type} download is capped at {MAX_PLACE_AREA_KM2} "
+                        "km2. Pass a district-sized place_name, or radius_m to "
+                        "search around its centre."
+                    )
                 if dt == "roads":
                     try:
-                        boundary = ox.geocode_to_gdf(place_name)
-                        area_km2 = float(
-                            boundary.to_crs(boundary.estimate_utm_crs()).area.sum()
-                        ) / 1e6
-                        if area_km2 > MAX_ROADS_PLACE_AREA_KM2:
-                            return (
-                                f"'{place_name}' covers {area_km2:,.0f} km2 and a "
-                                f"full roads download is capped at "
-                                f"{MAX_ROADS_PLACE_AREA_KM2} km2. Pass a "
-                                "district-sized place_name, or 'lat,lon' with "
-                                "radius_m."
-                            )
                         G = ox.graph_from_place(place_name, network_type="all")
                     except Exception:
                         lat, lon = ox.geocode(place_name)
                         G = ox.graph_from_point(
-                            (lat, lon),
-                            dist=radius_m or DEFAULT_ROADS_RADIUS_M,
-                            network_type="all",
+                            (lat, lon), dist=DEFAULT_ROADS_RADIUS_M, network_type="all"
                         )
                     gdf = ox.graph_to_gdfs(G, nodes=False).reset_index(drop=True)
                 else:
@@ -308,9 +315,7 @@ def download_osm_data(
                     except Exception:
                         lat, lon = ox.geocode(place_name)
                         gdf = ox.features_from_point(
-                            (lat, lon),
-                            tags=tags,
-                            dist=radius_m or ADDRESS_FALLBACK_RADIUS_M,
+                            (lat, lon), tags=tags, dist=ADDRESS_FALLBACK_RADIUS_M
                         )
                     if gdf.empty:
                         return f"No '{data_type}' features found in {place_name}."
