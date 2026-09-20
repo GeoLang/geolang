@@ -173,7 +173,7 @@ scores 1.0, which is what keeps a task from expecting something impossible.
 ## Viewer evals
 
 Measures whether a model maps a chat prompt onto one of the viewer's own
-actions instead of reaching for a tool. 75 tasks under `evals/viewer/tasks/`,
+actions instead of reaching for a tool. 76 tasks under `evals/viewer/tasks/`,
 one TOML file each, scored on the `viewer_control` calls the run made.
 
 The viewer state and the action catalogue are fixtures, `evals/viewer/snapshot.json`

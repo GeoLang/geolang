@@ -1,0 +1,8 @@
+id = "live-start"
+prompt = "start a live session called Toronto sites"
+notes = "The toolbar's Live control starts a live map with a name and joins it. live.join only reaches a map that already exists, and history.show_live only returns from a past moment."
+
+[expect]
+action = "run"
+name = "live.start"
+args = { map = "Toronto sites" }

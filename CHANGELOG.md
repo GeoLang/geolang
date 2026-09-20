@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-20: the viewer eval catalogue and suite carry `live.start`, which starts
+  a live map from the chat, as task 77. The catalogue shows the reworded
+  `history.show_live`, so "set map to live" no longer reads as that action.
 - 2026-09-20: the viewer eval catalogue and suite carry the two panel actions
   viewtopia added, `panel.open` and `panel.close`, as tasks 74 to 76. Task 76
   asks for the Layers panel, a toolbar button rather than a menu entry.
