@@ -1,0 +1,8 @@
+id = "open-the-data-sources-panel"
+prompt = "open the data sources panel, I want to import a file"
+notes = "Panels open by id, and Data Sources is dataSources. The chat has no way to pick a local file, so opening the panel is the whole answer."
+
+[expect]
+action = "run"
+name = "panel.open"
+args = { panel = "dataSources" }

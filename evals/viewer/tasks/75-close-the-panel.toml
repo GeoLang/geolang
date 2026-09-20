@@ -1,0 +1,7 @@
+id = "close-the-panel"
+prompt = "close that panel"
+notes = "Takes no arguments. The snapshot does not say which panel is open, so the only call is the close."
+
+[expect]
+action = "run"
+name = "panel.close"

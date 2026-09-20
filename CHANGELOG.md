@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-20: the viewer eval catalogue and suite carry the two panel actions
+  viewtopia added, `panel.open` and `panel.close`, as tasks 74 to 76. Task 76
+  asks for the Layers panel, a toolbar button rather than a menu entry.
 - 2026-09-19: one tool run can no longer take the executor down for everyone on
   it. Every call the executor serves runs in a worker process of its own,
   pre-warmed, used once and then replaced, and the executor watches that

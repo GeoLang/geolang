@@ -1,0 +1,8 @@
+id = "open-the-layers-panel"
+prompt = "show the layers panel"
+notes = "Layers is a toolbar button rather than a menu entry, and its panel id is layers. No layer action shows the list itself, so opening the panel is the whole answer."
+
+[expect]
+action = "run"
+name = "panel.open"
+args = { panel = "layers" }
