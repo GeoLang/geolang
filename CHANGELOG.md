@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-19: one tool run can no longer take the executor down for everyone on
+  it. Every call the executor serves runs in a worker process of its own,
+  pre-warmed, used once and then replaced, and the executor watches that
+  worker's resident memory and the clock while it runs. A run over
+  `GEOLANG_TOOL_MEMORY_LIMIT_MB` (3072) or `GEOLANG_TOOL_TIMEOUT_SECONDS` (840)
+  has its worker killed and the caller is told which tool hit which limit.
+  `GEOLANG_TOOL_MAX_CONCURRENT` (2) bounds the runs in flight, and a call past
+  that is told the executor is busy. A `download_osm_data` for every building in
+  the City of Toronto had been growing until the container was OOM-killed, which
+  left every user's chat dead for the two minutes ECS took to replace the task.
 - 2026-09-16: documentation corrections. `requirements_client.txt` names
   geopandas, so the README and `api_reference.md` no longer say it names none of
   the geospatial libraries. `api_reference.md` listed three of the four tools

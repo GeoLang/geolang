@@ -9,6 +9,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Thread
 
 import httpx
 import jwt
@@ -17,6 +18,12 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from src.api import executor
+from src.api.tool_worker_pool import (
+    MAX_CONCURRENT_ENV,
+    MEMORY_LIMIT_ENV,
+    TIMEOUT_ENV,
+    tool_workers,
+)
 from src.core import tool_executor, utils
 from src.core.auth import (
     MCP_SOURCE_ROLE_CLAIM,
@@ -273,7 +280,10 @@ def test_it_refuses_to_start_without_a_secret(monkeypatch):
 
 @pytest.fixture
 def outputs_root(monkeypatch, tmp_path):
+    # a worker reads the root when it starts, so the pre-warmed ones have to go
+    monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
+    tool_workers.shutdown()
     return tmp_path / "outputs"
 
 
@@ -506,14 +516,25 @@ def test_a_malformed_directory_is_refused_rather_than_pooled(
     assert not outputs_root.exists()
 
 
-def test_an_executor_that_was_not_told_falls_back_and_says_so(
-    monkeypatch, outputs_root, directory_tool, caplog
+def test_an_executor_that_was_not_told_falls_back(
+    monkeypatch, outputs_root, directory_tool
 ):
     monkeypatch.delenv(UNAUTHENTICATED_ENV, raising=False)
+
+    result = run_in_the_executor({"args": {}}, monkeypatch).json()["result"]
+
+    assert Path(result).name == utils.ANONYMOUS_OUTPUTS_DIRECTORY
+
+
+# the run above happens in a worker process, so its warning misses this log
+def test_a_fallback_to_the_shared_directory_says_so(monkeypatch, outputs_root, caplog):
+    monkeypatch.delenv(UNAUTHENTICATED_ENV, raising=False)
+    monkeypatch.delenv(SECRET_ENV, raising=False)
     monkeypatch.setattr(utils, "_warned_about_shared_outputs", False)
 
     with caplog.at_level(logging.WARNING, logger=utils.__name__):
-        result = run_in_the_executor({"args": {}}, monkeypatch).json()["result"]
+        with caller_directory_scope(None):
+            result = caller_outputs_dir()
 
     assert Path(result).name == utils.ANONYMOUS_OUTPUTS_DIRECTORY
     assert "cannot tell one caller from another" in caplog.text
@@ -530,3 +551,99 @@ def test_a_told_directory_does_not_warn(monkeypatch, outputs_root, caplog):
 
     # a correctly configured executor must not train operators to ignore this
     assert caplog.records == []
+
+
+# ── one run cannot take the executor down for everyone ───────────────────
+#
+# every run happens in a worker process of its own, so these ask real processes
+# to overrun real limits and then ask the executor for something else
+
+MEMORY_LIMIT_MB = 512
+ALLOCATION_CHUNK_BYTES = 64 * 1024 * 1024
+ALLOCATION_CHUNKS = 24
+# longer than the limit the test sets, so the kill is what ends the run
+PAST_THE_LIMIT_SECONDS = 30
+HELD_WORKER_SECONDS = 2
+
+
+def tool_that_allocates_past_the_limit():
+    held = []
+    for _ in range(ALLOCATION_CHUNKS):
+        held.append(b"x" * ALLOCATION_CHUNK_BYTES)
+    time.sleep(PAST_THE_LIMIT_SECONDS)
+    return f"held {len(held)} chunks"
+
+
+def tool_that_runs_past_the_limit():
+    time.sleep(PAST_THE_LIMIT_SECONDS)
+    return "ran to the end"
+
+
+def tool_that_holds_its_worker():
+    time.sleep(HELD_WORKER_SECONDS)
+    return "held a worker"
+
+
+@pytest.fixture
+def only_tool(monkeypatch):
+    def register(func):
+        monkeypatch.setattr(executor, "load_external_tools", lambda: [(func, NoArgs)])
+
+    return register
+
+
+def test_a_tool_over_the_memory_limit_is_killed_and_the_next_call_is_answered(
+    monkeypatch, only_tool
+):
+    monkeypatch.setenv(MEMORY_LIMIT_ENV, str(MEMORY_LIMIT_MB))
+    only_tool(tool_that_allocates_past_the_limit)
+
+    response = run(name="tool_that_allocates_past_the_limit")
+
+    assert response.json() == {
+        "error": (
+            f"tool_that_allocates_past_the_limit exceeded the {MEMORY_LIMIT_MB} MiB "
+            "memory limit, ask for a smaller area"
+        )
+    }
+    only_tool(tool_that_reports_its_caller)
+    assert run().json() == {"result": "ran as None"}
+
+
+def test_a_tool_over_the_time_limit_is_killed(monkeypatch, only_tool):
+    monkeypatch.setenv(TIMEOUT_ENV, "1")
+    only_tool(tool_that_runs_past_the_limit)
+
+    response = run(name="tool_that_runs_past_the_limit")
+
+    assert response.json() == {
+        "error": (
+            "tool_that_runs_past_the_limit exceeded the 1 second time limit, "
+            "ask for a smaller area"
+        )
+    }
+
+
+def test_more_runs_than_the_limit_are_told_the_executor_is_busy(
+    monkeypatch, only_tool
+):
+    monkeypatch.setenv(MAX_CONCURRENT_ENV, "1")
+    only_tool(tool_that_holds_its_worker)
+    answers = []
+
+    def call():
+        answers.append(run(name="tool_that_holds_its_worker").json())
+
+    callers = [Thread(target=call) for _ in range(2)]
+    for caller in callers:
+        caller.start()
+    for caller in callers:
+        caller.join()
+
+    assert {"result": "held a worker"} in answers
+    assert {
+        "error": (
+            "the tool executor is at its limit of 1 tool runs, "
+            "try tool_that_holds_its_worker again in a moment"
+        )
+    } in answers

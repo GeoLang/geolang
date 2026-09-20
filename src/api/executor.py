@@ -25,24 +25,18 @@ from __future__ import annotations
 import logging
 import secrets
 from contextlib import asynccontextmanager
-from threading import Thread
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from src.agents.agent_manager import load_external_tools
-from src.core.bound_document import bound_document_scope, document_id_of
+from src.api.tool_worker_pool import ToolRun, tool_workers
 from src.core.tool_executor import EXECUTOR_SECRET_ENV, executor_secret
-from src.core.user_token import bearer_token, user_token_scope
-from src.core.utils import (
-    caller_directory_scope,
-    preload_geo_stack,
-    valid_caller_directory_name,
-)
+from src.core.user_token import bearer_token
+from src.core.utils import valid_caller_directory_name
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 def require_configuration() -> None:
@@ -66,8 +60,9 @@ def executor_auth(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    Thread(target=preload_geo_stack, daemon=True).start()
+    tool_workers.start()
     yield
+    tool_workers.shutdown()
 
 
 require_configuration()
@@ -106,17 +101,17 @@ def run_tool(
     except ValidationError as e:
         return {"error": f"Invalid arguments: {e}"}
 
-    token = bearer_token(authorization)
-    try:
-        with (
-            user_token_scope(token),
-            caller_directory_scope(directory),
-            bound_document_scope(document_id_of(request.document_id)),
-        ):
-            return {"result": str(func(**args))}
-    except Exception as e:
-        logger.exception(f"Tool {name} failed")
-        return {"error": str(e)}
+    return tool_workers.run(
+        ToolRun(
+            name=name,
+            module=func.__module__,
+            qualified_name=func.__qualname__,
+            args=args,
+            token=bearer_token(authorization),
+            outputs_directory=directory,
+            document_id=request.document_id,
+        )
+    )
 
 
 @app.get("/health")

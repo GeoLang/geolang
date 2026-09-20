@@ -287,6 +287,15 @@ it keeps anything else on the network from running tools there. The executor
 refuses to start without it, publishes no port in the platform stack, drops all
 capabilities and runs under memory, CPU and process limits.
 
+Inside the executor, one call runs in a worker process of its own, started ahead
+of time and used once. A run that grows past `GEOLANG_TOOL_MEMORY_LIMIT_MB`
+(default 3072) or lasts longer than `GEOLANG_TOOL_TIMEOUT_SECONDS` (default 840)
+has its worker killed, and the caller is told which limit it hit and which tool
+hit it. `GEOLANG_TOOL_MAX_CONCURRENT` (default 2) is how many runs may be in
+flight, and a call past that is told the executor is busy rather than queued.
+The executor process runs no tool code itself, so one request for a whole city's
+buildings costs its own caller an answer and leaves everyone else served.
+
 Leaving the executor unset is a deployment's choice to run tools in the API
 process, which is fine for a single tenant and is what the standalone stack, the
 test suite and the eval harness do. With the gate on and no executor configured

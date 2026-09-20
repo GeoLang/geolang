@@ -28,10 +28,10 @@ A record is kept until it expires rather than consumed by the run: a retry of
 the same approved manifest is the same reviewed pipeline, and making it re-plan
 sends the model looking for another way to do the work.
 
-Records live in this process only. plan_workflow, the approval and run_workflow
-all execute here, or all in the executor, so one process sees every half. A
-restart between them loses the record and the run is refused, which asks for a
-re-plan.
+Records live in this process only. With tools running in the API process,
+plan_workflow, the approval and run_workflow all execute there, so one process
+sees every half. A restart between them loses the record and the run is refused,
+which asks for a re-plan.
 
 This sits in core rather than beside the two tools because the tool loader
 imports tool modules as the top-level `tools` package and reloads them: a store
@@ -60,6 +60,7 @@ class PlannedManifest:
 
 # caller directory -> digest -> what happened to that manifest
 _planned: dict[str, OrderedDict[str, PlannedManifest]] = {}
+# TODO: behind an executor each call gets its own worker, so no record here reaches the run
 
 
 def _digest(manifest_toml: str) -> str:

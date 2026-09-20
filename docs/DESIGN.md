@@ -39,6 +39,8 @@ That last one crosses because the executor cannot work it out: turning a bearer 
 
 Arguments are validated on both sides. The API's copy fails fast and keeps an unknown tool off the wire; the executor's is the one that matters, because the endpoint is on a network.
 
+Inside the executor a call runs in a worker process of its own, started ahead of time with the `spawn` context, used for one run and then replaced, so nothing a run leaked is there for the next caller. [`src/api/tool_worker_pool.py`](../src/api/tool_worker_pool.py) watches that worker's `VmRSS` and the clock, and kills it at `GEOLANG_TOOL_MEMORY_LIMIT_MB` (3072) or `GEOLANG_TOOL_TIMEOUT_SECONDS` (840, under the 900 seconds the API waits for an answer), replying with a sentence that names the tool and the limit so the model can pass it on. `GEOLANG_TOOL_MAX_CONCURRENT` (2) is how many runs may be in flight, and a call past that waits a second and is then told the executor is busy rather than queued. One `download_osm_data` for every building in a city used to grow until the container was OOM-killed, which took the executor down for every user on it. It now costs its own caller an answer.
+
 `GEOLANG_EXECUTOR_SECRET` says the caller is the API. Whoever is inside the executor already knows it, which is the point: it claims nothing about that process, it keeps anything else on the network from running tools there. The executor refuses to start without it.
 
 Unset, tools run in the API process, which is the standalone stack, the test suite, the eval harness and any single-tenant self-host. Nothing in the process can tell one deployment from the other, so this is not refused: the API logs a warning naming the cost when the gate is on and no executor is configured.
