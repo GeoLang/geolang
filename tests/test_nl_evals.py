@@ -129,6 +129,39 @@ def max_abs_coords(geojson: dict) -> tuple[float, float]:
     return worst_lon, worst_lat
 
 
+CANDIDATE_SITES_FILENAME = "candidate_sites.csv"
+CANDIDATE_SITES_STEM = "candidate_sites"
+
+CANDIDATE_SITES_CSV = (
+    "name,lat,lon\n"
+    "Yonge and Eglinton,43.7068,-79.3985\n"
+    "Queen and Spadina,43.6487,-79.3963\n"
+    "Danforth and Pape,43.6790,-79.3450\n"
+)
+
+
+def upload_candidate_sites() -> None:
+    # the route replaces the catalogue entry by stem, so every test can re-upload
+    response = httpx.post(
+        f"{GEOLANG}/upload",
+        headers=auth_headers(),
+        files={
+            "file": (
+                CANDIDATE_SITES_FILENAME,
+                CANDIDATE_SITES_CSV.encode(),
+                "text/csv",
+            )
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+
+
+def names_the_candidate_sites(value) -> bool:
+    name = str(value or "").split("/")[-1].lower()
+    return name in (CANDIDATE_SITES_STEM, f"{CANDIDATE_SITES_STEM}.gpkg")
+
+
 def parse_args(args: str) -> dict:
     try:
         return json.loads(args)
@@ -201,3 +234,46 @@ def test_elevation_mont_blanc():
     assert re.search(r"\b4[4-9]\d{2}\b", res.text.replace(",", "")), (
         f"expected ~4800m elevation in reply, got: {res.text[:300]}"
     )
+
+
+def test_trade_area_runs_once_over_an_uploaded_sites_layer():
+    upload_candidate_sites()
+    res = run_prompt(
+        "For each site in my uploaded candidate_sites layer, give the 10 minute "
+        "drive trade area with the population and the coffee shop competitors "
+        "inside it."
+    )
+
+    bands = res.calls("trade_area")
+    assert len(bands) == 1, (
+        f"trade_area called {len(bands)} times; called {[n for n, _ in res.tool_calls]}"
+    )
+    args = parse_args(bands[0])
+    assert names_the_candidate_sites(args.get("sites_path")), args
+    assert "driv" in str(args.get("travel_mode", "")).lower(), args
+    assert str(args.get("minutes")) == "10", args
+
+    # one call covers every site, so none of the per-site chain may run
+    for chained in (
+        "calculate_isochrones",
+        "download_population_grid",
+        "download_osm_data",
+    ):
+        assert not res.calls(chained), f"{chained} called alongside trade_area"
+
+
+def test_score_sites_takes_the_uploaded_layer():
+    upload_candidate_sites()
+    res = run_prompt(
+        "Rank the sites in my uploaded candidate_sites layer by population and "
+        "competition from cafes, population counts three times as much."
+    )
+
+    ranked = res.calls("score_sites")
+    assert ranked, (
+        f"score_sites not called; called {[n for n, _ in res.tool_calls]}"
+    )
+    args = parse_args(ranked[-1])
+    assert names_the_candidate_sites(args.get("sites_path")), args
+    assert "caf" in str(args.get("competition_type", "")).lower(), args
+    assert not res.calls("geocode_place"), "the uploaded layer was geocoded again"

@@ -2,24 +2,10 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from src.core.utils import tool_output_path
 
+from ._osm_tags import OSM_TAG_KEYS, OSM_TAG_MAP, tags_for_category
+
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_USER_AGENT = "geolang-gis-agent/1.0"
-
-# OSM tag keys a caller may name on their own, meaning "everything carrying it"
-OSM_TAG_KEYS = {
-    "waterway",
-    "natural",
-    "landuse",
-    "highway",
-    "amenity",
-    "shop",
-    "building",
-    "leisure",
-    "office",
-    "railway",
-    "tourism",
-    "boundary",
-}
 
 DEFAULT_RADIUS_M = 1000
 # road networks need more reach than point features before the graph connects up
@@ -167,53 +153,8 @@ def download_osm_data(
     try:
         import osmnx as ox
 
-        OSM_TAG_MAP = {
-            "buildings": {"building": True},
-            "residential": {"building": "residential"},
-            "commercial": {"building": "commercial"},
-            "industrial": {"building": "industrial"},
-            "schools": {"amenity": "school"},
-            "hospitals": {"amenity": "hospital"},
-            "pharmacies": {"amenity": "pharmacy"},
-            "clinics": {"amenity": "clinic"},
-            "parks": {"leisure": "park"},
-            "green_spaces": {"landuse": "grass"},
-            "restaurants": {"amenity": "restaurant"},
-            "cafes": {"amenity": "cafe"},
-            "bars": {"amenity": "bar"},
-            "shops": {"shop": True},
-            "supermarkets": {"shop": "supermarket"},
-            "offices": {"office": True},
-            "parking": {"amenity": "parking"},
-            "bus_stops": {"highway": "bus_stop"},
-            "transit": {"public_transport": True},
-            "amenities": {"amenity": True},
-            "water": {"natural": "water"},
-            "forests": {"landuse": "forest"},
-            "rivers": {"waterway": "river"},
-            "river": {"waterway": "river"},
-            "streams": {"waterway": "stream"},
-            "canals": {"waterway": "canal"},
-            "waterways": {"waterway": True},
-            "lakes": {"natural": "water"},
-            "coastline": {"natural": "coastline"},
-            "railways": {"railway": True},
-        }
-
-        # Resolve tags
         dt = data_type.lower().strip()
-        if "=" in dt:
-            key, val = dt.split("=", 1)
-            tags = {key.strip(): val.strip()}
-        elif dt in OSM_TAG_MAP:
-            tags = OSM_TAG_MAP[dt]
-        elif dt in OSM_TAG_KEYS:
-            # a bare key like "waterway": everything carrying it, not an amenity
-            # named after it, which matches nothing at all
-            tags = {dt: True}
-        else:
-            # Try as an amenity value (e.g. "cafe", "gym")
-            tags = {"amenity": dt}
+        tags = tags_for_category(dt)
 
         named_feature_label = None
         duplicates_dropped = 0

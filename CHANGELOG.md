@@ -56,6 +56,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nights running.
 
 ### Added
+- 2026-09-20: `trade_area`, one call that answers how many people and
+  competitors sit within N minutes of each candidate site. It builds one
+  travel-time band per site and writes a polygon per site carrying
+  `population`, `competitors`, an `anchor_<category>` count per traffic
+  generator, and any column of a census layer summarised area-weighted
+  (`demographics_columns` reads `population:sum,median_income:mean`). Overpass
+  is asked once for every band at once rather than once per site. The sites and
+  the competitors can both be the user's own layer: `sites_path` takes an
+  uploaded or exported layer of points or polygons, `competitors` takes either
+  a layer filename or an OSM category. `score_sites` takes `sites_path` and
+  `name_column` too, and `competitors_path` counts the user's own competitor
+  layer within 1 km of each site instead of the OSM tags.
+  Four modules the loader skips now hold what the tools share:
+  `_sites.py` resolves names, `lat, lon` pairs or a layer into sites,
+  `_isochrones.py` holds both isochrone paths, `_population.py` the GHS-POP
+  zonal sum and the WorldPop fallback, and `_osm_tags.py` the category to tag
+  map. `calculate_isochrones`, `download_population_grid`, `download_osm_data`
+  and `score_sites` call them instead of carrying their own copies.
 - 2026-09-01: a tool module can declare `TOOL_SUPERSEDED_BY`, the viewer
   actions that do its job on the map. `/chat/agui` sends sibyl the names of
   the offered tools whose action the run's catalogue lists as `without_tools`,

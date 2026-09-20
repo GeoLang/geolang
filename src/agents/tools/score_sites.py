@@ -1,14 +1,34 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import tool_output_path
+from src.core.utils import tool_input_path, tool_output_path
+
+from ._osm_tags import features_matching_tags, merge_tags, tags_for_category
+from ._sites import resolve_sites
 
 
 class ScoreSitesArgs(BaseModel):
-    sites: str = Field(
-        ...,
+    sites: Optional[str] = Field(
+        None,
         description=(
             "Site names to evaluate, each geocoded, separated by semicolons and not "
-            "commas: 'Shoreditch London; Brixton London'"
+            "commas: 'Shoreditch London; Brixton London'. A 'lat, lon' pair is taken "
+            "as coordinates. Give this or sites_path, not both."
+        ),
+    )
+    sites_path: Optional[str] = Field(
+        None,
+        description=(
+            "The sites as a layer instead, a filename in outputs/ or user_data/ and "
+            "not a path. Points or polygons, one site per feature. Use this when the "
+            "user uploaded or exported their candidate sites, and call "
+            "list_user_datasets to learn the filename."
+        ),
+    )
+    name_column: Optional[str] = Field(
+        None,
+        description=(
+            "Column of sites_path holding each site's name. Tries name, site, label "
+            "and address when omitted."
         ),
     )
     criteria: str = Field(
@@ -37,6 +57,15 @@ class ScoreSitesArgs(BaseModel):
             "'supermarkets' or 'amenity=cafe'. Only for the competition criterion."
         ),
     )
+    competitors_path: Optional[str] = Field(
+        None,
+        description=(
+            "The user's own competitor layer, a filename in outputs/ or user_data/ "
+            "and not a path. The competition criterion then counts its features "
+            "within 1km of each site instead of OSM ones. Give this or "
+            "competition_type, not both."
+        ),
+    )
     output_filename: Optional[str] = Field(
         None,
         description="Output name, no extension. Auto-generated if omitted.",
@@ -45,12 +74,18 @@ class ScoreSitesArgs(BaseModel):
 
 OPENTOPODATA_MAX_LOCATIONS = 100
 
+# every criterion that counts nearby features counts them within this distance
+SITE_RADIUS_M = 1000
+
 
 def score_sites(
-    sites: str,
+    sites: str = None,
+    sites_path: str = None,
+    name_column: str = None,
     criteria: str = "population,amenities,transport,flood_risk,green_space",
     weights: str = None,
     competition_type: str = None,
+    competitors_path: str = None,
     output_filename: str = None,
 ) -> str:
     """
@@ -68,11 +103,17 @@ def score_sites(
         import numpy as np
         from shapely.geometry import Point
 
-        # Parse inputs — semicolon-separated site names
-        site_names = [s.strip() for s in sites.split(";") if s.strip()]
-        if len(site_names) < 2:
+        if competition_type and competitors_path:
+            return (
+                "Give either competition_type (an OSM category) or competitors_path "
+                "(your own layer), not both."
+            )
+
+        site_list = resolve_sites(sites, sites_path, name_column)
+        if isinstance(site_list, str):
+            return site_list
+        if len(site_list) < 2:
             return "Provide at least 2 site names, separated by semicolons (;)."
-        site_list = [{"name": name} for name in site_names]
 
         criteria_list = [c.strip().lower() for c in criteria.split(",") if c.strip()]
         if not criteria_list:
@@ -89,33 +130,31 @@ def score_sites(
         else:
             weight_vals = [1.0] * len(criteria_list)
 
-        # Geocode all sites — parse raw coords if passed instead of a place name
-        import re as _re
-
-        for site in site_list:
-            if "lon" not in site or "lat" not in site:
-                _cm = _re.match(
-                    r"^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$", site["name"].strip()
-                )
-                if _cm:
-                    site["lat"], site["lon"] = float(_cm.group(1)), float(_cm.group(2))
-                else:
-                    try:
-                        lat, lon = ox.geocode(site["name"])
-                        site["lat"] = lat
-                        site["lon"] = lon
-                    except Exception as e:
-                        return f"Could not geocode '{site['name']}': {e}"
-
         # Evaluate criteria per site — batch OSM queries where possible
         raw_scores = {c: [] for c in criteria_list}
         osm_criteria = {"amenities", "transport", "green_space", "competition"}
         needs_osm = bool(osm_criteria & set(criteria_list))
 
-        import osmnx as ox
-
         ox.settings.timeout = 30
         ox.settings.overpass_rate_limit = False
+
+        competition_tags = None
+        if "competition" in criteria_list and competition_type:
+            competition_tags = tags_for_category(competition_type)
+
+        competitor_metric = None
+        competitor_crs = None
+        if competitors_path:
+            competitor_frame = gpd.read_file(
+                tool_input_path("competitors_path", competitors_path)
+            )
+            if competitor_frame.empty:
+                return f"Competitor layer is empty: {competitors_path}"
+            if competitor_frame.crs is None:
+                competitor_frame = competitor_frame.set_crs("EPSG:4326")
+            competitor_frame = competitor_frame.to_crs("EPSG:4326")
+            competitor_crs = competitor_frame.estimate_utm_crs()
+            competitor_metric = competitor_frame.to_crs(competitor_crs)
 
         site_elevations = [None] * len(site_list)
         if "flood_risk" in criteria_list:
@@ -145,32 +184,33 @@ def score_sites(
             # Batch all OSM data in a single Overpass query
             osm_features = None
             if needs_osm:
-                tags = {}
+                tag_groups = []
                 if "amenities" in criteria_list:
-                    tags["amenity"] = ["cafe", "restaurant", "bar"]
-                    tags["shop"] = True
+                    tag_groups.append(
+                        {"amenity": ["cafe", "restaurant", "bar"], "shop": True}
+                    )
                 if "transport" in criteria_list:
-                    tags["highway"] = "bus_stop"
-                    tags["public_transport"] = True
-                    tags["railway"] = ["station", "halt"]
+                    tag_groups.append(
+                        {
+                            "highway": "bus_stop",
+                            "public_transport": True,
+                            "railway": ["station", "halt"],
+                        }
+                    )
                 if "green_space" in criteria_list:
-                    tags["landuse"] = ["grass", "forest", "meadow"]
-                    tags["leisure"] = ["park", "garden", "nature_reserve"]
-                if "competition" in criteria_list and competition_type:
-                    dt_comp = competition_type.lower().strip()
-                    if "=" in dt_comp:
-                        ckey, cval = dt_comp.split("=", 1)
-                        existing = tags.get(ckey.strip())
-                        if existing is None:
-                            tags[ckey.strip()] = cval.strip()
-                        elif isinstance(existing, list):
-                            tags[ckey.strip()] = existing + [cval.strip()]
-                        else:
-                            tags[ckey.strip()] = True
+                    tag_groups.append(
+                        {
+                            "landuse": ["grass", "forest", "meadow"],
+                            "leisure": ["park", "garden", "nature_reserve"],
+                        }
+                    )
+                if competition_tags:
+                    tag_groups.append(competition_tags)
+                tags = merge_tags(tag_groups)
                 if tags:
                     try:
                         osm_features = ox.features_from_point(
-                            (lat, lon), tags=tags, dist=1000
+                            (lat, lon), tags=tags, dist=SITE_RADIUS_M
                         )
                     except Exception:
                         osm_features = None
@@ -248,34 +288,23 @@ def score_sites(
                             greens_proj = greens.to_crs("EPSG:3857")
                             score = float(greens_proj.geometry.area.sum())
 
+                    elif criterion == "competition" and competitor_metric is not None:
+                        site_point = (
+                            gpd.GeoSeries([Point(lon, lat)], crs="EPSG:4326")
+                            .to_crs(competitor_crs)
+                            .iloc[0]
+                        )
+                        near = competitor_metric.geometry.distance(site_point)
+                        score = float((near <= SITE_RADIUS_M).sum())
+
                     elif (
                         criterion == "competition"
-                        and competition_type
+                        and competition_tags
                         and osm_features is not None
                     ):
-                        dt_comp = competition_type.lower().strip()
-                        if "=" in dt_comp:
-                            ckey, cval = dt_comp.split("=", 1)
-                            col = osm_features.get(ckey.strip())
-                            if col is not None:
-                                score = float((col == cval.strip()).sum())
-                        else:
-                            COMP_MAP = {
-                                "cafes": ("amenity", "cafe"),
-                                "restaurants": ("amenity", "restaurant"),
-                                "shops": ("shop", None),
-                                "supermarkets": ("shop", "supermarket"),
-                                "pharmacies": ("amenity", "pharmacy"),
-                            }
-                            mapping = COMP_MAP.get(dt_comp)
-                            if mapping:
-                                mkey, mval = mapping
-                                col = osm_features.get(mkey)
-                                if col is not None:
-                                    if mval:
-                                        score = float((col == mval).sum())
-                                    else:
-                                        score = float(col.notna().sum())
+                        score = float(
+                            len(features_matching_tags(osm_features, competition_tags))
+                        )
 
                 except Exception:
                     score = 0.0

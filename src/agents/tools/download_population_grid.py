@@ -2,10 +2,11 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from src.core.utils import (
     caller_outputs_dir,
-    population_raster_path,
     tool_input_path_or_none,
     tool_output_path,
 )
+
+from ._population import population_inside
 
 
 class DownloadPopulationGridArgs(BaseModel):
@@ -45,15 +46,12 @@ def download_population_grid(
     walk time, or the demographic coverage of a service area.
     """
     import os
-    import json
-    import time
     import traceback
 
     exec_dir = os.environ.get("TOOL_EXEC_DIR", "/app/geolang")
     outputs_dir = caller_outputs_dir()
 
     try:
-        import requests
         import osmnx as ox
         import geopandas as gpd
         from shapely.geometry import box
@@ -63,76 +61,6 @@ def download_population_grid(
         # Convert radius to degrees (approximate)
         deg = radius_km / 111.0
         bbox = box(lon - deg, lat - deg, lon + deg, lat + deg)
-
-        # Use WorldPop API — free, no key, takes a geojson FeatureCollection and
-        # answers asynchronously: submit, then poll the task until it finishes
-        # API: https://www.worldpop.org/rest/data
-        def _worldpop_polygon(poly):
-            geojson = json.dumps(
-                {
-                    "type": "FeatureCollection",
-                    "features": [
-                        {
-                            "type": "Feature",
-                            "properties": {},
-                            "geometry": poly.__geo_interface__,
-                        }
-                    ],
-                }
-            )
-            try:
-                resp = requests.get(
-                    "https://api.worldpop.org/v1/services/stats",
-                    params={"dataset": "wpgpas", "year": 2020, "geojson": geojson},
-                    timeout=30,
-                )
-                if resp.status_code != 200:
-                    return None
-                taskid = resp.json().get("taskid")
-                if not taskid:
-                    return None
-                deadline = time.time() + 30
-                while True:
-                    task = requests.get(
-                        f"https://api.worldpop.org/v1/tasks/{taskid}", timeout=30
-                    )
-                    tj = task.json() if task.status_code == 200 else {}
-                    if tj.get("status") == "finished":
-                        # wpgpas reports people per age class and sex, never a total
-                        pyramid = (tj.get("data") or {}).get("agesexpyramid") or []
-                        if not pyramid:
-                            return None
-                        return sum(
-                            float(c.get("male") or 0) + float(c.get("female") or 0)
-                            for c in pyramid
-                        )
-                    if tj.get("status") in ("failed", "error"):
-                        return None
-                    if time.time() >= deadline:
-                        return None
-                    time.sleep(1.5)
-            except Exception:
-                pass
-            return None
-
-        def _ghsl_sum(poly):
-            """Sum GHS-POP cells inside the polygon, or None with no local raster."""
-            raster_path = population_raster_path()
-            if not raster_path:
-                return None
-            import numpy as np
-            import rasterio
-            from rasterio.mask import mask as rio_mask
-            from shapely.geometry import mapping
-
-            with rasterio.open(raster_path) as src:
-                geom = gpd.GeoSeries([poly], crs="EPSG:4326").to_crs(src.crs).iloc[0]
-                nodata = src.nodata if src.nodata is not None else -9999
-                out_image, _ = rio_mask(src, [mapping(geom)], crop=True, nodata=nodata)
-                data = out_image[0].astype(float)
-                data[data == nodata] = np.nan
-                data[data < 0] = np.nan
-                return float(np.nansum(data))
 
         # Resolve the clip polygon first: when given, it (not the radius bbox) is the
         # area the population count has to describe
@@ -153,18 +81,7 @@ def download_population_grid(
 
         # The local GHS-POP raster is the primary source for both paths, so the count
         # always covers exactly the area that gets rendered
-        pop_total = None
-        source = "unavailable"
-
-        raster_pop = _ghsl_sum(query_poly)
-        if raster_pop is not None:
-            pop_total = int(round(raster_pop))
-            source = "GHSL GHS-POP 2020 (zonal sum)"
-        else:
-            worldpop_pop = _worldpop_polygon(query_poly)
-            if worldpop_pop is not None:
-                pop_total = int(round(worldpop_pop))
-                source = "WorldPop wpgpas 2020 (age-sex pyramid sum)"
+        pop_total, source = population_inside(query_poly)
 
         # Fallback: use GeoJSON population estimate from Overture/OSM admin boundaries
         # via a simple approximation from Natural Earth populated places

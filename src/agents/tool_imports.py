@@ -15,6 +15,7 @@ from pathlib import Path
 from src.core.qgis_session import QGIS_SYSTEM_PATHS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+TOOLS_DIRECTORY = REPO_ROOT / "src" / "agents" / "tools"
 
 # import name on the left, the name to install on the right, listed only where
 # the two differ
@@ -66,7 +67,9 @@ def _guards_a_missing_package(node: ast.Try, wrappers: set[ast.Try]) -> bool:
     return False
 
 
-def _collect(node: ast.AST, names: set[str], wrappers: set[ast.Try]) -> None:
+def _collect(
+    node: ast.AST, names: set[str], wrappers: set[ast.Try], seen: set[str]
+) -> None:
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.Try) and _guards_a_missing_package(child, wrappers):
             continue
@@ -75,8 +78,26 @@ def _collect(node: ast.AST, names: set[str], wrappers: set[ast.Try]) -> None:
         elif isinstance(child, ast.ImportFrom):
             if child.level == 0 and child.module:
                 names.add(child.module.split(".")[0])
+            elif child.level == 1 and child.module:
+                _collect_sibling(child.module, names, seen)
         else:
-            _collect(child, names, wrappers)
+            _collect(child, names, wrappers, seen)
+
+
+def _collect_sibling(module: str, names: set[str], seen: set[str]) -> None:
+    """What a shared tool module needs, counted for whoever imports it."""
+    if module in seen:
+        return
+    seen.add(module)
+    path = TOOLS_DIRECTORY / f"{module}.py"
+    if not path.is_file():
+        return
+    _collect_source(path.read_text(), names, seen)
+
+
+def _collect_source(source: str, names: set[str], seen: set[str]) -> None:
+    tree = ast.parse(source)
+    _collect(tree, names, _function_body_wrappers(tree), seen)
 
 
 def _is_repo_package(name: str) -> bool:
@@ -86,12 +107,13 @@ def _is_repo_package(name: str) -> bool:
 def required_packages(source: str) -> set[str]:
     """Top-level packages the source imports and cannot run without.
 
-    Relative imports, the standard library, this repo's own packages and
-    imports a try guards against the package being absent are all left out.
+    A relative import of a shared tool module is followed, so what `_sites` or
+    `_isochrones` needs counts for every tool importing it. The standard
+    library, this repo's own packages and imports a try guards against the
+    package being absent are all left out.
     """
-    tree = ast.parse(source)
     names: set[str] = set()
-    _collect(tree, names, _function_body_wrappers(tree))
+    _collect_source(source, names, set())
     return {
         name
         for name in names

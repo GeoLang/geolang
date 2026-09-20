@@ -10,7 +10,7 @@
 
 - Natural language geospatial queries
 - Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 40 geospatial tools served to sibyl over HTTP, and 38 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
+- 41 geospatial tools served to sibyl over HTTP, and 39 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
 - A chat run offers fewer than 40 when the viewer's action catalogue already covers a tool. A tool module names the viewer actions that do its job on the map in `TOOL_SUPERSEDED_BY`, and `/chat/agui` sends sibyl those tool names as `without_tools`. `calculate_isochrones` names `analysis.travel_time`, `terrain_profile` names `analysis.terrain_profile` and `analysis.cross_section`
 - Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](https://github.com/GeoLang/geodukt) TOML manifest, `plan_workflow` validates it and streams the plan, the user presses approve in the viewer, and `run_workflow` executes it. Both halves are checked rather than trusted to the persona: `run_workflow` refuses a manifest `plan_workflow` never validated, and one the approve button never posted to `POST /workflow/approve`
 - AG-UI event stream for ViewTopia
@@ -98,6 +98,10 @@ docker exec viewtopia-geolang-api-1 sh -c "uv run --with pytest --with respx -- 
 # geolang api, sibyl (local mode), and the llama server are all up.
 uv run --with pytest --with httpx python -m pytest tests/test_nl_evals.py -v
 ```
+
+The suite includes the site selection prompts, which upload a candidate sites
+CSV through `POST /upload` before the run, so the api's upload route has to be
+reachable with the token the evals present.
 
 ## Tool sweep
 

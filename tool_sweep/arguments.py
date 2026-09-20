@@ -338,6 +338,15 @@ SWEEP_ARGUMENTS: dict[str, ToolSample] = {
         },
         external=True,
     ),
+    "trade_area": ToolSample(
+        args={
+            "sites": "Monaco;Monte Carlo",
+            "travel_mode": "walking",
+            "minutes": 5,
+            "output_filename": "sweep_trade_area",
+        },
+        external=True,
+    ),
     "service_gap": ToolSample(
         args={
             "place_name": SWEEP_PLACE,

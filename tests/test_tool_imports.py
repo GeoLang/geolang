@@ -45,6 +45,13 @@ def test_the_scanner_reads_what_a_module_cannot_run_without():
     assert required_packages(MODULE_SOURCE) == {"osmnx", "networkx"}
 
 
+def test_the_scanner_follows_a_shared_tool_module():
+    """_isochrones imports networkx, so every tool importing it needs networkx."""
+    source = "from ._isochrones import isochrone_polygons\n"
+
+    assert "networkx" in required_packages(source)
+
+
 def test_a_package_on_the_bridged_qgis_paths_counts_as_installed(tmp_path, monkeypatch):
     """The platform image holds qgis on the paths qgis_session bridges, not on
     sys.path, so find_spec alone would drop pyqgis_api there."""
