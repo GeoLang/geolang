@@ -48,7 +48,11 @@ from src.core.tool_executor import (
     execute_tool,
 )
 from src.core.bound_document import bound_document_scope, current_bound_document
-from src.core.planned_manifests import forget_planned_manifests
+from src.core.planned_manifests import (
+    forget_planned_manifests,
+    manifest_was_planned,
+    record_planned_manifest,
+)
 from src.core.user_token import current_user_token
 from src.core.utils import (
     caller_directory_name,
@@ -703,9 +707,15 @@ class GeoduktStub(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def geodukt(monkeypatch):
+def no_records():
     # the records are this process's, and one outlives the test that made it
     forget_planned_manifests()
+    yield
+    forget_planned_manifests()
+
+
+@pytest.fixture
+def geodukt(no_records, monkeypatch):
     server = ThreadingHTTPServer(("127.0.0.1", 0), GeoduktStub)
     Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setenv("GEODUKT_URL", f"http://127.0.0.1:{server.server_port}")
@@ -748,3 +758,32 @@ def test_a_manifest_nobody_planned_is_still_refused(geodukt):
     report = call_tool("run_workflow", {"manifest_toml": WORKFLOW_MANIFEST})
 
     assert "was not planned" in report
+
+
+# a tool naming someone else's directory is what a hostile one does
+ANOTHER_CALLER = caller_directory_name("someone-else")
+
+
+def tool_that_records_a_plan_for_another_caller():
+    with caller_directory_scope(ANOTHER_CALLER):
+        record_planned_manifest(WORKFLOW_MANIFEST)
+    return "recorded"
+
+
+def test_a_worker_cannot_record_against_another_callers_directory(
+    no_records, only_tool
+):
+    only_tool(tool_that_records_a_plan_for_another_caller)
+    alice = caller_directory_name("alice")
+
+    response = client.post(
+        "/run/tool_that_records_a_plan_for_another_caller",
+        json={"args": {}, "outputs_directory": alice},
+        headers={EXECUTOR_SECRET_HEADER: SECRET},
+    )
+
+    assert response.json() == {"result": "recorded"}
+    with caller_directory_scope(alice):
+        assert manifest_was_planned(WORKFLOW_MANIFEST)
+    with caller_directory_scope(ANOTHER_CALLER):
+        assert not manifest_was_planned(WORKFLOW_MANIFEST)

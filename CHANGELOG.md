@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is told the executor is busy. The plan and approval records stay in the
   executor process and a worker asks it over the pipe, so `plan_workflow`, the
   approve click and `run_workflow` read one set of records from three workers.
+  It keys them to the outputs directory the call arrived with, so a worker
+  cannot reach another caller's.
   A `download_osm_data` for every building in the City of Toronto had been
   growing until the container was OOM-killed, which left every user's chat dead
   for the two minutes ECS took to replace the task.

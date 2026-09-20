@@ -31,9 +31,10 @@ sends the model looking for another way to do the work.
 Records live in one process. With tools running in the API process that is the
 API, and with an executor it is the executor: a call there runs in a worker that
 exits when the tool returns, so the worker asks the executor over the pipe it
-was given and the executor holds the records. Either way one process sees every
-half, and a restart between them loses the record and refuses the run, which
-asks for a re-plan.
+was given and the executor holds the records. It keys them to the caller the
+call arrived for and never to one the worker names, because the worker is where
+tool code runs. Either way one process sees every half, and a restart between
+them loses the record and refuses the run, which asks for a re-plan.
 
 This sits in core rather than beside the two tools because the tool loader
 imports tool modules as the top-level `tools` package and reloads them: a store
@@ -140,10 +141,10 @@ def apply_operation(operation: str, caller: str, manifest_toml: str) -> bool:
 
 
 def _ask(operation: str, manifest_toml: str) -> bool:
-    caller = current_caller_directory()
     if _ask_the_executor is not None:
-        return _ask_the_executor(operation, caller, manifest_toml)
-    return apply_operation(operation, caller, manifest_toml)
+        # whose records these are is the executor's to decide, not this process's
+        return _ask_the_executor(operation, manifest_toml)
+    return apply_operation(operation, current_caller_directory(), manifest_toml)
 
 
 def record_planned_manifest(manifest_toml: str) -> None:

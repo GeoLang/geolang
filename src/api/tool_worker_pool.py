@@ -15,7 +15,11 @@ from src.agents.agent_manager import load_external_tools
 from src.core.bound_document import bound_document_scope, document_id_of
 from src.core.planned_manifests import apply_operation, ask_the_executor_instead
 from src.core.user_token import user_token_scope
-from src.core.utils import caller_directory_scope, preload_geo_stack
+from src.core.utils import (
+    ANONYMOUS_OUTPUTS_DIRECTORY,
+    caller_directory_scope,
+    preload_geo_stack,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +105,6 @@ class ToolRun:
 @dataclass
 class RecordAsk:
     operation: str
-    caller: str
     manifest_toml: str
 
 
@@ -146,8 +149,8 @@ def _execute(tool_run: ToolRun) -> dict:
 
 
 def _asking_the_executor(connection: Connection):
-    def ask(operation: str, caller: str, manifest_toml: str) -> bool:
-        connection.send(RecordAsk(operation, caller, manifest_toml))
+    def ask(operation: str, manifest_toml: str) -> bool:
+        connection.send(RecordAsk(operation, manifest_toml))
         return connection.recv()
 
     return ask
@@ -187,7 +190,7 @@ def _stop(worker: Worker) -> None:
 
 
 def _next_message(
-    worker: Worker, deadline: float, limit_mb: int
+    worker: Worker, deadline: float, limit_mb: int, caller: str
 ) -> tuple[object, str | None]:
     limit_kilobytes = limit_mb * KILOBYTES_PER_MEBIBYTE
     while True:
@@ -197,10 +200,9 @@ def _next_message(
             except EOFError:
                 return None, STOPPED
             if isinstance(message, RecordAsk):
+                # the run's caller, never one the worker names: it runs tool code
                 worker.connection.send(
-                    apply_operation(
-                        message.operation, message.caller, message.manifest_toml
-                    )
+                    apply_operation(message.operation, caller, message.manifest_toml)
                 )
                 continue
             return message, None
@@ -305,10 +307,11 @@ class ToolWorkerPool:
     def _run_in_worker(self, worker: Worker, tool_run: ToolRun) -> dict:
         limit_mb = memory_limit_mb()
         timeout = tool_timeout_seconds()
+        caller = tool_run.outputs_directory or ANONYMOUS_OUTPUTS_DIRECTORY
         logger.info(f"tool {tool_run.name} started in worker {worker.process.pid}")
 
         _, failure = _next_message(
-            worker, time.monotonic() + WORKER_START_SECONDS, limit_mb
+            worker, time.monotonic() + WORKER_START_SECONDS, limit_mb, caller
         )
         if failure is not None:
             self._end_run(worker, tool_run.name, NEVER_STARTED)
@@ -320,7 +323,9 @@ class ToolWorkerPool:
             self._end_run(worker, tool_run.name, STOPPED)
             return _failed(STOPPED, tool_run, limit_mb, timeout)
 
-        reply, failure = _next_message(worker, time.monotonic() + timeout, limit_mb)
+        reply, failure = _next_message(
+            worker, time.monotonic() + timeout, limit_mb, caller
+        )
         if failure is not None:
             self._end_run(worker, tool_run.name, failure)
             return _failed(failure, tool_run, limit_mb, timeout)
