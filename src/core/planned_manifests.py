@@ -28,10 +28,12 @@ A record is kept until it expires rather than consumed by the run: a retry of
 the same approved manifest is the same reviewed pipeline, and making it re-plan
 sends the model looking for another way to do the work.
 
-Records live in this process only. With tools running in the API process,
-plan_workflow, the approval and run_workflow all execute there, so one process
-sees every half. A restart between them loses the record and the run is refused,
-which asks for a re-plan.
+Records live in one process. With tools running in the API process that is the
+API, and with an executor it is the executor: a call there runs in a worker that
+exits when the tool returns, so the worker asks the executor over the pipe it
+was given and the executor holds the records. Either way one process sees every
+half, and a restart between them loses the record and refuses the run, which
+asks for a re-plan.
 
 This sits in core rather than beside the two tools because the tool loader
 imports tool modules as the top-level `tools` package and reloads them: a store
@@ -51,6 +53,11 @@ from src.core.utils import current_caller_directory
 PLAN_LIFETIME_SECONDS = 3600.0
 PLANS_KEPT_PER_CALLER = 32
 
+RECORD_PLAN = "record plan"
+RECORD_APPROVAL = "record approval"
+PLAN_EXISTS = "plan exists"
+APPROVAL_EXISTS = "approval exists"
+
 
 @dataclass
 class PlannedManifest:
@@ -60,7 +67,13 @@ class PlannedManifest:
 
 # caller directory -> digest -> what happened to that manifest
 _planned: dict[str, OrderedDict[str, PlannedManifest]] = {}
-# TODO: behind an executor each call gets its own worker, so no record here reaches the run
+# set in a tool worker, whose own records would die with it when the tool returns
+_ask_the_executor = None
+
+
+def ask_the_executor_instead(ask) -> None:
+    global _ask_the_executor
+    _ask_the_executor = ask
 
 
 def _digest(manifest_toml: str) -> str:
@@ -78,23 +91,64 @@ def _forget_expired(now: float) -> None:
             _planned.pop(caller, None)
 
 
-def _record(manifest_toml: str) -> PlannedManifest | None:
-    """This caller's live record for exactly this text, if there is one."""
+def _record(caller: str, manifest_toml: str) -> PlannedManifest | None:
+    """That caller's live record for exactly this text, if there is one."""
     now = time.monotonic()
     _forget_expired(now)
-    return _planned.get(current_caller_directory(), {}).get(_digest(manifest_toml))
+    return _planned.get(caller, {}).get(_digest(manifest_toml))
 
 
-def record_planned_manifest(manifest_toml: str) -> None:
-    """Remember that this caller has had exactly this manifest text planned."""
+def _record_plan(caller: str, manifest_toml: str) -> bool:
     now = time.monotonic()
     _forget_expired(now)
-    plans = _planned.setdefault(current_caller_directory(), OrderedDict())
+    plans = _planned.setdefault(caller, OrderedDict())
     digest = _digest(manifest_toml)
     plans.pop(digest, None)
     plans[digest] = PlannedManifest(planned_at=now)
     while len(plans) > PLANS_KEPT_PER_CALLER:
         plans.popitem(last=False)
+    return True
+
+
+def _record_approval(caller: str, manifest_toml: str) -> bool:
+    record = _record(caller, manifest_toml)
+    if record is None:
+        return False
+    record.approved = True
+    return True
+
+
+def _plan_exists(caller: str, manifest_toml: str) -> bool:
+    return _record(caller, manifest_toml) is not None
+
+
+def _approval_exists(caller: str, manifest_toml: str) -> bool:
+    record = _record(caller, manifest_toml)
+    return record is not None and record.approved
+
+
+_OPERATIONS = {
+    RECORD_PLAN: _record_plan,
+    RECORD_APPROVAL: _record_approval,
+    PLAN_EXISTS: _plan_exists,
+    APPROVAL_EXISTS: _approval_exists,
+}
+
+
+def apply_operation(operation: str, caller: str, manifest_toml: str) -> bool:
+    return _OPERATIONS[operation](caller, manifest_toml)
+
+
+def _ask(operation: str, manifest_toml: str) -> bool:
+    caller = current_caller_directory()
+    if _ask_the_executor is not None:
+        return _ask_the_executor(operation, caller, manifest_toml)
+    return apply_operation(operation, caller, manifest_toml)
+
+
+def record_planned_manifest(manifest_toml: str) -> None:
+    """Remember that this caller has had exactly this manifest text planned."""
+    _ask(RECORD_PLAN, manifest_toml)
 
 
 def record_user_approval(manifest_toml: str) -> bool:
@@ -103,22 +157,17 @@ def record_user_approval(manifest_toml: str) -> bool:
     False when there is no live plan to attach the approval to, which is the
     caller being told to plan it rather than an approval kept for later.
     """
-    record = _record(manifest_toml)
-    if record is None:
-        return False
-    record.approved = True
-    return True
+    return _ask(RECORD_APPROVAL, manifest_toml)
 
 
 def manifest_was_planned(manifest_toml: str) -> bool:
     """Whether this caller planned exactly this text and the record still holds."""
-    return _record(manifest_toml) is not None
+    return _ask(PLAN_EXISTS, manifest_toml)
 
 
 def manifest_was_approved(manifest_toml: str) -> bool:
     """Whether the user approved this caller's plan of exactly this text."""
-    record = _record(manifest_toml)
-    return record is not None and record.approved
+    return _ask(APPROVAL_EXISTS, manifest_toml)
 
 
 def forget_planned_manifests() -> None:

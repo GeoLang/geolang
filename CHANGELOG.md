@@ -15,9 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GEOLANG_TOOL_MEMORY_LIMIT_MB` (3072) or `GEOLANG_TOOL_TIMEOUT_SECONDS` (840)
   has its worker killed and the caller is told which tool hit which limit.
   `GEOLANG_TOOL_MAX_CONCURRENT` (2) bounds the runs in flight, and a call past
-  that is told the executor is busy. A `download_osm_data` for every building in
-  the City of Toronto had been growing until the container was OOM-killed, which
-  left every user's chat dead for the two minutes ECS took to replace the task.
+  that is told the executor is busy. The plan and approval records stay in the
+  executor process and a worker asks it over the pipe, so `plan_workflow`, the
+  approve click and `run_workflow` read one set of records from three workers.
+  A `download_osm_data` for every building in the City of Toronto had been
+  growing until the container was OOM-killed, which left every user's chat dead
+  for the two minutes ECS took to replace the task.
 - 2026-09-16: documentation corrections. `requirements_client.txt` names
   geopandas, so the README and `api_reference.md` no longer say it names none of
   the geospatial libraries. `api_reference.md` listed three of the four tools

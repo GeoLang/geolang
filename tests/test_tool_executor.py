@@ -5,9 +5,11 @@ executor, and `src.api.executor` is the remote one. The suite itself never sets
 `GEOLANG_EXECUTOR_URL`, so every other test still runs its tools in-process.
 """
 
+import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
@@ -17,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from src.api import executor
+from src.api import executor, tool_worker_pool
 from src.api.tool_worker_pool import (
     MAX_CONCURRENT_ENV,
     MEMORY_LIMIT_ENV,
@@ -46,6 +48,7 @@ from src.core.tool_executor import (
     execute_tool,
 )
 from src.core.bound_document import bound_document_scope, current_bound_document
+from src.core.planned_manifests import forget_planned_manifests
 from src.core.user_token import current_user_token
 from src.core.utils import (
     caller_directory_name,
@@ -647,3 +650,101 @@ def test_more_runs_than_the_limit_are_told_the_executor_is_busy(
             "try tool_that_holds_its_worker again in a moment"
         )
     } in answers
+
+
+# ── the three halves of a workflow, in three workers ─────────────────────
+#
+# plan_workflow records the manifest, the approve click marks that record and
+# run_workflow reads it, and each of the three runs in a worker that exits when
+# it answers. The records live in the executor, which is the process all three
+# workers ask
+
+WORKFLOW_MANIFEST = """
+[project]
+name = "depot-catchment"
+
+[[source]]
+name = "depots"
+format = "geojson"
+path = "outputs/depots.geojson"
+
+[[sink]]
+name = "out"
+input = "depots"
+format = "gpkg"
+path = "outputs/depot_catchment.gpkg"
+"""
+
+VALIDATED_ORDER = {"steps": [{"name": "depots"}, {"name": "out"}]}
+RUN_RECORD = {
+    "id": 7,
+    "status": "Completed",
+    "manifest_name": "depot-catchment",
+    "steps": [
+        {"name": "depots", "feature_count": 12},
+        {"name": "out", "feature_count": 12},
+    ],
+}
+
+
+class GeoduktStub(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        answer = VALIDATED_ORDER if self.path == "/validate" else RUN_RECORD
+        body = json.dumps(answer).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def geodukt(monkeypatch):
+    # the records are this process's, and one outlives the test that made it
+    forget_planned_manifests()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), GeoduktStub)
+    Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("GEODUKT_URL", f"http://127.0.0.1:{server.server_port}")
+    # a worker reads that address when it starts, so the pre-warmed ones have to go
+    tool_workers.shutdown()
+    yield
+    server.shutdown()
+
+
+def call_tool(name, args):
+    response = client.post(
+        f"/run/{name}", json={"args": args}, headers={EXECUTOR_SECRET_HEADER: SECRET}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["result"]
+
+
+def workers_named_in(caplog):
+    return {
+        line.rsplit(" ", 1)[1]
+        for line in caplog.text.splitlines()
+        if "started in worker" in line
+    }
+
+
+def test_a_plan_and_its_approval_reach_a_run_in_another_worker(geodukt, caplog):
+    with caplog.at_level(logging.INFO, logger=tool_worker_pool.__name__):
+        plan = call_tool("plan_workflow", {"manifest_toml": WORKFLOW_MANIFEST})
+        planned = json.loads(plan.split("__PLAN__:", 1)[1])["manifest"]
+        approval = call_tool("approve_workflow", {"manifest_toml": planned})
+        run_report = call_tool("run_workflow", {"manifest_toml": planned})
+
+    assert "Approved" in approval
+    assert 'Workflow "depot-catchment" run 7 completed.' in run_report
+    # three runs, three workers, one set of records in the executor behind them
+    assert len(workers_named_in(caplog)) == 3
+
+
+def test_a_manifest_nobody_planned_is_still_refused(geodukt):
+    report = call_tool("run_workflow", {"manifest_toml": WORKFLOW_MANIFEST})
+
+    assert "was not planned" in report

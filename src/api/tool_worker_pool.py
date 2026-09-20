@@ -13,6 +13,7 @@ from multiprocessing.connection import Connection
 
 from src.agents.agent_manager import load_external_tools
 from src.core.bound_document import bound_document_scope, document_id_of
+from src.core.planned_manifests import apply_operation, ask_the_executor_instead
 from src.core.user_token import user_token_scope
 from src.core.utils import caller_directory_scope, preload_geo_stack
 
@@ -98,6 +99,13 @@ class ToolRun:
 
 
 @dataclass
+class RecordAsk:
+    operation: str
+    caller: str
+    manifest_toml: str
+
+
+@dataclass
 class Worker:
     process: multiprocessing.process.BaseProcess
     connection: Connection
@@ -137,10 +145,19 @@ def _execute(tool_run: ToolRun) -> dict:
         return {"error": str(e)}
 
 
+def _asking_the_executor(connection: Connection):
+    def ask(operation: str, caller: str, manifest_toml: str) -> bool:
+        connection.send(RecordAsk(operation, caller, manifest_toml))
+        return connection.recv()
+
+    return ask
+
+
 def _worker_main(connection: Connection) -> None:
     logging.basicConfig(level=logging.INFO)
     # its own process group, so killing the worker kills what the tool started
     os.setsid()
+    ask_the_executor_instead(_asking_the_executor(connection))
     preload_geo_stack()
     load_external_tools()
     connection.send(READY)
@@ -176,9 +193,17 @@ def _next_message(
     while True:
         if worker.connection.poll(MESSAGE_POLL_SECONDS):
             try:
-                return worker.connection.recv(), None
+                message = worker.connection.recv()
             except EOFError:
                 return None, STOPPED
+            if isinstance(message, RecordAsk):
+                worker.connection.send(
+                    apply_operation(
+                        message.operation, message.caller, message.manifest_toml
+                    )
+                )
+                continue
+            return message, None
         # an exited worker can still have its reply waiting in the pipe
         if not worker.process.is_alive() and not worker.connection.poll():
             return None, STOPPED
