@@ -178,3 +178,4 @@ def ptolemy_query(
 
 TOOL_FUNCTION = ptolemy_query
 TOOL_SCHEMA = PtolemyQueryArgs
+TOOL_SUPERSEDED_BY = ("dataset.list", "dataset.draw_branch")

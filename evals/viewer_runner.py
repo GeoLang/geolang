@@ -27,6 +27,8 @@ from evals.runner import (
     delete_sessions,
     markdown_report,
     pin_active_profile,
+    pin_profile,
+    profile_by_id,
     restore_session,
     run_events,
     service_up,
@@ -42,7 +44,7 @@ FIXTURE_DIR = REPO_ROOT / "evals" / "viewer"
 REPORT_TITLE = "Viewer eval"
 
 
-def viewer_skip_reason(allow_cloud: bool) -> str:
+def viewer_skip_reason(allow_cloud: bool, profile_id: str = "") -> str:
     """Why the stack cannot be evaluated, or "" when it can."""
     if not service_up(f"{runner.GEOLANG}/tools"):
         return f"geolang api not up at {runner.GEOLANG}"
@@ -50,7 +52,7 @@ def viewer_skip_reason(allow_cloud: bool) -> str:
         return f"sibyl not up at {runner.SIBYL}"
     if sibyl_refuses_the_token():
         return runner.TOKEN_HINT
-    _, _, server = active_profile()
+    _, _, server = profile_by_id(profile_id) if profile_id else active_profile()
     if server == "cloud" and not allow_cloud:
         return "sibyl is on the cloud profile: pass --allow-cloud to spend credits"
     return ""
@@ -240,6 +242,12 @@ def main(argv=None) -> int:
         help="permit running against a cloud model profile, which costs credits",
     )
     parser.add_argument(
+        "--profile",
+        metavar="ID",
+        help="run against this sibyl profile instead of the active one, so a "
+        "sweep never switches what everyone else's chat uses",
+    )
+    parser.add_argument(
         "--repeat",
         type=int,
         default=1,
@@ -295,11 +303,13 @@ def main(argv=None) -> int:
         model = recording.get("model") or ""
         mode = "replay"
     else:
-        reason = viewer_skip_reason(args.allow_cloud)
+        reason = viewer_skip_reason(args.allow_cloud, args.profile or "")
         if reason:
             print(f"SKIP: {reason}")
             return 0
-        profile, model, _ = pin_active_profile()
+        profile, model, _ = (
+            pin_profile(args.profile) if args.profile else pin_active_profile()
+        )
         results, captured = run_against_the_stack(args, tasks, snapshot)
         mode = "stack"
         if args.record:

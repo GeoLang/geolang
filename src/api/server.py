@@ -339,6 +339,16 @@ class ToolCallRequest(BaseModel):
 
 
 # sync so FastAPI runs it in the threadpool: tools block for minutes
+def unknown_tool_detail(name: str) -> str:
+    if "." not in name:
+        return f"Unknown tool: {name}"
+    return (
+        f"Unknown tool: {name} is a viewer action, not a tool. Run it with the "
+        f"viewer_control tool, action 'run' and name '{name}', with its "
+        "parameters as further fields of that call."
+    )
+
+
 @app.post("/tools/{name}")
 def run_tool(
     name: str,
@@ -373,7 +383,7 @@ def run_tool(
         (t for t in offered_tools() if t[0].__name__ == name and t[1]), None
     )
     if entry is None:
-        raise HTTPException(status_code=404, detail=f"Unknown tool: {name}")
+        raise HTTPException(status_code=404, detail=unknown_tool_detail(name))
     func, schema = entry
 
     try:

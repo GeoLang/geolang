@@ -196,3 +196,4 @@ def compare_layers(
 
 TOOL_FUNCTION = compare_layers
 TOOL_SCHEMA = CompareLayersArgs
+TOOL_SUPERSEDED_BY = ("scenario.compare",)

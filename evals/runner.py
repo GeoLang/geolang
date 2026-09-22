@@ -73,6 +73,21 @@ def active_profile() -> tuple:
     return active, "", ""
 
 
+def profile_by_id(profile_id: str) -> tuple:
+    body = httpx.get(f"{SIBYL}/models", timeout=5).json()
+    for profile in body.get("profiles") or []:
+        if profile.get("id") == profile_id:
+            return profile_id, profile.get("model") or "", profile.get("server") or ""
+    raise SystemExit(f"sibyl has no profile {profile_id!r}. GET {SIBYL}/models lists them")
+
+
+def pin_profile(profile_id: str) -> tuple:
+    global _pinned_profile_id
+    found = profile_by_id(profile_id)
+    _pinned_profile_id = profile_id
+    return found
+
+
 def pin_active_profile() -> tuple:
     """Read the active profile once and pin every later run of this sweep to it.
 
