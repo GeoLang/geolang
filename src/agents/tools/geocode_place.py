@@ -99,7 +99,14 @@ def _geokode_answer(results: list, place_name: str) -> dict | None:
         return None
     if place_name.strip()[:1].isdigit():
         return results[0]
-    return next((r for r in results if r.get("kind") == "place"), None)
+    return next(
+        (
+            r
+            for r in results
+            if r.get("kind") == "place" or r.get("match_type") == "exact"
+        ),
+        None,
+    )
 
 
 def _format_geokode(hit: dict, place_name: str) -> str:

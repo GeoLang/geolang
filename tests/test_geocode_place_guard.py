@@ -5,9 +5,17 @@ from src.agents.tools.geocode_place import _geokode_answer, geocode_place
 
 JASPER_AVENUE = {
     "kind": "address",
+    "match_type": "prefix",
     "lon": -79.48301,
     "lat": 43.6835,
     "address": {"full": "2, Jasper Avenue"},
+}
+QUEEN_STREET_WEST = {
+    "kind": "address",
+    "match_type": "exact",
+    "lon": -79.38034,
+    "lat": 43.65219,
+    "address": {"full": "Queen Street West, Toronto"},
 }
 JASPER_TOWN = {
     "kind": "place",
@@ -27,6 +35,11 @@ def test_a_house_number_takes_the_best_hit_as_it_stands():
 
 def test_only_streets_answer_nothing_for_a_place_query():
     assert _geokode_answer([JASPER_AVENUE], "Jasper") is None
+
+
+def test_a_whole_street_name_answers_its_own_query():
+    answer = _geokode_answer([QUEEN_STREET_WEST], "Queen Street West")
+    assert answer is QUEEN_STREET_WEST
 
 
 def fake_geokode(results):
