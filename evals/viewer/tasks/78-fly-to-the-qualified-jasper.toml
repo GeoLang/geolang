@@ -1,0 +1,12 @@
+id = "fly-to-the-qualified-jasper"
+prompt = "fly to Jasper, Alberta"
+notes = "Two places answer to Jasper and the loaded extract holds a Jasper Avenue, so the province has to reach geocode_place rather than be dropped from the query."
+
+[expect]
+action = "run"
+name = "camera.fly_to"
+args = { lon = -118.08, lat = 52.88 }
+
+[tolerance]
+lon = 0.5
+lat = 0.5

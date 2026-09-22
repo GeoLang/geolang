@@ -21,6 +21,9 @@ def geocode_place(place_name: str) -> str:
     import os
     import traceback
 
+    # held back so the place sources answer a query with no house number first
+    geokode_street = None
+
     # platform geokode first: authoritative for addresses in the loaded extract
     geokode_url = os.environ.get("GEOKODE_URL")
     if geokode_url:
@@ -34,21 +37,11 @@ def geocode_place(place_name: str) -> str:
             )
             if resp.ok:
                 results = resp.json().get("results", [])
+                hit = _geokode_answer(results, place_name)
+                if hit is not None:
+                    return _format_geokode(hit, place_name)
                 if results:
-                    top = results[0]
-                    addr = top.get("address", {})
-                    label = addr.get("full") or ", ".join(
-                        str(p)
-                        for p in (
-                            addr.get("street"),
-                            addr.get("city"),
-                            addr.get("state"),
-                        )
-                        if p
-                    ) or place_name
-                    lon = round(float(top["lon"]), 5)
-                    lat = round(float(top["lat"]), 5)
-                    return f"✅ {label} (geokode): lon={lon}, lat={lat}"
+                    geokode_street = _format_geokode(results[0], place_name)
         except Exception:
             pass  # geokode unavailable or no match: fall back to Natural Earth
 
@@ -65,10 +58,7 @@ def geocode_place(place_name: str) -> str:
                 break
 
         if gdf is None:
-            return (
-                "❌ No populated places dataset found. "
-                "Run download_natural_earth_dataset first."
-            )
+            return _nominatim_fallback(place_name, geokode_street)
 
         # Try exact match on NAME, then case-insensitive, then partial
         name_col = next(
@@ -83,7 +73,7 @@ def geocode_place(place_name: str) -> str:
             match = gdf[gdf[name_col].str.contains(query, case=False, na=False)]
 
         if match.empty:
-            return _nominatim_fallback(place_name)
+            return _nominatim_fallback(place_name, geokode_street)
 
         # Use the most populous match if there are multiple
         pop_col = next((c for c in match.columns if "POP" in c.upper()), None)
@@ -104,7 +94,31 @@ def geocode_place(place_name: str) -> str:
         return f"❌ Geocoding failed: {str(e)}\n{traceback.format_exc()}"
 
 
-def _nominatim_fallback(place_name: str) -> str:
+def _geokode_answer(results: list, place_name: str) -> dict | None:
+    if not results:
+        return None
+    if place_name.strip()[:1].isdigit():
+        return results[0]
+    return next((r for r in results if r.get("kind") == "place"), None)
+
+
+def _format_geokode(hit: dict, place_name: str) -> str:
+    addr = hit.get("address", {})
+    label = (
+        addr.get("full")
+        or ", ".join(
+            str(p)
+            for p in (addr.get("street"), addr.get("city"), addr.get("state"))
+            if p
+        )
+        or place_name
+    )
+    lon = round(float(hit["lon"]), 5)
+    lat = round(float(hit["lat"]), 5)
+    return f"✅ {label} (geokode): lon={lon}, lat={lat}"
+
+
+def _nominatim_fallback(place_name: str, geokode_street: str | None = None) -> str:
     # landmarks ("Eiffel Tower") are in neither geokode's address extract nor
     # Natural Earth's populated places, so ask Nominatim before giving up
     try:
@@ -125,7 +139,7 @@ def _nominatim_fallback(place_name: str) -> str:
             return f"✅ {label} (nominatim): lon={lon}, lat={lat}"
     except Exception:
         pass
-    return (
+    return geokode_street or (
         f"❌ Place '{place_name}' not found in any geocoding source. "
         "Tell the user geocoding failed. Do not answer with coordinates "
         "from memory."
