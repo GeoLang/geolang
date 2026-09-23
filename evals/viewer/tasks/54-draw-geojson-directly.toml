@@ -5,4 +5,4 @@ notes = "The ring coordinates are not pinned, the layer name is. A polygon the m
 [expect]
 action = "run"
 name = "data.add_geojson"
-args = { name = "Survey area" }
+args = { layer_name = "Survey area" }

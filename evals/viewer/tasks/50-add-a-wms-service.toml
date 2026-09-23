@@ -5,4 +5,4 @@ notes = "The service kind is one of a fixed set, and the layer name is required.
 [expect]
 action = "run"
 name = "data.add_service"
-args = { type = "wms", url = "https://example.org/geoserver/wms", name = "Soils" }
+args = { type = "wms", url = "https://example.org/geoserver/wms", layer_name = "Soils" }
