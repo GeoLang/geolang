@@ -25,11 +25,15 @@ services:
   sibyl:
     build: ../sibyl
     environment:
+      # never set this where the port is reachable
+      SIBYL_ALLOW_UNAUTHENTICATED: "1"
       SIBYL_CLOUD_API_KEY: "${SIBYL_CLOUD_API_KEY}"
       SIBYL_CLOUD_API_BASE: "${SIBYL_CLOUD_API_BASE:-}"
       SIBYL_CLOUD_MODELS: "${SIBYL_CLOUD_MODELS:-}"
       SIBYL_LOCAL_API_BASE: "${SIBYL_LOCAL_API_BASE:-}"
       SIBYL_LOCAL_MODELS: "${SIBYL_LOCAL_MODELS:-}"
+      SIBYL_LOCAL2_API_BASE: "${SIBYL_LOCAL2_API_BASE:-}"
+      SIBYL_LOCAL2_MODELS: "${SIBYL_LOCAL2_MODELS:-}"
       SIBYL_THINKING: "${SIBYL_THINKING:-}"
       GEOLANG_URL: "http://geolang:8080"
       SIBYL_DB_PATH: "/data/sibyl.db"

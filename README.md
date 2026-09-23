@@ -32,7 +32,7 @@ Keep provider keys out of `docker-compose.yml`. Put them in `.env`, which compos
 export SIBYL_CLOUD_API_KEY="your-provider-key-here"
 ```
 
-The key is optional. sibyl sends it as a bearer to `SIBYL_CLOUD_API_BASE`, default `https://api.x.ai/v1`. `SIBYL_CLOUD_MODELS` lists the cloud models the viewer offers. `SIBYL_LOCAL_API_BASE` and `SIBYL_LOCAL_MODELS` add local models, see [sibyl's README](https://github.com/GeoLang/sibyl) for the llama-server launch. `docker-compose.yml` passes that first local pair to sibyl but not `SIBYL_LOCAL2_*`.
+The key is optional. sibyl sends it as a bearer to `SIBYL_CLOUD_API_BASE`, default `https://api.x.ai/v1`. `SIBYL_CLOUD_MODELS` lists the cloud models the viewer offers. `SIBYL_LOCAL_API_BASE` and `SIBYL_LOCAL_MODELS` add local models, see [sibyl's README](https://github.com/GeoLang/sibyl) for the llama-server launch. `SIBYL_LOCAL2_API_BASE` and `SIBYL_LOCAL2_MODELS` add a second local server. `docker-compose.yml` passes all of them to sibyl.
 
 The viewer's Settings panel switches between local and cloud models and can paste a cloud key, base and model list. sibyl stores them in sqlite, uses them from the next message, and prefers them over env on the next start. `GET /models` never returns the key. With no key and no local server sibyl still starts, and a run fails until Settings supplies one.
 
@@ -164,7 +164,7 @@ In the full platform (`viewtopia/docker-compose.platform.yml`) geolang serves th
 
 Set `PLATFORM_JWT_SECRET` to the shared platform secret and every route except the open ones below needs an `Authorization: Bearer <jwt>` header holding a live HS256 token, the same `{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts. The signature and `exp` are checked. Before a tool runs, geolang exchanges that token for a role-free token that expires within five minutes and carries only the downstream operation scopes mapped to that tool. Four tools have scopes mapped, listed in [`docs/api_reference.md`](docs/api_reference.md#post-mcptoken). Every other tool gets an empty scope list, so for those the exchange only shortens the expiry and drops the role.
 
-The service refuses to start without that variable. Running with no authentication takes `GEOLANG_ALLOW_UNAUTHENTICATED=1`, which the standalone `docker-compose.yml` and the test suite set. Never set it where the port is reachable.
+The service refuses to start without that variable. Running with no authentication takes `GEOLANG_ALLOW_UNAUTHENTICATED=1`, which the standalone `docker-compose.yml` and the test suite set. That compose file also sets `SIBYL_ALLOW_UNAUTHENTICATED=1` for sibyl. Never set it where the port is reachable.
 
 Gated deployments must also name the browser origins allowed to call the API in `CORS_ORIGINS`, comma separated. Startup fails without it, and `*` is refused while the gate is on, because a wildcard plus credentials lets any page a signed-in user visits spend their token here.
 
