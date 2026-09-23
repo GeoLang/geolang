@@ -41,7 +41,7 @@ from src.core.bound_document import current_bound_document
 from src.core.tool_executor import AGORA_WRITE_SCOPE
 from src.core.user_token import current_user_token
 from tests.test_agora import FakeAgora
-from tests.test_route_auth import SECRET, mint
+from tests.test_route_auth import AGUI_INPUT, SECRET, mint
 
 MCP_HEADERS = {
     "Content-Type": "application/json",
@@ -541,6 +541,29 @@ def test_a_minted_token_acts_as_whoever_asked_for_it(gated, client):
     assert claims[MCP_SOURCE_ROLE_CLAIM] == "editor"
     assert "role" not in claims
     assert claims["exp"] == minted["expires_at"]
+
+
+@pytest.mark.parametrize(
+    "path, body",
+    [
+        ("/chat/agui", AGUI_INPUT),
+        ("/tools/viewer_control", {"args": VIEWER_ARGUMENTS}),
+        ("/workflow/approve", {"manifest_toml": ""}),
+        ("/mcp/token", {}),
+    ],
+)
+def test_a_minted_token_opens_no_other_route(gated, client, path, body):
+    minted = client.post(
+        "/mcp/token", json={}, headers={"Authorization": f"Bearer {mint()}"}
+    ).json()["token"]
+
+    response = client.post(
+        path, json=body, headers={"Authorization": f"Bearer {minted}"}
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "invalid or expired token"}
+    assert result_of(call(client, "tools/list", {}, token=minted))["tools"]
 
 
 @pytest.mark.parametrize(

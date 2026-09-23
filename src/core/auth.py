@@ -64,6 +64,8 @@ TOOL_TOKEN_LIFETIME_SECONDS = 5 * 60
 # because a sensor feed is not a caller
 AGORA_USE_CLAIM = "agora_use"
 
+INVALID_TOKEN_DETAIL = "invalid or expired token"
+
 
 def platform_secret() -> str | None:
     """The shared HS256 secret, or None when the gate is off."""
@@ -89,34 +91,33 @@ def require_configuration() -> None:
         )
 
 
+def _caller_token_error(token: str | None, for_mcp: bool) -> str | None:
+    if platform_secret() is None:
+        return None
+
+    if not token:
+        return "missing bearer token"
+
+    claims = platform_claims(token)
+    # the reason is not echoed back: separating "expired" from "bad signature"
+    # helps an attacker more than a caller
+    if claims is None or TOOL_TOKEN_USE_CLAIM in claims or AGORA_USE_CLAIM in claims:
+        return INVALID_TOKEN_DETAIL
+
+    if for_mcp and claims.get(MCP_CLAIM) != MCP_CLAIM_VALUE:
+        return "this endpoint needs a token from POST /mcp/token"
+    if not for_mcp and MCP_CLAIM in claims:
+        return INVALID_TOKEN_DETAIL
+    return None
+
+
 def platform_token_error(token: str | None) -> str | None:
     """Why `token` is not a live platform token, or None when it is one.
 
     The transports differ in how they answer (an HTTP status here, a JSON-RPC
     error on the MCP endpoint), so the check is separate from the rejection.
     """
-    secret = platform_secret()
-    if secret is None:
-        return None
-
-    if not token:
-        return "missing bearer token"
-
-    try:
-        # naming the algorithm keeps a token that asks for "none", or an RS256
-        # token forged with the public key, from being accepted
-        claims = jwt.decode(
-            token, secret, algorithms=["HS256"], options={"require": ["exp"]}
-        )
-    except jwt.PyJWTError:
-        # the reason is not echoed back: separating "expired" from "bad
-        # signature" helps an attacker more than a caller
-        return "invalid or expired token"
-
-    if TOOL_TOKEN_USE_CLAIM in claims or AGORA_USE_CLAIM in claims:
-        return "invalid or expired token"
-
-    return None
+    return _caller_token_error(token, for_mcp=False)
 
 
 def require_platform_token(token: str | None) -> None:
@@ -141,6 +142,8 @@ def platform_claims(token: str | None) -> dict | None:
     if secret is None or not token:
         return None
     try:
+        # naming the algorithm keeps a token that asks for "none", or an RS256
+        # token forged with the public key, from being accepted
         return jwt.decode(
             token, secret, algorithms=["HS256"], options={"require": ["exp"]}
         )
@@ -249,14 +252,4 @@ def mcp_token_error(token: str | None) -> str | None:
     The marker says which geolang door the token is for. It is exchanged before
     any tool or downstream service receives a bearer.
     """
-    detail = platform_token_error(token)
-    if detail is not None:
-        return detail
-
-    claims = platform_claims(token)
-    if claims is None:
-        return None
-
-    if claims.get(MCP_CLAIM) != MCP_CLAIM_VALUE:
-        return "this endpoint needs a token from POST /mcp/token"
-    return None
+    return _caller_token_error(token, for_mcp=True)

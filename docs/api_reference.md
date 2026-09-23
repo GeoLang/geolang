@@ -137,7 +137,7 @@ The record is keyed on a digest of the confined manifest text, so the bytes the 
 
 ### Which routes need a token
 
-With `PLATFORM_JWT_SECRET` set, every route needs `Authorization: Bearer <jwt>` holding a live HS256 platform token, except the open ones: `/health`, `GET /`, `/static/*`, `GET /tools`, `GET /debug/tools`, `GET /live-data/{token}`, `GET /share/{share_id}` and `GET /share/{share_id}/data`. The signature and `exp` are checked, anything else is `401`. The role is not checked here, the services a tool calls enforce their own. `POST /mcp` and `POST /mcp/token` check their own token, below.
+With `PLATFORM_JWT_SECRET` set, every route needs `Authorization: Bearer <jwt>` holding a live HS256 platform token, except the open ones: `/health`, `GET /`, `/static/*`, `GET /tools`, `GET /debug/tools`, `GET /live-data/{token}`, `GET /share/{share_id}` and `GET /share/{share_id}/data`. The signature and `exp` are checked, anything else is `401`. A token minted by `POST /mcp/token` is `401` here too. The role is not checked here, the services a tool calls enforce their own. `POST /mcp` and `POST /mcp/token` check their own token, below.
 
 Without the secret, and with `GEOLANG_ALLOW_UNAUTHENTICATED=1`, every route is open. That is the standalone stack and the test suite.
 

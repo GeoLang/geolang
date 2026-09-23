@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-23: an MCP token from `POST /mcp/token` only opens `/mcp`. Every
+  other gated route, `POST /mcp/token` included, answers it with `401`.
 - 2026-09-20: the viewer eval catalogue and suite carry `live.start`, which starts
   a live map from the chat, as task 77. The catalogue shows the reworded
   `history.show_live`, so "set map to live" no longer reads as that action.

@@ -83,7 +83,7 @@ The press arrives at `POST /workflow/approve`, which the viewer's approve button
 
 `run_workflow` declares `TOOL_NEEDS_USER_APPROVAL = True`, which drops it from `/mcp` the way `TOOL_RUNS_CALLER_CODE` drops `sql_query`. An agent reaching that endpoint has no viewer to press approve in.
 
-The approval is not a credential: it is a record in the process, so both routes still take the caller's own platform token, and `platform_token_error` accepts an MCP-minted token as a platform token. A holder of one can therefore still reach `POST /tools/plan_workflow`, `POST /workflow/approve` and `POST /tools/run_workflow` over plain HTTP, which is the same reach it had before this gate existed. Narrowing the approval route to non-MCP tokens would close that and take `run_workflow` away from an MCP client entirely.
+The approval is not a credential: it is a record in the process, so both routes still take the caller's own platform token. `platform_token_error` refuses an MCP-minted token, so a holder of one reaches none of `POST /tools/plan_workflow`, `POST /workflow/approve` or `POST /tools/run_workflow`, and an MCP client has no way to run `run_workflow`.
 
 ## A platform token is equivalent to code execution here
 
