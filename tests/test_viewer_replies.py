@@ -61,6 +61,22 @@ def test_arguments_as_json_text_are_read():
     assert answer.startswith("Result of find_feature: ")
 
 
+def test_arguments_as_plain_fields_are_read():
+    call = {"action": "run", "name": "find_feature", "query": "Kingsway substation"}
+
+    assert reply(call).startswith("Result of find_feature: ")
+
+
+def test_a_plain_url_field_meets_a_required_url():
+    call = {
+        "action": "run",
+        "name": "data.add_tileset",
+        "url": "https://tiles.example.org/riverside/tileset.json",
+    }
+
+    assert reply(call) is None
+
+
 def test_an_action_with_no_required_parameters_takes_no_arguments_at_all():
     assert reply(run_call("project.list")).startswith("Result of project.list: ")
 

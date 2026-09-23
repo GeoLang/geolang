@@ -11,7 +11,12 @@ The result texts are a fixture, evals/viewer/reads_results.json, since nothing
 here runs the viewer's own actions.
 """
 
-from evals.viewer_scoring import RUN_ACTION, call_action, read_arguments
+from evals.viewer_scoring import (
+    RUN_ACTION,
+    call_action,
+    call_arguments,
+    read_arguments,
+)
 
 # viewtopia's MAXIMUM_FOLLOW_UPS: two keeps a read whose answer needs another
 # read from looping
@@ -37,14 +42,15 @@ def reply_for_call(call: dict, catalogue: list, reads_results: dict):
     if call_action(call) != RUN_ACTION:
         return None
     name = str(call.get("name") or "")
-    arguments = read_arguments(call.get("args"))
-    if arguments is None:
+    if read_arguments(call.get("args")) is None:
         return _failure(name, f"{name}: its arguments did not read as an object.")
     entry = next((e for e in catalogue if e.get("name") == name), None)
     if entry is None:
         return _failure(name, f"There is no viewer action named {name}.")
     if entry.get("destructive"):
         return None
+    # viewer_control folds plain fields into args before the viewer sees them
+    arguments = call_arguments(call)
     missing = [key for key in _required(entry) if arguments.get(key) is None]
     if missing:
         problems = ", ".join(f"{key} is required" for key in missing)
