@@ -1,6 +1,6 @@
 # GeoLang
 
-**AI-powered geospatial agent**: a natural language interface to GIS operations. The agent loop runs in [sibyl](https://github.com/GeoLang/sibyl), a separate Rust service. GeoLang owns the tools, the persona, and the viewer protocol.
+GeoLang is the geospatial tool service of the GeoLang platform: a FastAPI app that serves 41 geospatial tools, runs them, and streams chat runs to ViewTopia as AG-UI events. The agent loop runs in [sibyl](https://github.com/GeoLang/sibyl), a separate Rust service. geolang serves sibyl the tool manifest at `GET /tools`, runs each call at `POST /tools/{name}`, and supplies the system prompt and the viewer protocol.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
@@ -8,12 +8,11 @@
 
 ## Features
 
-- Natural language geospatial queries
-- Integration with GeoLang platform services (Ptolemy, Geokode, Itinera, TileTopia)
-- 41 geospatial tools served to sibyl over HTTP, and 39 of them to outside agents over MCP: the MCP manifest drops `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in an isolated executor that holds no platform secret
-- A chat run offers fewer than 40 when the viewer's action catalogue already covers a tool. A tool module names the viewer actions that do its job on the map in `TOOL_SUPERSEDED_BY`, and `/chat/agui` sends sibyl those tool names as `without_tools`. `calculate_isochrones` names `analysis.travel_time`, `terrain_profile` names `analysis.terrain_profile` and `analysis.cross_section`
-- Plan-then-execute for multi-step geoprocessing: the model composes a [geodukt](https://github.com/GeoLang/geodukt) TOML manifest, `plan_workflow` validates it and streams the plan, the user presses approve in the viewer, and `run_workflow` executes it. Both halves are checked rather than trusted to the persona: `run_workflow` refuses a manifest `plan_workflow` never validated, and one the approve button never posted to `POST /workflow/approve`
-- AG-UI event stream for ViewTopia
+- Chat requests in plain language, answered with tools that call the platform services Ptolemy, Geokode, Itinera, TileTopia, geodukt and agora
+- Every tool served to sibyl over HTTP, and 39 of them to outside agents over MCP. The MCP manifest leaves out `sql_query`, which declares `TOOL_RUNS_CALLER_CODE`, and `run_workflow`, which declares `TOOL_NEEDS_USER_APPROVAL`. Tool code runs in the API process, or in a separate executor process that holds no platform secret
+- A chat run leaves out a tool when the viewer's action catalogue offers an action that does its job. The tool module names those actions in `TOOL_SUPERSEDED_BY`, and `/chat/agui` sends sibyl the tool names as `without_tools`. `calculate_isochrones` names `analysis.travel_time`, `terrain_profile` names `analysis.terrain_profile` and `analysis.cross_section`, `compare_layers` names `scenario.compare`, and `ptolemy_query` names `dataset.list` and `dataset.draw_branch`
+- Plan, approve, then run for multi-step geoprocessing. The model writes a [geodukt](https://github.com/GeoLang/geodukt) TOML manifest, `plan_workflow` validates it and sends the plan to the viewer, the user presses approve, and `run_workflow` executes it. `run_workflow` refuses a manifest that `plan_workflow` never planned, and one the approve button never posted to `POST /workflow/approve`
+- MCP tool calls can write their map layers into a live agora document, so every open viewer redraws while an outside agent works
 
 ---
 
@@ -21,125 +20,103 @@
 
 ### Prerequisites
 
-- Docker + Docker Compose
-- Python 3.11+ (for the FastAPI server on the host)
-- An OpenAI-compatible provider key (xAI Grok by default), or a local llama-server, or both
+- Docker and Docker Compose
+- Python 3.11+ and uv, for running the API on the host
+- An OpenAI-compatible provider key (xAI Grok by default), a local llama-server, or both
 
 ### Configure
 
-GeoLang reads provider keys from environment variables. **Do not commit keys to
-`docker-compose.yml`.** Use a `.env` file or shell exports:
+Keep provider keys out of `docker-compose.yml`. Put them in `.env`, which compose reads, or export them:
 
 ```bash
 export SIBYL_CLOUD_API_KEY="your-provider-key-here"
 ```
 
-That export is optional. sibyl sends a cloud key as a bearer token to
-`SIBYL_CLOUD_API_BASE`, which defaults to x.ai. `SIBYL_CLOUD_MODELS` lists the
-cloud models offered in the viewer. `SIBYL_LOCAL_API_BASE` plus
-`SIBYL_LOCAL_MODELS` add local models on top, see
-[sibyl's README](https://github.com/GeoLang/sibyl) for the llama-server launch. Settings
-in the viewer is the live path: it switches local/cloud and can paste a cloud
-key, base and model list. Those are stored in sibyl's sqlite, take effect on
-the next message, and override env on the next start. The key never comes back
-in `GET /models`. The agent starts with no key at all; a run then asks you to
-pick a model in Settings.
+The key is optional. sibyl sends it as a bearer to `SIBYL_CLOUD_API_BASE`, default `https://api.x.ai/v1`. `SIBYL_CLOUD_MODELS` lists the cloud models the viewer offers. `SIBYL_LOCAL_API_BASE` and `SIBYL_LOCAL_MODELS` add local models, see [sibyl's README](https://github.com/GeoLang/sibyl) for the llama-server launch. `docker-compose.yml` passes that first local pair to sibyl but not `SIBYL_LOCAL2_*`.
+
+The viewer's Settings panel switches between local and cloud models and can paste a cloud key, base and model list. sibyl stores them in sqlite, uses them from the next message, and prefers them over env on the next start. `GET /models` never returns the key. With no key and no local server sibyl still starts, and a run fails until Settings supplies one.
 
 ### Run both services
 
 ```bash
 docker compose up -d --build
-
-# Watch startup
 docker compose logs -f geolang
 ```
 
-That starts geolang on `8080` (FastAPI, tools, QGIS) and sibyl on `8090` (agent
-loop, sessions, history). sibyl fetches the tool manifest from
-`http://geolang:8080/tools` and calls back into `/tools/{name}` to run one.
-Sessions live in sibyl's SQLite database on the `sibyl-data` volume.
+That starts geolang on `8080` (FastAPI, tools, QGIS) and sibyl on `8090` (agent loop, sessions, history). sibyl fetches the tool manifest from `http://geolang:8080/tools` and calls back into `/tools/{name}` to run one. Sessions are in sibyl's SQLite database on the `sibyl-data` volume.
 
 ### Run the API server on the host
 
 ```bash
-# sibyl must be reachable. SIBYL_URL defaults to http://localhost:8090
-uv run --with-requirements requirements.txt \
+# sibyl must be reachable, SIBYL_URL defaults to http://localhost:8090
+GEOLANG_ALLOW_UNAUTHENTICATED=1 uv run --with-requirements requirements.txt \
   --with-requirements requirements_client.txt \
   -- python -m uvicorn src.api.server:app --reload --port 8080
-# → http://localhost:8080/
 ```
 
-Both files are needed. `requirements_client.txt` names geopandas but not osmnx,
-rasterio, rasterstats, scikit-learn, scipy or matplotlib, so with it alone
-`GET /tools` lists 23 of the 40. Every tool left out is named in the startup log
-with the packages it needs, and `pyqgis_api` goes the same way wherever the QGIS
-bindings are absent.
+The server refuses to start without either `PLATFORM_JWT_SECRET` or `GEOLANG_ALLOW_UNAUTHENTICATED=1`, see [Authenticating the API](#authenticating-the-api).
 
-`TOOL_EXEC_DIR` auto-detects the geolang repo root from `src/core/utils.py`, so
-no env var is needed in dev. Override it via the `TOOL_EXEC_DIR` env var if you
-want outputs elsewhere.
+Both requirements files are needed. `requirements_client.txt` names geopandas but none of osmnx, rasterio, scipy or matplotlib, so with it alone `GET /tools` leaves out every tool that imports one of them. The startup log names each tool left out and the packages it needs. `pyqgis_api` is left out the same way wherever the QGIS bindings are absent.
+
+`TOOL_EXEC_DIR` defaults to the repo root, found from `src/core/utils.py`. Set it to put `outputs/` and `user_data/` elsewhere.
 
 ---
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — process topology, SSE event vocabulary, tool manifest flow
-- [`docs/api_reference.md`](docs/api_reference.md) — all HTTP endpoints and the tool catalogue
-- [`docs/viewer_integration.md`](docs/viewer_integration.md) — `viewer_cmd` protocol for ViewTopia (including `sql_query` for in-browser DuckDB)
-- [`docs/DESIGN.md`](docs/DESIGN.md) — why the current design is shaped the way it is, and the improvements still open
+- [`docs/architecture.md`](docs/architecture.md): process topology, SSE event vocabulary, tool manifest flow
+- [`docs/api_reference.md`](docs/api_reference.md): every HTTP route, the tool catalogue and the environment variables
+- [`docs/viewer_integration.md`](docs/viewer_integration.md): the `viewer_cmd` protocol ViewTopia runs, including `sql_query` for in-browser DuckDB
+- [`docs/DESIGN.md`](docs/DESIGN.md): why the design is shaped the way it is, and the improvements still open
 
 ## Tests
 
-```bash
-# unit tests, run inside the container with temporary test dependencies
-docker exec viewtopia-geolang-api-1 sh -c "uv run --with pytest --with respx -- python -m pytest tests/ -q"
+The same commands CI runs:
 
-# NL evals: real agent runs against the local model. Auto-skipped unless
-# geolang api, sibyl (local mode), and the llama server are all up.
+```bash
+uv venv --python 3.11
+uv pip install -r requirements_client.txt -r requirements.txt pytest respx
+uv run python -m pytest tests/ -q
+```
+
+The QGIS tool tests skip where the QGIS bindings are not importable.
+
+`tests/test_nl_evals.py` runs real agent prompts against the local model. It skips unless the geolang API, sibyl on a local profile and the llama server are all up. `NL_EVAL_ALLOW_CLOUD=1` lets it run on a cloud profile, which spends credits.
+
+```bash
 uv run --with pytest --with httpx python -m pytest tests/test_nl_evals.py -v
 ```
 
-The suite includes the site selection prompts, which upload a candidate sites
-CSV through `POST /upload` before the run, so the api's upload route has to be
-reachable with the token the evals present.
+The site selection prompts upload a candidate sites CSV through `POST /upload` first, so that route has to accept the token the evals present.
+
+The evals and the eval runners below find their token in `NL_EVAL_TOKEN`, or mint one from `PLATFORM_JWT_SECRET`. With neither they send no token, which only works against a stack started with the gates off. `NL_EVAL_GEOLANG` and `NL_EVAL_SIBYL` override `http://localhost:8080` and `http://localhost:8090`.
 
 ## Tool sweep
 
-Every tool in the manifest, one `POST /tools/{name}` each, against a live
-platform stack. viewtopia's `platform-sweep.yml` runs it nightly against the
-nginx origin the viewer uses. A manifest tool with no sample arguments in
-[`tool_sweep/arguments.py`](tool_sweep/arguments.py) fails the run, so a new tool
-cannot ship unswept.
+Calls every tool in the manifest once through `POST /tools/{name}` against a live platform stack. viewtopia's `platform-sweep.yml` runs it nightly against the nginx origin the viewer uses. A manifest tool with no sample arguments in [`tool_sweep/arguments.py`](tool_sweep/arguments.py) fails the run.
 
 ```bash
-# PLATFORM_TOKEN is the bearer; the stack refuses the call without one
+# PLATFORM_TOKEN is the bearer, a gated stack refuses the call without one
 python -m tool_sweep.runner --base-url http://localhost:5174/agent
 
-# leave out the tools that call a third party
-python -m tool_sweep.runner --skip-external
+# leave out the tools that call a third party, and the ones marked as crashing the executor
+python -m tool_sweep.runner --skip-external --skip-crashing
+
+python -m tool_sweep.runner --only clip_layer,voronoi
 ```
 
-Each result is appended to the JSONL file as its tool finishes, so a killed run
-still says which tool it died on. `tests/test_tool_sweep.py` runs the `offline`
-entries of the same table through the in-process app on every push.
+Each result is appended to `outputs/tool_sweep.jsonl` (`--results`) as its tool finishes, so a killed run still shows which tool it stopped on. When every tool has run, the sweep deletes the output files they reported through `DELETE /outputs/{name}`. `tests/test_tool_sweep.py` runs the `offline` entries of the same table through the in-process app on every push.
 
 ## Workflow evals
 
-Measures whether a model builds the right geodukt pipeline, so "model X scores Y
-on N tasks" is a number rather than an impression. Scoring compares the manifest
-the model composed against the expected pipeline graph, never its prose, so the
-same manifest always scores the same.
-
-Scoring is deterministic but the model is not: a task the model gets right most
-of the time still fails sometimes, so a single run can report anything within
-that spread. Quote a repeated run, not one lucky pass.
+Scores whether a model builds the right geodukt pipeline for a request. Scoring compares the manifest the model wrote against the expected pipeline graph, never its prose, so the same manifest always gets the same score. The model is not deterministic, so a single run can land anywhere in its spread. Quote a repeated run.
 
 ```bash
-# against whatever model sibyl is running. Needs geolang api, sibyl, and a
-# geodukt the tool executor can reach. Skips cleanly with the reason otherwise.
+# against the profile sibyl has active. Needs geolang api, sibyl, and a geodukt
+# the tool executor can reach. Prints SKIP with the reason otherwise
 python -m evals.runner
 
-# what to quote: each task five times, reporting means and the flaky ones
+# each task five times, reporting means and the flaky tasks
 python -m evals.runner --repeat 5
 
 # cloud profiles cost credits, so they are opt-in
@@ -149,203 +126,90 @@ python -m evals.runner --allow-cloud --only buffer-depots-gpkg
 python -m evals.runner --manifests evals/reference
 ```
 
-`--repeat N` runs every task N times in its own session. A task's score is the
-mean over its runs and its checks come from its worst run, so a task that only
-passes sometimes cannot report a clean sheet. The report names the flaky tasks
-and gives their range; `--repeat` needs the stack, since a captured manifest
-scores the same every time.
+`--repeat N` runs every task N times, each in a new session. A task's score is the mean over its runs and its checks come from its worst run, so a task that passes only sometimes cannot report a clean sheet. The report names the flaky tasks and gives their range. `--repeat` needs the stack, since a captured manifest scores the same every time.
 
-Reports land in `evals/reports/` as JSON and markdown, tagged with the profile,
-model and timestamp. `--capture DIR` saves each model manifest so a run can be
-re-scored later without spending another run.
+Reports are written to `evals/reports/` (`--out`) as JSON and markdown, tagged with the profile, model and timestamp. `--capture DIR` saves each manifest the model wrote, so a run can be scored again later without asking the model.
 
-Each task in `evals/tasks/` is one TOML file: the request, the input layers it
-assumes exist (created before a stack run), and the pipeline a correct answer
-builds. Every expected element is one check worth one point and the task score is
-`passed/total`, so pinning three parameters weights parameters more. A task with
-`unavailable = "<operation>"` is a negative task, passed by *not* building a
-manifest that reaches for an operation geodukt cannot run.
+Each task in `evals/tasks/` is one TOML file: the request, the input layers it assumes exist (created before a stack run unless `--no-fixtures`), and the pipeline a correct answer builds. Every expected element is one check worth one point and the task score is `passed/total`, so pinning three parameters weights parameters more. A task with `unavailable = "<operation>"` is a negative task, passed by *not* building a manifest that uses an operation geodukt cannot run.
 
-To add one, drop a task file in `evals/tasks/` and a reference answer named
-`<task id>.toml` in `evals/reference/`. A test asserts every reference answer
-scores 1.0, which is what keeps a task from expecting something impossible.
+To add one, put a task file in `evals/tasks/` and a reference answer named `<task id>.toml` in `evals/reference/`. A test asserts every reference answer scores 1.0, which keeps a task from expecting something impossible.
 
 ## Viewer evals
 
-Measures whether a model maps a chat prompt onto one of the viewer's own
-actions instead of reaching for a tool. 76 tasks under `evals/viewer/tasks/`,
-one TOML file each, scored on the `viewer_control` calls the run made.
+Scores whether a model maps a chat prompt onto one of the viewer's own actions instead of a tool. One TOML file per task under `evals/viewer/tasks/`, scored on the `viewer_control` calls the run made.
 
-The viewer state and the action catalogue are fixtures, `evals/viewer/snapshot.json`
-and `evals/viewer/catalogue.json`, copied from viewtopia's own test fixtures and
-sent to sibyl exactly the way `/chat/agui` sends the live ones. A task can carry
-a `[snapshot]` table whose fields replace the shared snapshot's for that task.
-A call the viewer would refuse comes back as the next user message, and so does
-a `reads` action's result, taken from `evals/viewer/reads_results.json`. geodukt
-is not involved, so an unreachable geodukt does not skip the run.
+The viewer state and the action catalogue are fixtures, `evals/viewer/snapshot.json` and `evals/viewer/catalogue.json`, copied from viewtopia's test fixtures and sent to sibyl the way `/chat/agui` sends the live ones. A task can carry a `[snapshot]` table whose fields replace the shared snapshot's for that task. A call the viewer would refuse comes back as the next user message, and so does a `reads` action's result, taken from `evals/viewer/reads_results.json`. geodukt is not involved, so an unreachable geodukt does not skip the run.
 
 ```bash
 # needs geolang api and sibyl. One run is a poor estimate of a score
 python -m evals.viewer_runner --repeat 3
 
-# read back what a failed task actually did
+# run on one sibyl profile without switching the active one
+python -m evals.viewer_runner --profile <profile id from GET /models> --repeat 3
+
+# keep every event of every run, to read back what a failed task did
 python -m evals.viewer_runner --transcripts evals/reports/transcripts.jsonl
 
 # no model and no network: score a recording against the current tasks
 python -m evals.viewer_runner --replay evals/viewer/recordings/grok-2026-08-29.json
 ```
 
-`--record PATH` writes the calls each task drew so they can be replayed later.
-`tests/test_viewer_replay.py` replays the checked-in recording and fails when
-any recorded score moves, which is what makes this eval a CI gate. Refresh the
-two fixtures from viewtopia rather than editing them, as
-[`evals/viewer/README.md`](evals/viewer/README.md) sets out.
+`--record PATH` writes the calls each task drew so they can be replayed later. `tests/test_viewer_replay.py` replays the checked-in recording and fails when any recorded score changes, which makes this eval a CI gate. Refresh the two fixtures from viewtopia rather than editing them, as [`evals/viewer/README.md`](evals/viewer/README.md) describes.
 
 ## Platform Integration
 
-When running as part of the full GeoLang platform (via `viewtopia/docker-compose.platform.yml`),
-GeoLang serves the API on port **8080** and sibyl runs alongside it on **8090**.
+In the full platform (`viewtopia/docker-compose.platform.yml`) geolang serves the API on port **8080** and sibyl runs beside it on **8090**. nginx serves geolang under the viewer's origin at `/agent/`. The browser never calls sibyl directly.
 
 ### Authenticating the API
 
-Set `PLATFORM_JWT_SECRET` to the shared platform secret and every route that
-runs code, writes a file, or reads back a session or a user's data requires an
-`Authorization: Bearer <jwt>` header holding a live HS256 token, the same
-`{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts. Signature
-and `exp` are checked. At the tool boundary, geolang exchanges that token for a
-role-free token that expires within five minutes and carries only the downstream
-operation scopes mapped to that tool. Only 4 of the 40 tools have any scopes
-mapped today; the other 36 exchange to an empty scope list, so for them the
-exchange shortens the expiry and drops the role but narrows no operation.
+Set `PLATFORM_JWT_SECRET` to the shared platform secret and every route except the open ones below needs an `Authorization: Bearer <jwt>` header holding a live HS256 token, the same `{sub, exp, role}` tokens ptolemy mints and geodukt's `/run` accepts. The signature and `exp` are checked. Before a tool runs, geolang exchanges that token for a role-free token that expires within five minutes and carries only the downstream operation scopes mapped to that tool. Four tools have scopes mapped, listed in [`docs/api_reference.md`](docs/api_reference.md#post-mcptoken). Every other tool gets an empty scope list, so for those the exchange only shortens the expiry and drops the role.
 
-The service refuses to start without that variable, as ptolemy and interiora
-already do. Running with no authentication at all takes a second, explicit
-`GEOLANG_ALLOW_UNAUTHENTICATED=1`, which is what `docker-compose.yml` sets for
-the standalone stack. Never set it where the port is reachable.
+The service refuses to start without that variable. Running with no authentication takes `GEOLANG_ALLOW_UNAUTHENTICATED=1`, which the standalone `docker-compose.yml` and the test suite set. Never set it where the port is reachable.
 
-**Treat a platform token like an SSH key to this host.** `geopandas_api`,
-`run_qgis_algorithm` and `sql_query` take expressions and algorithm parameters
-the caller chooses, so anyone holding a live token can compute arbitrary things
-and read and write everything under their own directories in `outputs/` and
-`user_data/`. That is by design for a geoprocessing agent. Scope the token
-short, never commit it, and rotate it like a key.
+Gated deployments must also name the browser origins allowed to call the API in `CORS_ORIGINS`, comma separated. Startup fails without it, and `*` is refused while the gate is on, because a wildcard plus credentials lets any page a signed-in user visits spend their token here.
 
-`pyqgis_api` still only takes `function_name`, `uri` and `layer_name`, so most
-algorithms reject the call for want of their parameters. The `uri` it does take
-goes through `tool_input_path`, the same confinement as the tools above.
+Open routes: `/health`, `GET /`, `/static/*`, `GET /tools` (sibyl fetches it before anyone has signed in), `GET /debug/tools` (every tool name), `GET /live-data/{token}` (reaches what its token names), and `GET /share/{id}` and `GET /share/{id}/data`. A share reader gets the view and the summary, not the layers behind them. `POST /mcp` and `POST /mcp/token` check a token themselves, see [MCP for outside agents](#mcp-for-outside-agents).
 
-What that reaches is bounded by where the tool runs, which is the next section.
+A live token reaches a lot. `geopandas_api` evaluates a pandas query the caller writes, `run_qgis_algorithm` runs any QGIS algorithm with caller-chosen parameters, and `sql_query` sends caller-written SQL to the browser. Together they can read and write everything under the caller's own directories in `outputs/` and `user_data/`. Keep tokens short-lived and out of commits.
 
-Gated deployments must also name the browser origins allowed to call the API in
-`CORS_ORIGINS`, comma separated. Startup fails without it, and `*` is refused
-while the gate is on, because a wildcard plus credentials means any page a
-signed-in user visits can spend their token here.
-
-Gated: `POST /tools/{name}`, `POST /chat/agui` and `POST /workflow/approve`, the file writers `/upload`,
-`/draw`, `/export-pdf` and `/export-png`, the sibyl proxies `/sessions*`,
-`/models` and `/model`, and the reads `/datasets`, `/outputs/{file}`,
-`/download/{file}`, `/geojson/{file}` and `/stats/{file}`. Creating a share is
-gated too.
-
-Open: `/health`, the viewer's static assets, the `GET /tools` manifest sibyl
-fetches at startup before anyone has signed in, `GET /debug/tools`, which carries
-no auth dependency and returns every tool name, `GET /live-data/{token}`, which
-is open by design and reaches what its token names, and reading a share by id,
-whose whole point is a link that works for someone who never signs in. That
-reader gets the view and the summary, not the layers behind them.
-
-`POST /mcp/token` is in neither list. It hangs off no gate dependency and checks
-the platform bearer itself, so it needs a live platform token either way.
-
-With `GEOLANG_ALLOW_UNAUTHENTICATED=1` and no secret the whole API stays open.
-That is the standalone `docker compose up` flow, the test suite and the eval
-harness, none of which carry a token. With the gate on the client has to send
-the header on every call, layer fetches and download links included.
+`pyqgis_api` takes only `function_name`, `uri` and `layer_name`, so most processing algorithms fail for want of their parameters. Its `uri` goes through `tool_input_path` like every other input path.
 
 ### Where tool code runs
 
-By default a tool runs in the API process. That process holds
-`PLATFORM_JWT_SECRET`, so a tool that can be made to run something other than
-geoprocessing can read the secret and sign a token for any user on any service
-in the platform. One tenant cannot be promised isolation from another while that
-is true.
+By default a tool runs in the API process. That process holds `PLATFORM_JWT_SECRET`, so a tool that can be made to run something other than geoprocessing can read the secret and sign a token for any user on any platform service. Tenants are not isolated from each other in that mode.
 
-Set `GEOLANG_EXECUTOR_URL` to move tool code into a separate process that holds
-no signing secret, no service account token and no model API key. The only
-credential it sees is the short scoped token minted for that call. Both processes share the same
-`TOOL_EXEC_DIR`, because a tool writes the output files the API then serves.
+Set `GEOLANG_EXECUTOR_URL` to move tool code into a separate process that holds no signing secret, no service account token and no model API key. The only credential it sees is the scoped token minted for that call. Both processes need the same `TOOL_EXEC_DIR`, because the API serves the files the tools write.
 
 ```bash
-# the executor, with nothing worth stealing in its environment
+# the executor, with no secrets in its environment
 GEOLANG_EXECUTOR_SECRET=<random> TOOL_EXEC_DIR=... \
   python -m uvicorn src.api.executor:app --port 8081
 
 # the API, pointed at it
-GEOLANG_EXECUTOR_URL=http://localhost:8081 GEOLANG_EXECUTOR_SECRET=<same> \
+PLATFORM_JWT_SECRET=<platform secret> CORS_ORIGINS=http://localhost:5174 \
+  GEOLANG_EXECUTOR_URL=http://localhost:8081 GEOLANG_EXECUTOR_SECRET=<same random> \
   python -m uvicorn src.api.server:app --port 8080
 ```
 
-`GEOLANG_EXECUTOR_SECRET` is how the executor knows its caller is the API. It
-claims nothing about the executor itself, whose contents are assumed reachable:
-it keeps anything else on the network from running tools there. The executor
-refuses to start without it, publishes no port in the platform stack, drops all
-capabilities and runs under memory, CPU and process limits.
+`GEOLANG_EXECUTOR_SECRET` tells the executor its caller is the API, so nothing else on the network can run tools there. It says nothing about the executor itself, whose contents are assumed readable by an attacker. The executor refuses to start without it. In the platform stack it publishes no port, drops all capabilities and runs under memory, CPU and process limits.
 
-Inside the executor, one call runs in a worker process of its own, started ahead
-of time and used once. A run that grows past `GEOLANG_TOOL_MEMORY_LIMIT_MB`
-(default 3072) or lasts longer than `GEOLANG_TOOL_TIMEOUT_SECONDS` (default 840)
-has its worker killed, and the caller is told which limit it hit and which tool
-hit it. `GEOLANG_TOOL_MAX_CONCURRENT` (default 2) is how many runs may be in
-flight, and a call past that is told the executor is busy rather than queued.
-The executor process runs no tool code itself, so one request for a whole city's
-buildings costs its own caller an answer and leaves everyone else served.
+Inside the executor each call runs in its own worker process, started ahead of time and used once. A run that exceeds `GEOLANG_TOOL_MEMORY_LIMIT_MB` (default 3072) or `GEOLANG_TOOL_TIMEOUT_SECONDS` (default 840) has its worker killed, and the caller is told which limit which tool hit. `GEOLANG_TOOL_MAX_CONCURRENT` (default 2) caps the runs in flight, and a call past that is told the executor is busy instead of being queued. An oversized request fails only its own call.
 
-Leaving the executor unset is a deployment's choice to run tools in the API
-process, which is fine for a single tenant and is what the standalone stack, the
-test suite and the eval harness do. With the gate on and no executor configured
-the API logs a warning naming what that costs, and keeps running.
+With no executor configured, tools run in the API process. That is fine for one tenant and is what the standalone stack and the test suite do. With the gate on and no executor, the API logs a warning at startup and keeps running.
 
-The tool holds a five-minute role-free bearer while it runs, limited to the
-operations mapped to that tool. Outputs are split by caller, each caller reads
-and writes their own directory under `outputs/`, keyed on the subject of the
-token they presented. The executor is told which directory that is, since
-naming it needs the signing secret the executor does not have, and it refuses a
-name that is not a single directory of the expected shape.
+Outputs are split by caller. Each caller reads and writes their own directory under `outputs/`, named from the subject of their token. The executor is told which directory that is, since deriving it needs the signing secret, and it refuses a name that is not a single directory of the expected shape.
 
-Uploads are split the same way. A caller uploads into `user_data/<caller>/`,
-under the same directory name as their outputs, with their own
-`catalogue.json` inside it. `/datasets`, `/upload`, `/draw` and
-`list_user_datasets` all see that caller's files and no one else's. Files left
-in the flat `user_data/` directory from before the split stay on disk and are
-no longer listed or served.
+Uploads are split the same way. A caller uploads into `user_data/<caller>/`, the same directory name as their outputs, with their own `catalogue.json` inside it. `/datasets`, `/upload`, `/draw` and `list_user_datasets` see only that caller's files. Files directly in `user_data/`, outside any caller directory, are neither listed nor served.
 
-Output files are deleted by age. The API server sweeps every caller's outputs
-directory once at startup and once a day after that, deletes the files last
-written more than `GEOLANG_OUTPUTS_RETENTION_DAYS` ago, default 30, and removes
-a directory the sweep emptied. Each pass logs how many files it removed and how
-many bytes that freed. Set the variable to `0` to keep everything forever. The
-sweep runs in the API server and not in the executor, so the two processes
-sharing the volume do not both delete from it. A caller can also delete one of
-their own files early with `DELETE /outputs/{filename}`.
+Output files are deleted by age. The API server sweeps every caller's outputs directory at startup and once a day, deletes files last written more than `GEOLANG_OUTPUTS_RETENTION_DAYS` ago (default 30), and removes directories the sweep emptied. Each pass logs the file count and bytes freed. `0` keeps everything. The executor, which mounts the same volume, does not sweep. A caller can delete one of their own files with `DELETE /outputs/{filename}`.
 
-A tool argument that names a file is a filename, not a path. It is looked up in
-the caller's own outputs directory, their own `user_data/` directory, and in the
-natural earth reference sets, the same three places `/geojson` serves from. An absolute path
-is refused with an error rather than opened, and an output filename carrying a
-directory part is refused rather than trimmed, so no two callers can be steered
-onto one file.
+A tool argument that names a file is a filename, not a path. It is looked up in the caller's own outputs directory, their own `user_data/` directory, and the natural earth reference sets, the same places `/geojson` serves from. An absolute path is refused, and an output filename with a directory part is refused rather than trimmed, so two callers cannot be pointed at one file.
 
-`plan_workflow` and `run_workflow` rewrite each `[[source]]` and `[[sink]]`
-`path` onto the caller's own directories before the manifest reaches geodukt.
-`outputs/foo.gpkg` becomes `outputs/<caller>/foo.gpkg`, which is what
-`list_outputs` and the download routes serve. An absolute path outside those
-directories is refused. geodukt itself still has no confinement root: the
-rewrite is the check.
+`plan_workflow` and `run_workflow` rewrite each `[[source]]` and `[[sink]]` `path` into the caller's own directories before the manifest reaches geodukt: `outputs/foo.gpkg` becomes `outputs/<caller>/foo.gpkg`, which is what `list_outputs` and the download routes serve. An absolute path outside those directories is refused. geodukt has no confinement root of its own, so this rewrite is the only check.
 
 ### MCP for outside agents
 
-The tools are served over the Model Context Protocol at `POST /mcp`,
-`/agent/mcp` from outside. It takes a token of its own, so mint one first:
+The tools are served over the Model Context Protocol at `POST /mcp`, which is `/agent/mcp` behind the platform proxy. It takes a token of its own, so mint one first:
 
 ```bash
 curl -X POST https://<host>/agent/mcp/token \
@@ -355,8 +219,7 @@ curl -X POST https://<host>/agent/mcp/token \
 # {"token": "<mcp jwt>", "expires_at": 1760000000}
 ```
 
-`lifetime_seconds` is yours to choose up to 30 days, and defaults to 30 days.
-Then point Claude, Cursor or any MCP client at it:
+`lifetime_seconds` is optional, up to and defaulting to 30 days. Then point Claude, Cursor or any MCP client at it:
 
 ```json
 { "mcpServers": { "geolang": {
@@ -366,36 +229,15 @@ Then point Claude, Cursor or any MCP client at it:
 } } }
 ```
 
-**Migration:** a plain platform token used to work here and now answers `401`
-with `this endpoint needs a token from POST /mcp/token`. Mint one and swap it
-into the client config.
+A plain platform token answers `401` with `this endpoint needs a token from POST /mcp/token`. With the gate on the bearer is required on every MCP request, and its subject is copied into each tool's execution token.
 
-The bearer is required on every MCP request when the gate is on and supplies
-the subject copied into each execution token. Set `MCP_ALLOWED_HOSTS` to the public hostname,
-otherwise the transport's DNS-rebinding check answers `421` to everything. See
-[`docs/api_reference.md`](docs/api_reference.md#mcp).
+`MCP_ALLOWED_HOSTS` must name the public hostname, or the transport's DNS-rebinding check answers `421` to everything. The default is localhost only, and the platform compose does not set it, so the `https://<host>/agent/mcp` examples need it set on the geolang service first. See [`docs/api_reference.md`](docs/api_reference.md#mcp).
 
-The platform compose sets `MCP_ALLOWED_HOSTS` nowhere, and the default is
-localhost only, so as shipped every MCP request through a real hostname gets a
-`421` and only local access works. The `https://<host>/agent/mcp` examples above
-need the variable set on the geolang service first.
+The MCP token only opens this service. Before each tool runs, geolang exchanges it for a role-free JWT with `token_use: "tool"` and an exact `scope` array, expiring at the earlier of the MCP token's expiry or five minutes. The MCP token keeps the minting token's role in a private claim, so the exchange cannot delegate an operation that role could not perform. The executor never receives an agora scope. When a result has to be written to a live document, geolang-api mints a separate `agora:write` token after the tool returns and keeps it out of the tool process.
 
-The MCP token only opens this service. Before each tool runs, geolang exchanges
-it for a role-free JWT with `token_use: "tool"` and an exact `scope` array. The
-exchange token expires at the earlier of the MCP token's expiry or five minutes.
-The MCP token keeps the minting token's role in a private claim so the exchange
-cannot delegate an operation that role could not perform directly.
-The executor never receives an Agora scope. If a bound result needs a live
-document write, geolang-api mints a separate `agora:write` token after the tool
-returns and keeps it out of the tool process.
+`sql_query` and `run_workflow` are not offered here. `sql_query` runs caller-written SQL in whichever browser receives it, which is safe only when the caller owns that browser. `run_workflow` needs the user to press approve in their viewer, and an outside agent has no viewer.
 
-Two tools `/chat` has are missing here. `sql_query` runs SQL the caller wrote in
-a browser, which only makes sense when they are the same person. `run_workflow`
-runs a manifest the user pressed approve on in their viewer, and an agent
-arriving here has no viewer, so it could only ever be refused.
-
-Add one more header and the call's map effects also land in a live agora
-document, so every open viewer redraws while the outside agent works:
+Add an `X-Agora-Document` header and each call's map output also lands in that live agora document, so every open viewer redraws while the outside agent works:
 
 ```json
 { "mcpServers": { "geolang": {
@@ -408,11 +250,7 @@ document, so every open viewer redraws while the outside agent works:
 } } }
 ```
 
-The layers a tool emits become document layers and a `fly_to` moves the agent's
-presence. The agent joins as its own member, put there by a grant made with the
-caller's token, so it can only reach documents its caller could already edit.
-`AGORA_URL` says where agora is. See
-[writing to a live map](docs/api_reference.md#writing-to-a-live-map).
+The layers a tool emits become document layers, and a `camera.fly_to` moves the agent's presence. The agent joins as its own member, added by a grant made with the caller's token, so it can only reach documents its caller could already edit. `AGORA_URL` says where agora is. See [writing to a live map](docs/api_reference.md#writing-to-a-live-map).
 
 ---
 
