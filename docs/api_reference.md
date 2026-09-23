@@ -52,9 +52,9 @@ The model profile routes, forwarded to sibyl with its status and body unchanged.
 |---|---|---|
 | `GET` | `/models` | Profiles, providers and the active profile. |
 | `PUT` | `/model` | Switch the active profile. |
-| `PUT` | `/model/cloud` | Set the default cloud provider's base, key and model list. |
-| `PUT` | `/model/providers` | Add or update a named cloud or local provider. |
-| `DELETE` | `/model/providers/{provider_id}` | Remove a provider and its profiles. |
+| `PUT` | `/model/cloud` | Set the default cloud provider's base, key and model list. Admin role only. |
+| `PUT` | `/model/providers` | Add or update a named cloud or local provider. Admin role only. |
+| `DELETE` | `/model/providers/{provider_id}` | Remove a provider and its profiles. Admin role only. |
 
 ## Datasets
 
