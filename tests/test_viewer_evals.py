@@ -239,6 +239,15 @@ def test_the_tab_tasks_are_asked_from_the_map_tab():
         assert by_id[task_id].snapshot == {"tab": "map"}, task_id
 
 
+def test_returning_to_live_is_asked_from_a_past_moment():
+    by_id = {task.id: task for task in load_tasks(TASKS_DIR)}
+
+    asked_from = by_id["history-show-live"].snapshot_for(SNAPSHOT)
+
+    assert asked_from["historyAt"] is not None
+    assert asked_from["live"] == SNAPSHOT["live"]
+
+
 # ── the snapshot's own names ─────────────────────────────────────────────
 
 

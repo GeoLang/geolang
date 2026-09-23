@@ -1,7 +1,10 @@
 id = "history-show-live"
 prompt = "bring me back to the live map"
-notes = "No arguments, and it must not be confused with live.join."
+notes = "Asked while the map shows a past moment, since the viewer refuses history.show_live otherwise. No arguments, and it must not be confused with live.join."
 
 [expect]
 action = "run"
 name = "history.show_live"
+
+[snapshot]
+historyAt = "2026-05-01T12:00:00Z"
