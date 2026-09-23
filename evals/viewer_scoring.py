@@ -110,7 +110,7 @@ def call_action(call: dict) -> str:
 
 
 # the fields of a run call that are not the run's own parameters
-RUN_CALL_FIELDS = {"action", "name", "args", "url"}
+RUN_CALL_FIELDS = {"action", "name", "args"}
 
 
 def read_arguments(value):
@@ -145,8 +145,11 @@ def call_arguments(call: dict) -> dict:
     """
     if call_action(call) != RUN_ACTION:
         return {k: v for k, v in call.items() if k != "action"}
-    written = _object_text(call.get("args")) or _object_text(call.get("url"))
-    flat = {k: v for k, v in call.items() if k not in RUN_CALL_FIELDS}
+    url_object = _object_text(call.get("url"))
+    written = _object_text(call.get("args")) or url_object
+    # viewer_control forwards a plain url as the run's url parameter
+    ignored = RUN_CALL_FIELDS | ({"url"} if url_object else set())
+    flat = {k: v for k, v in call.items() if k not in ignored}
     return {**written, **flat}
 
 

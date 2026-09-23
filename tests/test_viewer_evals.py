@@ -133,6 +133,17 @@ def test_arguments_written_into_url_score():
     assert score_calls(HIDE_PARCELS, [call], SNAPSHOT).score == 1.0
 
 
+def test_a_plain_url_field_is_the_url_parameter():
+    by_id = {task.id: task for task in load_tasks(TASKS_DIR)}
+    call = {
+        "action": "run",
+        "name": "data.add_tileset",
+        "url": "https://tiles.example.org/riverside/tileset.json",
+    }
+
+    assert score_calls(by_id["load-a-3d-tileset"], [call], SNAPSHOT).score == 1.0
+
+
 def test_a_string_that_is_not_an_object_leaves_the_arguments_empty():
     call = {"action": "run", "name": "layers.set_visible", "args": "Parcels"}
 
