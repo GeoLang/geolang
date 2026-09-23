@@ -65,7 +65,7 @@ from src.api.upload_limits import (
     save_upload,
     upload_form,
 )
-from src.api.viewer_state import hidden_tools, system_prompt_for
+from src.api.viewer_state import run_fields
 from src.core.auth import (
     MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
     SECRET_ENV,
@@ -502,10 +502,7 @@ async def agent_event_stream(
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
-    body = {"system_prompt": system_prompt_for(state), "message": message}
-    hidden = hidden_tools(state)
-    if hidden:
-        body["without_tools"] = hidden
+    body = {**run_fields(state), "message": message}
     if user_token:
         body["user_token"] = user_token
     if thread_id:

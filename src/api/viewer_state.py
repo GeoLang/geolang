@@ -38,19 +38,28 @@ INSTRUCTIONS = (
 )
 
 
-def hidden_tools(state) -> list:
-    """The agent tools a run with this catalogue does without.
+def superseding_actions(state) -> dict:
+    """The agent tools a run with this catalogue does without, each with the actions replacing it.
 
     A tool names the viewer actions that do its job on the map, and a model
     given both takes the tool, whatever the prompt says. With the action
     offered, the tool is not.
     """
     offered = {entry["name"] for entry in catalogue_of(state)}
-    return [
-        func.__name__
-        for func, _ in load_external_tools()
-        if offered.intersection(superseded_by(func))
-    ]
+    superseding = {}
+    for func, _ in load_external_tools():
+        actions = [action for action in superseded_by(func) if action in offered]
+        if actions:
+            superseding[func.__name__] = actions
+    return superseding
+
+
+def run_fields(state) -> dict:
+    superseding = superseding_actions(state)
+    fields = {"system_prompt": system_prompt_for(state, superseding)}
+    if superseding:
+        fields["without_tools"] = list(superseding)
+    return fields
 
 
 def catalogue_of(state) -> list:
@@ -99,7 +108,14 @@ def action_line(entry: dict) -> str:
     return "\n".join([line, *described])
 
 
-def system_prompt_for(state) -> str:
+def hidden_tool_line(tool: str, actions: list) -> str:
+    return (
+        f"{tool} is not offered here: where a rule above names it, run "
+        f"{' or '.join(actions)} with viewer_control instead."
+    )
+
+
+def system_prompt_for(state, superseding: dict | None = None) -> str:
     """PERSONA, plus what the viewer looks like and what it can be told to do."""
     catalogue = catalogue_of(state)
     if not catalogue:
@@ -109,9 +125,13 @@ def system_prompt_for(state) -> str:
     viewer = viewer if isinstance(viewer, dict) else {}
     snapshot = json.dumps(viewer, separators=(",", ":"))
     lines = "\n".join(action_line(entry) for entry in catalogue)
-    return (
+    prompt = (
         f"{PERSONA}\n\n"
         f"{STATE_HEADING}\n{snapshot}\n\n"
         f"{ACTIONS_HEADING}\n{lines}\n\n"
         f"{INSTRUCTIONS}"
     )
+    hidden = [hidden_tool_line(tool, actions) for tool, actions in (superseding or {}).items()]
+    if not hidden:
+        return prompt
+    return prompt + "\n\n" + "\n".join(hidden)

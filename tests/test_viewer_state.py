@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from src.agents.agent_manager import PERSONA
 from src.api import server
-from src.api.viewer_state import hidden_tools, system_prompt_for
+from src.api.viewer_state import run_fields, system_prompt_for
 
 SET_VISIBLE = {
     "name": "layers.set_visible",
@@ -132,19 +132,36 @@ def test_the_instructions_name_the_tool_call_and_the_read_answer():
 
 TERRAIN_PROFILE = {"name": "analysis.terrain_profile", "description": "Read the ground"}
 TRAVEL_TIME = {"name": "analysis.travel_time", "description": "Draw travel bands"}
+SCENARIO_COMPARE = {"name": "scenario.compare", "description": "Compare two branches"}
+DATASET_LIST = {"name": "dataset.list", "description": "List the datasets", "reads": True}
+DRAW_BRANCH = {"name": "dataset.draw_branch", "description": "Draw a branch"}
 
 
 def test_a_catalogue_offering_the_action_hides_the_tool_it_supersedes():
-    assert hidden_tools(_state(TERRAIN_PROFILE)) == ["terrain_profile"]
-    assert set(hidden_tools(_state(TERRAIN_PROFILE, TRAVEL_TIME))) == {
+    assert run_fields(_state(TERRAIN_PROFILE))["without_tools"] == ["terrain_profile"]
+    assert set(run_fields(_state(TERRAIN_PROFILE, TRAVEL_TIME))["without_tools"]) == {
         "calculate_isochrones",
         "terrain_profile",
     }
 
 
 def test_a_catalogue_without_the_action_hides_nothing():
-    assert hidden_tools(_state(SET_VISIBLE)) == []
-    assert hidden_tools(None) == []
+    assert "without_tools" not in run_fields(_state(SET_VISIBLE))
+    assert run_fields(None) == {"system_prompt": PERSONA}
+
+
+def test_a_hidden_tool_is_named_with_the_actions_that_replace_it():
+    prompt = run_fields(_state(SCENARIO_COMPARE, DATASET_LIST, DRAW_BRANCH))["system_prompt"]
+
+    assert (
+        "compare_layers is not offered here: where a rule above names it, run "
+        "scenario.compare with viewer_control instead."
+    ) in prompt
+    assert (
+        "ptolemy_query is not offered here: where a rule above names it, run "
+        "dataset.list or dataset.draw_branch with viewer_control instead."
+    ) in prompt
+    assert "terrain_profile is not offered here" not in prompt
 
 
 # ── the state reaches the run ────────────────────────────────────────────
@@ -185,7 +202,7 @@ def test_chat_agui_puts_the_viewers_catalogue_in_the_system_prompt():
         )
         assert response.status_code == 200
 
-    assert _sibyl_body(route)["system_prompt"] == system_prompt_for(_state(SET_VISIBLE))
+    assert _sibyl_body(route)["system_prompt"] == run_fields(_state(SET_VISIBLE))["system_prompt"]
 
 
 def test_chat_agui_leaves_out_the_tools_the_catalogue_supersedes():
@@ -196,6 +213,7 @@ def test_chat_agui_leaves_out_the_tools_the_catalogue_supersedes():
         )
 
     assert _sibyl_body(route)["without_tools"] == ["terrain_profile"]
+    assert "terrain_profile is not offered here" in _sibyl_body(route)["system_prompt"]
 
 
 def test_chat_agui_sends_no_exclusion_when_nothing_is_superseded():

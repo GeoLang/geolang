@@ -162,14 +162,9 @@ def replay_recording(entries: list, tasks: list, snapshot: dict) -> list:
 def run_request(snapshot: dict, catalogue: list) -> dict:
     """The run body one task's turns share: what `/chat/agui` sends, less the message."""
     # imported late so loading a task never needs the persona or the tools
-    from src.api.viewer_state import hidden_tools, system_prompt_for
+    from src.api.viewer_state import run_fields
 
-    state = {"viewer": snapshot, "actions": catalogue}
-    request = {"system_prompt": system_prompt_for(state)}
-    hidden = hidden_tools(state)
-    if hidden:
-        request["without_tools"] = hidden
-    return request
+    return run_fields({"viewer": snapshot, "actions": catalogue})
 
 
 def run_against_the_stack(args, tasks: list, snapshot: dict) -> tuple:
