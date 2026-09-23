@@ -18,18 +18,17 @@ from typing import Annotated
 from fastapi import (
     Depends,
     FastAPI,
-    File,
-    Form,
     Header,
     HTTPException,
     Request,
     Response,
-    UploadFile,
+    status,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
+from starlette.datastructures import UploadFile
 from starlette.routing import Route
 
 from ag_ui.core import (
@@ -58,6 +57,14 @@ from src.api.live_document import (
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.api.outputs_retention import sweep_outputs_periodically
+from src.api.upload_limits import (
+    UploadBudget,
+    UploadLimits,
+    checked_unzipped_bytes,
+    checked_upload_bytes,
+    save_upload,
+    upload_form,
+)
 from src.api.viewer_state import hidden_tools, system_prompt_for
 from src.core.auth import (
     MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
@@ -227,6 +234,8 @@ def cors_origins() -> list[str]:
 require_configuration()
 report_configuration()
 chat_run_budget = ChatRunBudget.from_environment()
+upload_limits = UploadLimits.from_environment()
+upload_budget = UploadBudget.from_environment()
 
 app = FastAPI(title="GeoLang API", lifespan=lifespan)
 
@@ -721,6 +730,10 @@ async def budget_refusal_events(reply: str):
     yield ("text", reply)
 
 
+def token_subject(token: str | None) -> str | None:
+    return str((platform_claims(token) or {}).get("sub") or "") or None
+
+
 @app.post("/chat/agui", dependencies=[Depends(platform_auth)])
 async def chat_agui(input: RunAgentInput, request: Request):
     """AG-UI event endpoint: the agent pipeline rendered as AG-UI SSE.
@@ -738,8 +751,7 @@ async def chat_agui(input: RunAgentInput, request: Request):
     prompt = user_messages[-1].content or ""
     document = document_id_of(request.headers.get(DOCUMENT_HEADER))
     user_token = bearer_token(request.headers.get("authorization"))
-    subject = str((platform_claims(user_token) or {}).get("sub") or "") or None
-    refusal = chat_run_budget.count_run(subject)
+    refusal = chat_run_budget.spend(token_subject(user_token))
     if refusal is None:
         events = agent_event_stream(
             prompt,
@@ -880,33 +892,49 @@ async def get_datasets(authorization: Annotated[str | None, Header()] = None):
 
 @app.post("/upload", dependencies=[Depends(platform_auth)])
 async def upload_dataset(
-    file: UploadFile = File(...),
-    thread_id: str | None = Form(None),
+    # not File(): that reads the whole body before the gate and the size limits run
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ):
+    user_token = bearer_token(authorization)
     # every path here is the caller's own: the directory, the catalogue
-    with user_token_scope(bearer_token(authorization)):
+    with user_token_scope(user_token):
         import geopandas as gpd
         import pandas as pd
 
         user_data = caller_user_data_dir()
-        # the multipart filename is the caller's to choose, directory part included
-        try:
-            raw_path = Path(path_inside_directory("filename", user_data, file.filename))
-        except PathRefused as e:
-            raise HTTPException(400, str(e))
+        async with upload_form(request, upload_limits) as form:
+            file = form.get("file")
+            thread_id = form.get("thread_id")
+            if not isinstance(file, UploadFile) or isinstance(thread_id, UploadFile):
+                raise HTTPException(400, "send one file in the 'file' field")
+            # the multipart filename is the caller's to choose, directory part included
+            try:
+                raw_path = Path(
+                    path_inside_directory("filename", user_data, file.filename or "")
+                )
+            except PathRefused as e:
+                raise HTTPException(400, str(e))
+            suffix = raw_path.suffix.lower()
+            stem = raw_path.stem
+            extract_dir = Path(user_data) / stem
 
-        suffix = raw_path.suffix.lower()
-        stem = raw_path.stem
-        content = await file.read()
-        with open(raw_path, "wb") as f:
-            f.write(content)
+            stored_bytes = checked_upload_bytes(file, upload_limits)
+            if suffix == ".zip":
+                stored_bytes = max(
+                    stored_bytes,
+                    checked_unzipped_bytes(file, extract_dir, upload_limits),
+                )
+            refusal = upload_budget.spend(token_subject(user_token), stored_bytes)
+            if refusal is not None:
+                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, refusal)
+
+            await save_upload(file, raw_path)
 
         data_path = raw_path
 
         # Unzip shapefile bundles or GPKG zips
         if suffix == ".zip":
-            extract_dir = Path(user_data) / stem
             extract_dir.mkdir(exist_ok=True)
             with zipfile.ZipFile(raw_path) as z:
                 z.extractall(extract_dir)

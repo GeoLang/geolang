@@ -258,6 +258,14 @@ Adding a tool takes one module in `src/agents/tools/` exporting `TOOL_FUNCTION` 
 | `GEOLANG_OUTPUTS_RETENTION_DAYS` | `30` | How long an output file is kept. The API server deletes older files from every caller directory at startup and once a day. `0` keeps everything. |
 | `GEOLANG_CHAT_RUNS_PER_DAY` | unset | Chat runs `/chat/agui` starts per UTC day, all callers together. Unset or `0` means no limit. Kept in memory, so a restart resets the count. |
 | `GEOLANG_CHAT_RUNS_PER_CALLER_PER_DAY` | unset | Chat runs per UTC day for one token subject. Unset or `0` means no limit. Without the gate there is no subject, so only the global limit applies. |
+| `GEOLANG_UPLOAD_MAX_REQUEST_MEGABYTES` | unset | Largest `/upload` request body. Checked while the body is read, a larger one gets 413. Unset or `0` means no limit. |
+| `GEOLANG_UPLOAD_MAX_FILE_MEGABYTES` | unset | Largest uploaded file. A larger one gets 413 and is not written. Unset or `0` means no limit. |
+| `GEOLANG_UPLOAD_MAX_ZIP_ENTRIES` | unset | Most entries an uploaded `.zip` may hold. Checked before unzipping, a larger archive gets 413. Unset or `0` means no limit. |
+| `GEOLANG_UPLOAD_MAX_UNZIPPED_MEGABYTES` | unset | Largest total unzipped size an uploaded `.zip` may declare. Checked before unzipping, a larger archive gets 413. Unset or `0` means no limit. |
+| `GEOLANG_UPLOAD_FILES_PER_DAY` | unset | Uploads per UTC day, all callers together. Past it `/upload` answers 429. Unset or `0` means no limit. Kept in memory. |
+| `GEOLANG_UPLOAD_FILES_PER_CALLER_PER_DAY` | unset | Uploads per UTC day for one token subject. Unset or `0` means no limit. |
+| `GEOLANG_UPLOAD_MEGABYTES_PER_DAY` | unset | Megabytes uploaded per UTC day, all callers together. A zip counts as the larger of its size and its unzipped size. Unset or `0` means no limit. |
+| `GEOLANG_UPLOAD_MEGABYTES_PER_CALLER_PER_DAY` | unset | Megabytes uploaded per UTC day for one token subject, counted the same way. Unset or `0` means no limit. |
 | `GEOLANG_EXECUTOR_URL` | unset | Where the tool executor answers. Unset runs tools in the API process. |
 | `GEOLANG_EXECUTOR_SECRET` | unset | Shared value the executor checks its caller against. The executor refuses to start without it. |
 | `GEOLANG_TOOL_MEMORY_LIMIT_MB` | `3072` | Executor only. Memory a tool run may use before its worker is killed. |
