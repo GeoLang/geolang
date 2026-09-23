@@ -366,6 +366,30 @@ def test_score_sites_counts_a_competitor_layer_within_a_kilometre(
     assert rows.loc["north depot", "rank"] == 1
 
 
+def test_score_sites_writes_each_criterion_weight_onto_every_row(
+    monkeypatch, stub_services
+):
+    monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx())
+    monkeypatch.setitem(sys.modules, "requests", _fake_opentopodata([]))
+    rivals_layer = _write_layer(
+        _points([{"name": "rival", "at": (LON + 0.002, LAT)}]), "rivals"
+    )
+    sites_layer = _write_layer(_two_site_layer(), "candidates")
+
+    out = score_sites(
+        sites_path=sites_layer,
+        criteria="flood_risk,competition",
+        weights="3,1",
+        competitors_path=rivals_layer,
+        output_filename="weighted_scores",
+    )
+    assert "Site scoring results" in out, out
+
+    rows = _read_output("weighted_scores")
+    assert rows["flood_risk_weight"].tolist() == [3.0, 3.0]
+    assert rows["competition_weight"].tolist() == [1.0, 1.0]
+
+
 def test_score_sites_refuses_both_competitor_arguments(monkeypatch, stub_services):
     monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx())
 

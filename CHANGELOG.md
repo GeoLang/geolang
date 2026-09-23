@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nights running.
 
 ### Added
+- 2026-09-23: `score_sites` writes a `<criterion>_weight` column beside
+  each `<criterion>_score`, so the viewer's site weights panel starts from the
+  weights the ranking used.
 - 2026-09-20: `trade_area`, one call that answers how many people and
   competitors sit within N minutes of each candidate site. It builds one
   travel-time band per site and writes a polygon per site carrying
