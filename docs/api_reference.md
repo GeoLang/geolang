@@ -256,6 +256,8 @@ Adding a tool takes one module in `src/agents/tools/` exporting `TOOL_FUNCTION` 
 | `GEOLANG_PUBLIC_URL` | `/agent` | Where a browser reaches this service, used to build the `/live-data/{token}` URLs written into a document. |
 | `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O. Holds the `outputs/` and `user_data/` roots, each one directory per caller. |
 | `GEOLANG_OUTPUTS_RETENTION_DAYS` | `30` | How long an output file is kept. The API server deletes older files from every caller directory at startup and once a day. `0` keeps everything. |
+| `GEOLANG_CHAT_RUNS_PER_DAY` | unset | Chat runs `/chat/agui` starts per UTC day, all callers together. Unset or `0` means no limit. Kept in memory, so a restart resets the count. |
+| `GEOLANG_CHAT_RUNS_PER_CALLER_PER_DAY` | unset | Chat runs per UTC day for one token subject. Unset or `0` means no limit. Without the gate there is no subject, so only the global limit applies. |
 | `GEOLANG_EXECUTOR_URL` | unset | Where the tool executor answers. Unset runs tools in the API process. |
 | `GEOLANG_EXECUTOR_SECRET` | unset | Shared value the executor checks its caller against. The executor refuses to start without it. |
 | `GEOLANG_TOOL_MEMORY_LIMIT_MB` | `3072` | Executor only. Memory a tool run may use before its worker is killed. |

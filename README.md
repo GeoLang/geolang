@@ -203,6 +203,8 @@ Uploads are split the same way. A caller uploads into `user_data/<caller>/`, the
 
 Output files are deleted by age. The API server sweeps every caller's outputs directory at startup and once a day, deletes files last written more than `GEOLANG_OUTPUTS_RETENTION_DAYS` ago (default 30), and removes directories the sweep emptied. Each pass logs the file count and bytes freed. `0` keeps everything. The executor, which mounts the same volume, does not sweep. A caller can delete one of their own files with `DELETE /outputs/{filename}`.
 
+`GEOLANG_CHAT_RUNS_PER_DAY` caps the chat runs `/chat/agui` starts per UTC day across all callers, and `GEOLANG_CHAT_RUNS_PER_CALLER_PER_DAY` caps them per token subject. Unset or `0` means no limit. A run past a cap gets an assistant reply saying the budget is used up, and the model is not called. The counts are kept in memory, so a restart resets them.
+
 A tool argument that names a file is a filename, not a path. It is looked up in the caller's own outputs directory, their own `user_data/` directory, and the natural earth reference sets, the same places `/geojson` serves from. An absolute path is refused, and an output filename with a directory part is refused rather than trimmed, so two callers cannot be pointed at one file.
 
 `plan_workflow` and `run_workflow` rewrite each `[[source]]` and `[[sink]]` `path` into the caller's own directories before the manifest reaches geodukt: `outputs/foo.gpkg` becomes `outputs/<caller>/foo.gpkg`, which is what `list_outputs` and the download routes serve. An absolute path outside those directories is refused. geodukt has no confinement root of its own, so this rewrite is the only check.

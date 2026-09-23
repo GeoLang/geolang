@@ -49,6 +49,7 @@ import httpx
 
 from src.agents.agent_manager import approval_route_only, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
+from src.api.chat_budget import ChatRunBudget
 from src.api.live_document import (
     DOCUMENT_HEADER,
     LAYER_DATA_SUFFIX,
@@ -225,6 +226,7 @@ def cors_origins() -> list[str]:
 
 require_configuration()
 report_configuration()
+chat_run_budget = ChatRunBudget.from_environment()
 
 app = FastAPI(title="GeoLang API", lifespan=lifespan)
 
@@ -715,6 +717,10 @@ async def agui_stream(events, thread_id: str, run_id: str, accept: str | None = 
         )
 
 
+async def budget_refusal_events(reply: str):
+    yield ("text", reply)
+
+
 @app.post("/chat/agui", dependencies=[Depends(platform_auth)])
 async def chat_agui(input: RunAgentInput, request: Request):
     """AG-UI event endpoint: the agent pipeline rendered as AG-UI SSE.
@@ -731,18 +737,25 @@ async def chat_agui(input: RunAgentInput, request: Request):
         raise HTTPException(status_code=400, detail="No user message in input")
     prompt = user_messages[-1].content or ""
     document = document_id_of(request.headers.get(DOCUMENT_HEADER))
+    user_token = bearer_token(request.headers.get("authorization"))
+    subject = str((platform_claims(user_token) or {}).get("sub") or "") or None
+    refusal = chat_run_budget.count_run(subject)
+    if refusal is None:
+        events = agent_event_stream(
+            prompt,
+            user_token=user_token,
+            thread_id=input.thread_id,
+            state=input.state,
+        )
+    else:
+        events = budget_refusal_events(refusal)
 
     async def bound_stream():
         # the binding has to hold while the stream runs: the run request is
         # built on the first pull, long after this route has returned
         with bound_document_scope(document):
             async for chunk in agui_stream(
-                agent_event_stream(
-                    prompt,
-                    user_token=bearer_token(request.headers.get("authorization")),
-                    thread_id=input.thread_id,
-                    state=input.state,
-                ),
+                events,
                 thread_id=input.thread_id,
                 run_id=input.run_id,
                 accept=request.headers.get("accept"),
