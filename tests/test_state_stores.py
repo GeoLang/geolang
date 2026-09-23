@@ -7,6 +7,7 @@ written back over the real ones.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,24 @@ def shares_file(tmp_path, monkeypatch):
     path = tmp_path / ".shares.json"
     monkeypatch.setattr(utils, "SHARES_FILE", str(path))
     return path
+
+
+def test_shares_are_kept_on_the_outputs_volume():
+    """The outputs volume is the part of the tree that survives a rebuild."""
+    assert Path(utils.SHARES_FILE).parent == Path(utils.OUTPUTS_ROOT)
+
+
+def test_no_caller_directory_can_be_named_like_the_shares_file():
+    assert not utils.valid_caller_directory_name(Path(utils.SHARES_FILE).name)
+
+
+def test_the_first_share_creates_a_missing_outputs_directory(tmp_path, monkeypatch):
+    path = tmp_path / "outputs" / ".shares.json"
+    monkeypatch.setattr(utils, "SHARES_FILE", str(path))
+
+    utils.save_shares({"first": {"title": "a map"}})
+
+    assert utils.load_shares() == {"first": {"title": "a map"}}
 
 
 def test_a_write_that_fails_leaves_the_shares_that_were_there(shares_file):

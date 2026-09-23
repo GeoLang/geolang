@@ -20,13 +20,14 @@ SIBYL_URL = os.environ.get("SIBYL_URL", "http://localhost:8090")
 # so the API works without TOOL_EXEC_DIR set regardless of checkout location.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 EXEC_DIR = os.environ.get("TOOL_EXEC_DIR", str(_REPO_ROOT))
-# one directory per caller, never written to directly
+# one directory per caller, and the shares file beside them
 OUTPUTS_ROOT = os.path.join(EXEC_DIR, "outputs")
-SHARES_FILE = os.path.join(EXEC_DIR, ".shares.json")
+# the outputs volume is what survives a container rebuild
+SHARES_FILE = os.path.join(OUTPUTS_ROOT, ".shares.json")
 # layer data published to a live document, readable without a platform token by
 # whoever holds the file's token
 LIVE_DATA_DIR = Path(EXEC_DIR) / "live_data"
-# one directory per caller, never written to directly, same as OUTPUTS_ROOT
+# one directory per caller, never written to directly
 USER_DATA_ROOT = Path(EXEC_DIR) / "user_data"
 CATALOGUE_NAME = "catalogue.json"
 NATURAL_EARTH_DIRECTORY_NAME = "natural_earth"
@@ -388,4 +389,5 @@ def load_shares() -> dict:
 
 
 def save_shares(shares: dict) -> None:
+    os.makedirs(os.path.dirname(SHARES_FILE), exist_ok=True)
     save_json(SHARES_FILE, shares)
