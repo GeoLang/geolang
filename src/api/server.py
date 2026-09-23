@@ -351,13 +351,14 @@ class ToolCallRequest(BaseModel):
 
 # sync so FastAPI runs it in the threadpool: tools block for minutes
 def unknown_tool_detail(name: str) -> str:
-    if "." not in name:
-        return f"Unknown tool: {name}"
-    return (
-        f"Unknown tool: {name} is a viewer action, not a tool. Run it with the "
-        f"viewer_control tool, action 'run' and name '{name}', with its "
-        "parameters as further fields of that call."
+    how_to_run = (
+        f"Run it with the viewer_control tool, action 'run' and name '{name}', "
+        "with its parameters as further fields of that call."
     )
+    if "." in name:
+        return f"Unknown tool: {name} is a viewer action, not a tool. {how_to_run}"
+    # this route never sees the viewer catalogue
+    return f"Unknown tool: {name}. If 'Viewer actions' lists {name}, it is not a tool. {how_to_run}"
 
 
 @app.post("/tools/{name}")

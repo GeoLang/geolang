@@ -91,6 +91,15 @@ def test_a_viewer_action_called_as_a_tool_is_pointed_at_viewer_control():
     assert "name 'live.start'" in detail
 
 
+def test_an_undotted_viewer_action_called_as_a_tool_is_pointed_at_viewer_control():
+    response = client.post("/tools/find_feature", json={"args": {"query": "old brewery"}})
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert "viewer_control" in detail
+    assert "name 'find_feature'" in detail
+
+
 def test_bad_args_come_back_as_a_tool_error():
     response = client.post("/tools/geocode_place", json={"args": {}})
 
