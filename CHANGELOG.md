@@ -78,6 +78,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against 0.17 for the same tasks before the trim.
 
 ### Fixed
+- 2026-09-23: chat answers about a layer's attributes come from the data.
+  `geopandas_api` `read_file` returned `str(gdf)`, which for the 169-column
+  Natural Earth countries table shows neither `NAME` nor `POP_EST`, so
+  gpt-oss-120b made up European populations and said they came from
+  `POP_EST`. It now lists the columns and returns the rows of the ones named in
+  a new `columns` argument, up to 300. Its call arguments are collected before
+  its imports, so `os`, `traceback`, `gpd` and `Point` no longer reach
+  `gpd.read_file`. `download_natural_earth_dataset` adds `.gpkg` to an
+  `output_filename` given without it, which a QGIS call had failed to open.
+- 2026-09-23: the map inferred from a run's text no longer loads layers nobody
+  named. With a reply naming none of the written files every layer was kept,
+  and after a `list_outputs` call 14 old outputs went onto the map. An empty
+  match now sends no `ui_spec`, and `list_outputs` results are never read for
+  one. The `Saved to outputs/` fallback is gone.
+- 2026-09-23: `emit_ui_spec` refuses a `shade_by` column the layer file does
+  not have, and names the columns it has. The viewer could not apply it while
+  the model was told the map was drawn.
+- 2026-09-23: prompt fixes from a hosted preview chat. The persona's worked
+  `emit_ui_spec` example is prose, since the model copied its arguments into
+  the reply as a JSON block instead of calling the tool, and the viewer
+  instructions say every tool is called as a tool call. In chat mode the model
+  is told no toolbar or menus are visible, so it runs the action rather than
+  sending the person to a button: it had pointed at a "Legend button". The
+  persona says to admit when no tool or action does what was asked, names
+  unique values (QGIS categorized) and choropleth (QGIS graduated) colouring,
+  and sends "neighbours in different colours" to `qgis:topologicalcoloring`
+  followed by shading by `color_id`.
 - 2026-09-01: the import filter probes the QGIS system paths too. `qgis` is
   importable only after `qgis_session` appends `/usr/lib/python3/dist-packages`
   to `sys.path`, so `find_spec` missed it in the platform image and the
@@ -97,6 +124,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   add to their outputs directory per day. They are counted where every tool
   call goes through, so `POST /tools/{name}`, `POST /workflow/approve`, MCP
   and sibyl's chat tool calls all count, and a refused call gets 429.
+- 2026-09-23: viewer eval tasks 79 to 83, 82 in all. Three colour a European
+  countries layer with `layers.shade_by`, by `NAME` for "each country a
+  different colour" and "unique values", by `POP_EST` for "a choropleth of
+  population". Two open the legend panel. The catalogue is recopied from
+  viewtopia 62b40a66. `tests/test_nl_evals.py` gains a European populations
+  run that checks Switzerland's 8574832 reaches the answer, and a topological
+  colouring run, both asked with the chat-mode viewer prompt.
 - 2026-09-23: `score_sites` writes a `<criterion>_weight` column beside
   each `<criterion>_score`, so the viewer's site weights panel starts from the
   weights the ranking used.

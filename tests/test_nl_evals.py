@@ -9,6 +9,7 @@ choices and artifact validity, never on exact phrasing.
 import json
 import os
 import re
+from pathlib import Path
 
 import httpx
 import pytest
@@ -16,8 +17,10 @@ import pytest
 from evals.platform_token import auth_headers
 from evals.runner import run_events, sibyl_refuses_the_token
 from src.agents.agent_manager import PERSONA
+from src.api.viewer_state import run_fields
 
 GEOLANG = os.environ.get("NL_EVAL_GEOLANG", "http://localhost:8080")
+VIEWER_FIXTURES = Path(__file__).resolve().parent.parent / "evals" / "viewer"
 SIBYL = os.environ.get("NL_EVAL_SIBYL", "http://localhost:8090")
 MODEL_PROBE = os.environ.get("NL_EVAL_MODEL", "http://172.17.0.1:18200/v1/models")
 
@@ -88,9 +91,9 @@ class RunResult:
         return None
 
 
-def run_prompt(message: str) -> RunResult:
+def run_prompt(message: str, request: dict | None = None) -> RunResult:
     res = RunResult()
-    for ev in run_events({"system_prompt": PERSONA, "message": message}):
+    for ev in run_events({**(request or {"system_prompt": PERSONA}), "message": message}):
         kind = ev.get("kind")
         if kind == "tool_call":
             res.tool_calls.append((str(ev.get("name") or ""), str(ev.get("args") or "")))
@@ -277,3 +280,55 @@ def test_score_sites_takes_the_uploaded_layer():
     assert names_the_candidate_sites(args.get("sites_path")), args
     assert "caf" in str(args.get("competition_type", "")).lower(), args
     assert not res.calls("geocode_place"), "the uploaded layer was geocoded again"
+
+
+def viewer_request() -> dict:
+    snapshot = json.loads((VIEWER_FIXTURES / "snapshot.json").read_text())
+    catalogue = json.loads((VIEWER_FIXTURES / "catalogue.json").read_text())
+    return run_fields({"viewer": snapshot, "actions": catalogue})
+
+
+# Natural Earth 50m admin_0_countries POP_EST
+SWITZERLAND_POPULATION = "8574832"
+
+
+def states_switzerlands_population(text: str) -> bool:
+    compact = re.sub(r"[\s,\u202f]", "", text)
+    return SWITZERLAND_POPULATION in compact or bool(
+        re.search(r"8\.57\d*(million|m\b)", compact, re.IGNORECASE)
+    )
+
+
+def test_european_populations_are_read_from_the_data():
+    res = run_prompt("show me the countries of europe with their populations", viewer_request())
+
+    reads = [parse_args(args) for args in res.calls("geopandas_api")]
+    assert any("POP_EST" in str(args.get("columns", "")) for args in reads), (
+        f"POP_EST never read, called {[n for n, _ in res.tool_calls]}"
+    )
+    shown = res.text + " ".join(content for _, content in res.tool_returns if "__UI_SPEC__:" in content)
+    assert "Switzerland" in shown
+    assert states_switzerlands_population(shown), f"no 8.57 million for Switzerland: {shown[:600]}"
+
+
+def shades_by(res: RunResult, column: str) -> bool:
+    spec_layers = (res.ui_spec or {}).get("layers") or []
+    if any(layer.get("shade_by") == column for layer in spec_layers):
+        return True
+    return any(
+        args.get("name") == "layers.shade_by" and args.get("column") == column
+        for args in map(viewer_run_args, res.calls("viewer_control"))
+    )
+
+
+def test_neighbouring_countries_get_different_colours():
+    res = run_prompt(
+        "colour the European countries so that no two neighbours share a colour",
+        viewer_request(),
+    )
+
+    algorithms = [parse_args(args).get("algorithm_id") for args in res.calls("run_qgis_algorithm")]
+    assert "qgis:topologicalcoloring" in algorithms, (
+        f"no topological colouring, called {[n for n, _ in res.tool_calls]}"
+    )
+    assert shades_by(res, "color_id"), f"the result was not shaded by color_id: {res.ui_spec}"
