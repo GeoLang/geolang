@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
+from src.core.place_lookup import GeocoderUnavailable, geocode
 from src.core.utils import natural_earth_dataset_paths
-
-NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 
 
 class GeocodePlaceArgs(BaseModel):
@@ -14,44 +13,28 @@ class GeocodePlaceArgs(BaseModel):
 def geocode_place(place_name: str) -> str:
     """
     Look up a place name or an address anywhere in the world, returning
-    longitude, latitude and country. Tries the platform's geokode service, then
-    Natural Earth populated places, then Nominatim for landmarks and anything
-    else. Call this for a town, an address or a landmark the user names. A
-    feature on the user's map is found with viewer_control run find_feature
-    instead, not here.
+    longitude, latitude and country. Tries the platform geocoder, then Natural
+    Earth populated places. Call this for a town, an address or a landmark the
+    user names. A feature on the user's map is found with viewer_control run
+    find_feature instead, not here.
     """
     import os
     import traceback
 
-    # held back so the place sources answer a query with no house number first
-    geokode_street = None
-
-    # platform geokode first: authoritative for addresses in the loaded extract
-    geokode_url = os.environ.get("GEOKODE_URL")
-    if geokode_url:
-        try:
-            import requests
-
-            resp = requests.get(
-                f"{geokode_url.rstrip('/')}/forward",
-                params={"q": place_name},
-                timeout=10,
-            )
-            if resp.ok:
-                results = resp.json().get("results", [])
-                hit = _geokode_answer(results, place_name)
-                if hit is not None:
-                    return _format_geokode(hit, place_name)
-                if results:
-                    geokode_street = _format_geokode(results[0], place_name)
-        except Exception:
-            pass  # geokode unavailable or no match: fall back to Natural Earth
-
-    # Search across available Natural Earth populated places datasets
-    search_paths = natural_earth_dataset_paths("populated_places")
-
     try:
+        try:
+            results = geocode(place_name)
+        except GeocoderUnavailable:
+            results = []
+        hit = _geokode_answer(results, place_name)
+        if hit is not None:
+            return _format_geokode(hit, place_name)
+        # held back so the place sources answer a query with no house number first
+        geokode_street = _format_geokode(results[0], place_name) if results else None
+
         import geopandas as gpd
+
+        search_paths = natural_earth_dataset_paths("populated_places")
 
         gdf = None
         for path in search_paths:
@@ -60,7 +43,7 @@ def geocode_place(place_name: str) -> str:
                 break
 
         if gdf is None:
-            return _nominatim_fallback(place_name, geokode_street)
+            return _not_found(place_name, geokode_street)
 
         # Try exact match on NAME, then case-insensitive, then partial
         name_col = next(
@@ -75,7 +58,7 @@ def geocode_place(place_name: str) -> str:
             match = gdf[gdf[name_col].str.contains(query, case=False, na=False)]
 
         if match.empty:
-            return _nominatim_fallback(place_name, geokode_street)
+            return _not_found(place_name, geokode_street)
 
         # Use the most populous match if there are multiple
         pop_col = next((c for c in match.columns if "POP" in c.upper()), None)
@@ -127,30 +110,7 @@ def _format_geokode(hit: dict, place_name: str) -> str:
     return f"✅ {label} (geokode): lon={lon}, lat={lat}"
 
 
-def _nominatim_fallback(place_name: str, geokode_street: str | None = None) -> str:
-    # landmarks ("Eiffel Tower") are in neither geokode's address extract nor
-    # Natural Earth's populated places, so ask Nominatim before giving up
-    try:
-        import requests
-
-        from src.core.external_pacing import wait_for_turn
-
-        wait_for_turn(NOMINATIM_SEARCH_URL)
-        resp = requests.get(
-            NOMINATIM_SEARCH_URL,
-            params={"q": place_name, "format": "json", "limit": 1},
-            headers={"User-Agent": "geolang-gis-agent/1.0"},
-            timeout=10,
-        )
-        data = resp.json()
-        if data:
-            hit = data[0]
-            lon = round(float(hit["lon"]), 5)
-            lat = round(float(hit["lat"]), 5)
-            label = hit.get("display_name", place_name)
-            return f"✅ {label} (nominatim): lon={lon}, lat={lat}"
-    except Exception:
-        pass
+def _not_found(place_name: str, geokode_street: str | None) -> str:
     return geokode_street or (
         f"❌ Place '{place_name}' not found in any geocoding source. "
         "Tell the user geocoding failed. Do not answer with coordinates "

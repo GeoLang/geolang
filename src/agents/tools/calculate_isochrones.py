@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import tool_output_path
 
 from ._isochrones import isochrone_polygons
@@ -51,7 +52,6 @@ def calculate_isochrones(
 
 
     try:
-        import osmnx as ox
         import geopandas as gpd
 
         # Parse times
@@ -63,7 +63,9 @@ def calculate_isochrones(
 
         driving = travel_mode.lower() == "driving"
 
-        location = ox.geocode(place_name)
+        location = geocode_point(place_name)
+        if location is None:
+            return place_not_found(place_name)
         lat, lon = location
 
         if not output_filename:

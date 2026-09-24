@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode_batch
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -44,17 +45,15 @@ def batch_geocode(
     """
     Geocode a list of addresses or place names and save them as a point GPKG,
     ready to map or to feed a spatial tool. Takes either a semicolon-separated
-    list or a CSV. Geocodes through Nominatim at one address per second, so a
-    long list is slow.
+    list or a CSV. Geocodes through the platform geocoder, 100 addresses per
+    request.
     """
     import traceback
 
     try:
-        import requests
         import geopandas as gpd
         import pandas as pd
 
-        from src.core.external_pacing import wait_for_turn
         from shapely.geometry import Point
 
         records = []  # [{label, address}]
@@ -113,37 +112,18 @@ def batch_geocode(
         if not records:
             return "No addresses to geocode."
 
-        # Geocode via Nominatim
-        NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-        HEADERS = {"User-Agent": "geolang-gis-agent/1.0"}
-
         results = []
         failed = []
 
-        for rec in records:
-            addr = rec["address"]
-            try:
-                wait_for_turn(NOMINATIM_URL)
-                resp = requests.get(
-                    NOMINATIM_URL,
-                    params={"q": addr, "format": "json", "limit": 1},
-                    headers=HEADERS,
-                    timeout=10,
-                )
-                data = resp.json()
-                if data:
-                    hit = data[0]
-                    lat = float(hit["lat"])
-                    lon = float(hit["lon"])
-                    display = hit.get("display_name", addr)
-                    row = dict(rec)
-                    row["geocoded_name"] = display
-                    row["geometry"] = Point(lon, lat)
-                    results.append(row)
-                else:
-                    failed.append(addr)
-            except Exception:
-                failed.append(addr)
+        answers = geocode_batch([rec["address"] for rec in records])
+        for rec, hits in zip(records, answers, strict=True):
+            if not hits:
+                failed.append(rec["address"])
+                continue
+            row = dict(rec)
+            row["geocoded_name"] = hits[0]["display_name"]
+            row["geometry"] = Point(hits[0]["lon"], hits[0]["lat"])
+            results.append(row)
 
         if not results:
             return (

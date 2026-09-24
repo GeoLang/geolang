@@ -1,9 +1,9 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode, place_not_found
 from src.core.utils import tool_input_path, tool_output_path
 
-NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
-
+GEOCODE_CANDIDATES = 10
 
 LOW_BAND_M = 5.0  # same bands query_elevation uses: below 5m high, below 10m moderate
 MID_BAND_M = 10.0
@@ -22,17 +22,10 @@ OSM_LAYERS = {
 }
 
 
+# ties on confidence go to the lowest osm id so the sample grid cannot move
 def pinned_geocode_hit(hits):
-    """The hit Nominatim ranked first, or its equal-importance twin with the lowest id.
-
-    Nominatim's own order weighs how well the name matched, so it stays: sorting
-    by importance alone put New York (old name New Amsterdam) above Amsterdam.
-    It can still swap equally ranked hits between calls, so those tie-break on
-    osm_type and osm_id to keep the elevation sample grid anchored.
-    """
-    first = hits[0]
-    importance = float(first.get("importance") or 0.0)
-    tied = [hit for hit in hits if float(hit.get("importance") or 0.0) == importance]
+    confidence = hits[0]["confidence"]
+    tied = [hit for hit in hits if hit["confidence"] == confidence]
     return min(tied, key=lambda hit: (str(hit.get("osm_type") or ""), int(hit.get("osm_id") or 0)))
 
 
@@ -148,7 +141,6 @@ def assess_environmental_risk(
         import requests
         import osmnx as ox
 
-        from src.core.external_pacing import wait_for_turn
         import geopandas as gpd
         import numpy as np
         from shapely.geometry import Point
@@ -162,28 +154,11 @@ def assess_environmental_risk(
         if _coord_m:
             lat, lon = float(_coord_m.group(1)), float(_coord_m.group(2))
         else:
-            lat, lon = None, None
-            try:
-                wait_for_turn(NOMINATIM_SEARCH_URL)
-                _geo_resp = requests.get(
-                    NOMINATIM_SEARCH_URL,
-                    params={
-                        "q": place_name,
-                        "format": "json",
-                        "limit": 10,
-                        "dedupe": 0,
-                    },
-                    headers={"User-Agent": "geolang-gis-agent/1.0"},
-                    timeout=20,
-                )
-                _hits = _geo_resp.json() if _geo_resp.status_code == 200 else []
-            except Exception:
-                _hits = []
-            if isinstance(_hits, list) and _hits:
-                _best = pinned_geocode_hit(_hits)
-                lat, lon = float(_best["lat"]), float(_best["lon"])
-            if lat is None:
-                lat, lon = ox.geocode(place_name)
+            hits = geocode(place_name, limit=GEOCODE_CANDIDATES)
+            if not hits:
+                return place_not_found(place_name)
+            best = pinned_geocode_hit(hits)
+            lat, lon = best["lat"], best["lon"]
         # quantise the anchor so geocoder jitter below ~10m cannot shift the grid
         lat, lon = round(lat, 4), round(lon, 4)
         center = Point(lon, lat)

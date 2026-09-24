@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import (
     population_raster_path,
     tool_input_path,
@@ -93,7 +94,10 @@ def service_gap(
             if _coord_m:
                 lat, lon = float(_coord_m.group(1)), float(_coord_m.group(2))
             else:
-                lat, lon = ox.geocode(place_name)
+                location = geocode_point(place_name)
+                if location is None:
+                    return place_not_found(place_name)
+                lat, lon = location
             # 10km square around centroid as default study area
             center_gdf = gpd.GeoDataFrame(
                 geometry=[Point(lon, lat)], crs="EPSG:4326"

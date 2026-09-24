@@ -3,7 +3,6 @@
 import pathlib
 import sys
 import warnings
-from types import SimpleNamespace
 
 import geopandas as gpd
 import pandas as pd
@@ -12,8 +11,10 @@ from shapely.geometry import LineString, box
 
 from src.agents.tools.download_osm_data import download_osm_data
 from src.core import utils
+from tests.geokode_fakes import fake_platform, geokode_hit, overpass_way
 
 LAT, LON = 51.5, -0.12
+DISTRICT_ID = 51805
 
 # the wording osmnx uses when a place is too big for one Overpass call
 SUBDIVIDE_WARNING = (
@@ -41,13 +42,10 @@ class _RecordingOsmnx:
         self.frame = frame
         self.warn = warn
         self.point_calls = []
-        self.place_calls = []
+        self.polygon_calls = []
 
-    def geocode(self, place_name):
-        return LAT, LON
-
-    def features_from_place(self, place_name, tags=None):
-        self.place_calls.append((place_name, tags))
+    def features_from_polygon(self, polygon, tags=None):
+        self.polygon_calls.append((polygon, tags))
         if self.warn:
             warnings.warn(SUBDIVIDE_WARNING, UserWarning, stacklevel=2)
         return self.frame
@@ -58,43 +56,56 @@ class _RecordingOsmnx:
 
 
 class _RoadsOsmnx:
-    """Answers geocode_to_gdf with a fixed boundary and records graph requests."""
-
-    def __init__(self, boundary, frame):
-        self.boundary = boundary
+    def __init__(self, frame):
         self.frame = frame
         self.graph_calls = []
 
-    def geocode_to_gdf(self, place_name):
-        return self.boundary
-
-    def graph_from_place(self, place_name, network_type=None):
-        self.graph_calls.append((place_name, network_type))
+    def graph_from_polygon(self, polygon, network_type=None):
+        self.graph_calls.append((polygon, network_type))
         return "graph"
 
     def graph_to_gdfs(self, G, nodes=False):
         return self.frame
 
 
-def _boundary(degrees):
-    return gpd.GeoDataFrame(
-        geometry=[box(LON, LAT, LON + degrees, LAT + degrees)], crs="EPSG:4326"
+def _district(degrees):
+    corners = [
+        (LON, LAT),
+        (LON + degrees, LAT),
+        (LON + degrees, LAT + degrees),
+        (LON, LAT + degrees),
+        (LON, LAT),
+    ]
+    hit = geokode_hit(
+        LAT + degrees / 2,
+        LON + degrees / 2,
+        kind="boundary",
+        osm_type="relation",
+        osm_id=DISTRICT_ID,
+        osm_key="boundary",
+        osm_value="administrative",
+        bbox=[LON, LAT, LON + degrees, LAT + degrees],
     )
+    relation = {
+        "type": "relation",
+        "id": DISTRICT_ID,
+        "tags": {"type": "boundary", "boundary": "administrative"},
+        "members": [overpass_way("outer", *corners)],
+    }
+    return hit, relation, box(LON, LAT, LON + degrees, LAT + degrees)
 
 
-def _nominatim(hits, calls=None):
-    def get(url, params=None, headers=None, timeout=None):
-        if calls is not None:
-            calls.append(params)
-        return SimpleNamespace(
-            status_code=200, raise_for_status=lambda: None, json=lambda: hits
-        )
-
-    return SimpleNamespace(get=get)
+def _platform(monkeypatch, hits, overpass_element=None):
+    fake = fake_platform(
+        lambda query: hits,
+        overpass_elements=[overpass_element] if overpass_element else [],
+    )
+    monkeypatch.setitem(sys.modules, "requests", fake)
+    return fake
 
 
 @pytest.fixture
-def outputs(monkeypatch, tmp_path):
+def outputs(monkeypatch, tmp_path, geokode_env):
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
@@ -114,6 +125,8 @@ def test_overlapping_sub_queries_do_not_inflate_the_feature_count(monkeypatch, o
     repeated = _features([1, 1, 2, 2, 2, 3])
     fake = _RecordingOsmnx(repeated)
     monkeypatch.setitem(sys.modules, "osmnx", fake)
+    hit, relation, _ = _district(0.05)
+    _platform(monkeypatch, [hit], relation)
 
     result = download_osm_data(
         data_type="waterway=river", place_name="South East England", output_filename="rivers"
@@ -127,6 +140,8 @@ def test_overlapping_sub_queries_do_not_inflate_the_feature_count(monkeypatch, o
 def test_a_subdivided_query_says_so_instead_of_going_quiet(monkeypatch, outputs):
     fake = _RecordingOsmnx(_features([1, 2]), warn=True)
     monkeypatch.setitem(sys.modules, "osmnx", fake)
+    hit, relation, _ = _district(0.05)
+    _platform(monkeypatch, [hit], relation)
 
     result = download_osm_data(
         data_type="waterway=river", place_name="South East England", output_filename="rivers"
@@ -164,25 +179,30 @@ def test_point_query_without_a_radius_keeps_the_1km_default(monkeypatch, outputs
 
 def test_a_named_feature_arrives_whole_and_ignores_place_boundaries(monkeypatch, outputs):
     # a river running well outside any one place: a boundary search would clip it
+    river = geokode_hit(
+        51.5,
+        -0.12,
+        name="River Thames",
+        display_name="River Thames, England, United Kingdom",
+        osm_type="relation",
+        osm_id=2263653,
+        osm_key="waterway",
+        osm_value="river",
+    )
+    # two stretches end to end, and one the relation carries apart from them
     whole_river = {
-        "osm_type": "relation",
-        "osm_id": 2263653,
-        "class": "waterway",
-        "type": "river",
-        "display_name": "River Thames, England, United Kingdom",
-        "geojson": {
-            "type": "MultiLineString",
-            "coordinates": [
-                [[-2.03, 51.69], [-1.26, 51.75]],
-                [[-1.26, 51.75], [-0.12, 51.50]],
-                [[-0.12, 51.50], [0.68, 51.52]],
-            ],
-        },
+        "type": "relation",
+        "id": 2263653,
+        "tags": {"type": "waterway", "waterway": "river"},
+        "members": [
+            overpass_way("main_stream", (-2.03, 51.69), (-1.26, 51.75)),
+            overpass_way("main_stream", (-1.26, 51.75), (-0.12, 51.50)),
+            overpass_way("side_stream", (0.40, 51.40), (0.68, 51.52)),
+        ],
     }
-    calls = []
     fake = _RecordingOsmnx(_features([1]))
     monkeypatch.setitem(sys.modules, "osmnx", fake)
-    monkeypatch.setitem(sys.modules, "requests", _nominatim([whole_river], calls))
+    platform = _platform(monkeypatch, [river], whole_river)
 
     result = download_osm_data(
         data_type="waterway=river",
@@ -191,9 +211,9 @@ def test_a_named_feature_arrives_whole_and_ignores_place_boundaries(monkeypatch,
     )
 
     written = _read_output("thames")
-    assert len(written) == 3, "each part of the relation should survive as a feature"
-    assert fake.place_calls == [], "a named feature must not fall back to an area search"
-    assert calls[0]["polygon_geojson"] == 1
+    assert len(written) == 2, "each separate stretch should survive as a feature"
+    assert fake.polygon_calls == [], "a named feature must not fall back to an area search"
+    assert platform.seen.overpass == ["[out:json][timeout:90];relation(2263653);out geom;"]
     # the full span, not the piece inside any single place
     assert written.total_bounds[0] == pytest.approx(-2.03)
     assert written.total_bounds[2] == pytest.approx(0.68)
@@ -202,41 +222,50 @@ def test_a_named_feature_arrives_whole_and_ignores_place_boundaries(monkeypatch,
 
 
 def test_a_named_feature_prefers_the_hit_matching_the_requested_tag(monkeypatch, outputs):
-    pub = {
-        "osm_type": "node",
-        "osm_id": 1,
-        "class": "amenity",
-        "type": "pub",
-        "display_name": "The River Thames, London",
-        "geojson": {"type": "Point", "coordinates": [-0.12, 51.50]},
-    }
-    river = {
-        "osm_type": "relation",
-        "osm_id": 2263653,
-        "class": "waterway",
-        "type": "river",
-        "display_name": "River Thames, England",
-        "geojson": {
-            "type": "LineString",
-            "coordinates": [[-2.03, 51.69], [0.68, 51.52]],
-        },
+    pub = geokode_hit(
+        51.50,
+        -0.12,
+        display_name="The River Thames, London",
+        kind="poi",
+        osm_type="node",
+        osm_id=1,
+        osm_key="amenity",
+        osm_value="pub",
+    )
+    river = geokode_hit(
+        51.6,
+        -1.0,
+        display_name="River Thames, England",
+        osm_type="relation",
+        osm_id=2263653,
+        osm_key="waterway",
+        osm_value="river",
+    )
+    relation = {
+        "type": "relation",
+        "id": 2263653,
+        "tags": {"type": "waterway", "waterway": "river"},
+        "members": [overpass_way("main_stream", (-2.03, 51.69), (0.68, 51.52))],
     }
     monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx(_features([1])))
     # the pub ranks first, so only the tag match keeps this off it
-    monkeypatch.setitem(sys.modules, "requests", _nominatim([pub, river]))
+    platform = _platform(monkeypatch, [pub, river], relation)
 
     result = download_osm_data(
         data_type="waterway=river", feature_name="River Thames", output_filename="thames"
     )
 
     assert "relation 2263653" in result
+    assert platform.seen.overpass == ["[out:json][timeout:90];relation(2263653);out geom;"]
     assert _read_output("thames").geometry.iloc[0].geom_type == "LineString"
 
 
 def test_roads_for_an_oversized_place_are_refused(monkeypatch, outputs):
     # a 1 degree square, thousands of km2
-    fake = _RoadsOsmnx(_boundary(1.0), _features([1, 2]))
+    fake = _RoadsOsmnx(_features([1, 2]))
     monkeypatch.setitem(sys.modules, "osmnx", fake)
+    hit, relation, _ = _district(1.0)
+    platform = _platform(monkeypatch, [hit], relation)
 
     result = download_osm_data(
         data_type="roads", place_name="London", output_filename="roads"
@@ -244,26 +273,34 @@ def test_roads_for_an_oversized_place_are_refused(monkeypatch, outputs):
 
     assert "capped at 50 km2" in result
     assert fake.graph_calls == [], "the graph download must not start"
+    assert platform.seen.overpass == [], "the outline must not be fetched either"
 
 
-def test_roads_for_a_district_sized_place_download(monkeypatch, outputs):
+def test_roads_for_a_district_sized_place_download_inside_its_outline(monkeypatch, outputs):
     # about 20 km2, under the cap
-    fake = _RoadsOsmnx(_boundary(0.05), _features([1, 2]))
+    fake = _RoadsOsmnx(_features([1, 2]))
     monkeypatch.setitem(sys.modules, "osmnx", fake)
+    hit, relation, square = _district(0.05)
+    platform = _platform(monkeypatch, [hit], relation)
 
     result = download_osm_data(
         data_type="roads", place_name="Camden", output_filename="roads"
     )
 
-    assert fake.graph_calls == [("Camden", "all")]
+    assert platform.seen.overpass == [f"[out:json][timeout:90];relation({DISTRICT_ID});out geom;"]
+    [(outline, network_type)] = fake.graph_calls
+    assert network_type == "all"
+    assert outline.equals(square)
     assert len(_read_output("roads")) == 2
     assert "Downloaded 2 roads features" in result
 
 
 def test_buildings_for_an_oversized_place_are_refused(monkeypatch, outputs):
     # the City of Toronto, whose buildings killed the 4 GiB executor
-    fake = _RoadsOsmnx(_boundary(1.0), _features([1, 2]))
+    fake = _RecordingOsmnx(_features([1, 2]))
     monkeypatch.setitem(sys.modules, "osmnx", fake)
+    hit, relation, _ = _district(1.0)
+    _platform(monkeypatch, [hit], relation)
 
     result = download_osm_data(
         data_type="buildings", place_name="Toronto", output_filename="buildings"
@@ -271,17 +308,46 @@ def test_buildings_for_an_oversized_place_are_refused(monkeypatch, outputs):
 
     assert "capped at 50 km2" in result
     assert "radius_m" in result
+    assert fake.polygon_calls == []
+
+
+def test_a_place_without_an_outline_searches_around_its_point(monkeypatch, outputs):
+    fake = _RecordingOsmnx(_features([1, 2]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+    address = geokode_hit(LAT, LON, kind="address", osm_type="node", osm_id=9)
+    platform = _platform(monkeypatch, [address])
+
+    download_osm_data(
+        data_type="cafes", place_name="221B Baker Street, London", output_filename="x"
+    )
+
+    assert platform.seen.overpass == []
+    assert fake.polygon_calls == []
+    assert fake.point_calls[0]["point"] == (LAT, LON)
+    assert fake.point_calls[0]["dist"] == 2000
+
+
+def test_a_place_the_geocoder_does_not_know_is_a_miss(monkeypatch, outputs):
+    fake = _RecordingOsmnx(_features([1, 2]))
+    monkeypatch.setitem(sys.modules, "osmnx", fake)
+    _platform(monkeypatch, [])
+
+    result = download_osm_data(data_type="cafes", place_name="Nowhereville")
+
+    assert "found no place named 'Nowhereville'" in result
+    assert fake.point_calls == [] and fake.polygon_calls == []
 
 
 def test_a_radius_with_a_place_name_searches_around_its_centre(monkeypatch, outputs):
     fake = _RecordingOsmnx(_features([1, 2]))
     monkeypatch.setitem(sys.modules, "osmnx", fake)
+    _platform(monkeypatch, [geokode_hit(LAT, LON)])
 
     download_osm_data(
         data_type="buildings", place_name="Toronto", radius_m=2000, output_filename="x"
     )
 
-    assert fake.place_calls == [], "a radius must skip the place boundary"
+    assert fake.polygon_calls == [], "a radius must skip the place boundary"
     assert fake.point_calls[0]["point"] == (LAT, LON)
     assert fake.point_calls[0]["dist"] == 2000
 
@@ -303,17 +369,20 @@ def test_a_kind_of_feature_is_refused_as_a_name(monkeypatch, outputs):
 
 def test_a_named_feature_that_is_not_the_kind_asked_for_is_refused(monkeypatch, outputs):
     # relation 2604751 is a civil parish called River, near Dover
-    parish = {
-        "osm_type": "relation",
-        "osm_id": 2604751,
-        "class": "boundary",
-        "type": "administrative",
-        "display_name": "River, Dover, Kent, England",
-        "geojson": {"type": "Point", "coordinates": [1.27, 51.14]},
-    }
+    parish = geokode_hit(
+        51.14,
+        1.27,
+        name="River",
+        display_name="River, Dover, Kent, England",
+        kind="boundary",
+        osm_type="relation",
+        osm_id=2604751,
+        osm_key="boundary",
+        osm_value="administrative",
+    )
     fake = _RecordingOsmnx(_features([1]))
     monkeypatch.setitem(sys.modules, "osmnx", fake)
-    monkeypatch.setitem(sys.modules, "requests", _nominatim([parish]))
+    platform = _platform(monkeypatch, [parish])
 
     result = download_osm_data(
         data_type="waterway=river", feature_name="Riverside Walk", output_filename="x"
@@ -322,6 +391,7 @@ def test_a_named_feature_that_is_not_the_kind_asked_for_is_refused(monkeypatch, 
     assert "is a waterway=river" in result
     assert "River (boundary=administrative)" in result
     assert "place_name and data_type" in result
+    assert platform.seen.overpass == [], "a refused hit must not be fetched"
 
 
 @pytest.mark.parametrize(

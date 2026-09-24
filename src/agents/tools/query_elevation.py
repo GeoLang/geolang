@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import tool_output_path
 
 
@@ -25,7 +26,6 @@ def query_elevation(place_name: str, output_filename: str = None) -> str:
 
     try:
         import requests
-        import osmnx as ox
         import geopandas as gpd
         from shapely.geometry import Point
 
@@ -38,7 +38,10 @@ def query_elevation(place_name: str, output_filename: str = None) -> str:
         if _coord_m:
             lat, lon = float(_coord_m.group(1)), float(_coord_m.group(2))
         else:
-            lat, lon = ox.geocode(place_name)
+            location = geocode_point(place_name)
+            if location is None:
+                return place_not_found(place_name)
+            lat, lon = location
 
         # Query OpenTopoData SRTM 90m — free, no key needed
         url = f"https://api.opentopodata.org/v1/srtm90m?locations={lat},{lon}"

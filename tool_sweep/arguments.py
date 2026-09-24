@@ -7,9 +7,9 @@ so the two cannot drift, and a tool in the manifest with no entry here fails the
 sweep instead of shipping unswept.
 
 `external` marks a tool whose code can reach a third-party host on these
-arguments: Overpass, Nominatim, opentopodata, WorldPop, the Natural Earth
-downloads, the public Valhalla. Several of those try a platform service first,
-so the mark means "can leave the network", not "always does". The sweep lists
+arguments: Overpass, opentopodata, WorldPop, the Natural Earth downloads, the
+public Valhalla. Several of those try a platform service first, so the mark
+means "can leave the network", not "always does". The sweep lists
 their failures separately, so a third party being down reads differently from a
 broken tool.
 

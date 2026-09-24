@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import tool_output_path
 
 
@@ -43,7 +44,6 @@ def terrain_profile(
     try:
         import requests
         import numpy as np
-        import osmnx as ox
         import matplotlib
 
         matplotlib.use("Agg")
@@ -55,19 +55,24 @@ def terrain_profile(
         _cm1 = _re2.match(
             r"^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$", start_place.strip()
         )
-        lat1, lon1 = (
+        start = (
             (float(_cm1.group(1)), float(_cm1.group(2)))
             if _cm1
-            else ox.geocode(start_place)
+            else geocode_point(start_place)
         )
         _cm2 = _re2.match(
             r"^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$", end_place.strip()
         )
-        lat2, lon2 = (
+        end = (
             (float(_cm2.group(1)), float(_cm2.group(2)))
             if _cm2
-            else ox.geocode(end_place)
+            else geocode_point(end_place)
         )
+        for name, point in ((start_place, start), (end_place, end)):
+            if point is None:
+                return place_not_found(name)
+        lat1, lon1 = start
+        lat2, lon2 = end
 
         n_samples = max(10, min(100, int(n_samples)))
 

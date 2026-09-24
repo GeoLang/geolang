@@ -1,7 +1,11 @@
-from types import SimpleNamespace
+import sys
+
+import geopandas as gpd
+from shapely.geometry import Point
 
 import src.agents.tools.geocode_place as geocode_module
 from src.agents.tools.geocode_place import _geokode_answer, geocode_place
+from tests.geokode_fakes import fake_platform
 
 JASPER_AVENUE = {
     "kind": "address",
@@ -42,48 +46,31 @@ def test_a_whole_street_name_answers_its_own_query():
     assert answer is QUEEN_STREET_WEST
 
 
-def fake_geokode(results):
-    def get(url, **kwargs):
-        if "nominatim" in url:
-            return SimpleNamespace(
-                ok=True,
-                json=lambda: [
-                    {
-                        "lon": "-118.08243",
-                        "lat": "52.87523",
-                        "display_name": "Municipality of Jasper, Alberta, Canada",
-                    }
-                ],
-            )
-        return SimpleNamespace(ok=True, json=lambda: {"results": results})
-
-    return get
+def _natural_earth_with_jasper(directory):
+    path = directory / "ne_populated_places.shp"
+    gpd.GeoDataFrame(
+        {"NAME": ["Jasper"], "SOV0NAME": ["Canada"]},
+        geometry=[Point(-118.08, 52.88)],
+        crs="EPSG:4326",
+    ).to_file(path)
+    return str(path)
 
 
-def test_a_street_only_match_falls_through_to_the_place_sources(monkeypatch):
-    monkeypatch.setenv("GEOKODE_URL", "http://geokode:3000")
-    monkeypatch.setattr(geocode_module, "natural_earth_dataset_paths", lambda _: [])
-    import requests
-
-    monkeypatch.setattr(requests, "get", fake_geokode([JASPER_AVENUE]))
+def test_a_street_only_match_falls_through_to_the_place_sources(
+    monkeypatch, tmp_path, geokode_env
+):
+    natural_earth = _natural_earth_with_jasper(tmp_path)
+    monkeypatch.setattr(geocode_module, "natural_earth_dataset_paths", lambda _: [natural_earth])
+    monkeypatch.setitem(sys.modules, "requests", fake_platform(lambda query: [JASPER_AVENUE]))
 
     answer = geocode_place("Jasper")
 
-    assert "nominatim" in answer
-    assert "52.87523" in answer
+    assert "Jasper, Canada" in answer
     assert "Jasper Avenue" not in answer
 
 
-def test_the_street_still_answers_when_no_place_source_can(monkeypatch):
-    monkeypatch.setenv("GEOKODE_URL", "http://geokode:3000")
+def test_the_street_still_answers_when_no_place_source_can(monkeypatch, geokode_env):
     monkeypatch.setattr(geocode_module, "natural_earth_dataset_paths", lambda _: [])
-    import requests
-
-    def get(url, **kwargs):
-        if "nominatim" in url:
-            return SimpleNamespace(ok=True, json=lambda: [])
-        return SimpleNamespace(ok=True, json=lambda: {"results": [JASPER_AVENUE]})
-
-    monkeypatch.setattr(requests, "get", get)
+    monkeypatch.setitem(sys.modules, "requests", fake_platform(lambda query: [JASPER_AVENUE]))
 
     assert "Jasper Avenue" in geocode_place("Jasper")

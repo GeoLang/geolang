@@ -21,19 +21,14 @@ from src.agents.tools.calculate_isochrones import calculate_isochrones
 from src.agents.tools.download_population_grid import download_population_grid
 from src.agents.tools.score_sites import score_sites
 from src.core import utils
+from tests.geokode_fakes import fake_platform, geokode_hit
 
 LAT, LON = 52.6369, -1.1398  # Leicester
 
-# two equally-ranked Nominatim hits, so only the tie-break makes the pick stable
+# two equally-ranked geokode hits, so only the tie-break makes the pick stable
 HITS = [
-    {"lat": LAT, "lon": LON, "importance": 0.75, "osm_type": "relation", "osm_id": 100},
-    {
-        "lat": LAT + 0.5,
-        "lon": LON + 0.5,
-        "importance": 0.75,
-        "osm_type": "relation",
-        "osm_id": 200,
-    },
+    geokode_hit(LAT, LON, confidence=0.75, osm_type="relation", osm_id=100),
+    geokode_hit(LAT + 0.5, LON + 0.5, confidence=0.75, osm_type="relation", osm_id=200),
 ]
 
 # canned WorldPop task payload: wpgpas answers per age class and sex, never a total
@@ -46,35 +41,19 @@ PYRAMID_TOTAL = 42796  # 2158.31 + 2057.88 + 8665.65 + 8255.97 + 11046.78 + 1061
 
 
 class _FakeOsmnx:
-    """Geocoder that answers, OSM feature queries that don't (the tools degrade)."""
-
-    def geocode(self, place_name):
-        return LAT, LON
-
     def features_from_point(self, *args, **kwargs):
         raise RuntimeError("no OSM in tests")
 
 
-class _DriftingOsmnx(_FakeOsmnx):
-    """Geocoder whose answer moves between calls, as Nominatim's top hit can."""
-
-    def __init__(self):
-        self.calls = 0
-
-    def geocode(self, place_name):
-        self.calls += 1
-        return LAT + 0.5 * self.calls, LON
+def _answers_leicester(query):
+    return HITS
 
 
-def _fake_requests(payload, status=200, geocode_hits=None):
-    hits = HITS if geocode_hits is None else geocode_hits
-
+def _fake_requests(payload, status=200):
     def get(url, params=None, headers=None, timeout=None):
-        if "nominatim" in url:
-            return SimpleNamespace(status_code=200, json=lambda: hits)
         return SimpleNamespace(status_code=status, json=lambda: payload)
 
-    return SimpleNamespace(get=get)
+    return fake_platform(_answers_leicester, others=SimpleNamespace(get=get))
 
 
 def _fake_worldpop(pyramid=None, pending_polls=0, submits=None):
@@ -100,7 +79,7 @@ def _fake_worldpop(pyramid=None, pending_polls=0, submits=None):
             )
         raise AssertionError(f"unexpected request: {url}")
 
-    return SimpleNamespace(get=get)
+    return fake_platform(_answers_leicester, others=SimpleNamespace(get=get))
 
 
 class _SettingsOsmnx(_FakeOsmnx):
@@ -131,7 +110,7 @@ def _fake_valhalla(posts):
             json=lambda: {"type": "FeatureCollection", "features": features},
         )
 
-    return SimpleNamespace(post=post)
+    return fake_platform(_answers_leicester, others=SimpleNamespace(post=post))
 
 
 def _fake_opentopodata(gets):
@@ -145,18 +124,11 @@ def _fake_opentopodata(gets):
             status_code=200, json=lambda: {"status": "OK", "results": results}
         )
 
-    return SimpleNamespace(get=get)
-
-
-def _no_http():
-    def get(url, params=None, headers=None, timeout=None):
-        raise AssertionError(f"no HTTP expected, got {url}")
-
-    return SimpleNamespace(get=get)
+    return fake_platform(_answers_leicester, others=SimpleNamespace(get=get))
 
 
 @pytest.fixture
-def stub_services(monkeypatch, tmp_path):
+def stub_services(monkeypatch, tmp_path, geokode_env):
     """Stub the HTTP boundaries and point tool output at tmp_path."""
     monkeypatch.setenv("TOOL_EXEC_DIR", str(tmp_path))
     # the tree dirs are read once at import, so the env var alone misses them
@@ -187,8 +159,6 @@ def _fake_requests_elev_by_coord(geocode_hits):
     """Elevation mirrors the sampled latitude, so a moved anchor moves the scores."""
 
     def get(url, params=None, headers=None, timeout=None):
-        if "nominatim" in url:
-            return SimpleNamespace(status_code=200, json=lambda: geocode_hits)
         locs = url.split("locations=")[1].split("|")
         results = [
             {"elevation": round((float(p.split(",")[0]) - 52.0) * 100, 3)} for p in locs
@@ -197,7 +167,7 @@ def _fake_requests_elev_by_coord(geocode_hits):
             status_code=200, json=lambda: {"status": "OK", "results": results}
         )
 
-    return SimpleNamespace(get=get)
+    return fake_platform(lambda query: geocode_hits, others=SimpleNamespace(get=get))
 
 
 def _write_pop_raster(path, value=10.0, size=200, res=0.002):
@@ -319,7 +289,6 @@ def test_env_risk_uses_a_supplied_polygon_as_the_area(monkeypatch, stub_services
 
 
 def test_env_risk_is_deterministic_across_geocoder_ordering(monkeypatch, stub_services):
-    monkeypatch.setitem(sys.modules, "osmnx", _DriftingOsmnx())
     monkeypatch.setitem(sys.modules, "requests", _fake_requests_elev_by_coord(HITS))
     first = assess_environmental_risk(
         "Leicester", radius_km=2.0, output_filename="risk_det"
@@ -380,8 +349,8 @@ def test_population_grid_renders_the_clip_polygon(monkeypatch, stub_services):
 
 
 def test_population_grid_zonal_sums_the_local_raster(monkeypatch, stub_services):
-    # the local raster answers both paths, so no HTTP call may be needed
-    monkeypatch.setitem(sys.modules, "requests", _no_http())
+    # the local raster answers both paths, so nothing past the geocoder may be asked
+    monkeypatch.setitem(sys.modules, "requests", fake_platform(_answers_leicester))
 
     clip = _circle(5000)
     clip_path = pathlib.Path(utils.caller_outputs_dir()) / "clip5k.gpkg"

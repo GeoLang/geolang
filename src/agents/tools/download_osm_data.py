@@ -1,11 +1,18 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import (
+    first_outlined_hit,
+    geocode,
+    geocode_point,
+    osm_geometry,
+    place_not_found,
+)
 from src.core.utils import tool_output_path
 
 from ._osm_tags import OSM_TAG_KEYS, OSM_TAG_MAP, tags_for_category
 
-NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
-NOMINATIM_USER_AGENT = "geolang-gis-agent/1.0"
+NAMED_FEATURE_CANDIDATES = 10
+PLACE_CANDIDATES = 5
 
 DEFAULT_RADIUS_M = 1000
 # road networks need more reach than point features before the graph connects up
@@ -57,32 +64,19 @@ class DownloadOSMDataArgs(BaseModel):
 
 
 def _named_feature_gdf(feature_name: str, tags: dict):
-    """Fetch one named OSM feature's own geometry from Nominatim.
+    """Fetch one named OSM feature's own geometry by the id the platform geocoder gives.
 
     Returns (GeoDataFrame, description) or (None, error message). The geometry is
     the feature as OSM defines it, so a river arrives whole instead of clipped to
     whichever place was searched.
     """
     import geopandas as gpd
-    import requests
-    from shapely.geometry import shape
 
-    from src.core.external_pacing import wait_for_turn
-
-    wait_for_turn(NOMINATIM_SEARCH_URL)
-    resp = requests.get(
-        NOMINATIM_SEARCH_URL,
-        params={
-            "q": feature_name,
-            "format": "json",
-            "polygon_geojson": 1,
-            "limit": 10,
-        },
-        headers={"User-Agent": NOMINATIM_USER_AGENT},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    hits = [h for h in resp.json() if h.get("geojson")]
+    hits = [
+        hit
+        for hit in geocode(feature_name, limit=NAMED_FEATURE_CANDIDATES)
+        if hit["osm_type"] and hit["osm_id"] is not None
+    ]
     if not hits:
         return None, f"No OSM feature named '{feature_name}' found."
 
@@ -93,7 +87,7 @@ def _named_feature_gdf(feature_name: str, tags: dict):
         (
             h
             for h in hits
-            if h.get("class") == key and (value is True or h.get("type") == value)
+            if h["osm_key"] == key and (value is True or h["osm_value"] == value)
         ),
         None,
     )
@@ -102,12 +96,12 @@ def _named_feature_gdf(feature_name: str, tags: dict):
         # lands on whatever happens to carry it, and a wrong layer drawn without
         # complaint is worse than no layer
         found = ", ".join(
-            f"{h.get('display_name', '?').split(',')[0]} ({h.get('class')}={h.get('type')})"
+            f"{h['display_name'].split(',')[0]} ({h['osm_key']}={h['osm_value']})"
             for h in hits[:3]
         )
         return None, (
             f"No OSM feature named '{feature_name}' is a {key}={value}. "
-            f"Nominatim offered: {found}. "
+            f"The platform geocoder offered: {found}. "
             "If you meant every such feature in an area rather than one named "
             "feature, pass place_name and data_type instead of feature_name."
         )
@@ -115,27 +109,38 @@ def _named_feature_gdf(feature_name: str, tags: dict):
     gdf = gpd.GeoDataFrame(
         [
             {
-                "name": chosen.get("display_name", feature_name).split(",")[0],
-                "osm_type": chosen.get("osm_type"),
-                "osm_id": chosen.get("osm_id"),
-                "osm_class": chosen.get("class"),
-                "osm_value": chosen.get("type"),
+                "name": chosen["name"] or chosen["display_name"].split(",")[0],
+                "osm_type": chosen["osm_type"],
+                "osm_id": chosen["osm_id"],
+                "osm_key": chosen["osm_key"],
+                "osm_value": chosen["osm_value"],
             }
         ],
-        geometry=[shape(chosen["geojson"])],
+        geometry=[osm_geometry(chosen["osm_type"], chosen["osm_id"])],
         crs="EPSG:4326",
     ).explode(index_parts=False)
 
-    label = f"{chosen.get('osm_type')} {chosen.get('osm_id')}"
+    label = f"{chosen['osm_type']} {chosen['osm_id']}"
     return gdf.reset_index(drop=True), label
 
 
-def _place_area_km2(ox, place_name):
-    try:
-        boundary = ox.geocode_to_gdf(place_name)
-    except Exception:
+def _place_area_km2(bbox):
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    area = gpd.GeoSeries([box(*bbox)], crs="EPSG:4326")
+    return float(area.to_crs(area.estimate_utm_crs()).area.iloc[0]) / 1e6
+
+
+def _polygon_outline(place):
+    if place is None:
         return None
-    return float(boundary.to_crs(boundary.estimate_utm_crs()).area.sum()) / 1e6
+    try:
+        outline = osm_geometry(place["osm_type"], place["osm_id"])
+    # a boundary relation whose rings do not close
+    except LookupError:
+        return None
+    return outline if outline.geom_type in ("Polygon", "MultiPolygon") else None
 
 
 def download_osm_data(
@@ -191,7 +196,10 @@ def download_osm_data(
                 _lat, _lon = float(_coord_m.group(1)), float(_coord_m.group(2))
                 place_name = f"{_lat},{_lon}"  # normalise for output filename
             elif radius_m:
-                _lat, _lon = ox.geocode(place_name)
+                point = geocode_point(place_name)
+                if point is None:
+                    return place_not_found(place_name)
+                _lat, _lon = point
             else:
                 _lat = _lon = None
             if _lat is not None:
@@ -228,39 +236,45 @@ def download_osm_data(
             output_filename = output_filename[:-5]
         output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
 
-        # Download — try place boundary first, fall back to point+radius for addresses
+        # Download: the place's outline when it has one, point+radius for addresses
         if not _coord_download:
             import warnings
 
-            # osmnx splits an oversized area into sub-queries and says so only in a
-            # warning, which is the difference between a fast call and a slow one
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                area_km2 = _place_area_km2(ox, place_name)
-                if area_km2 is not None and area_km2 > MAX_PLACE_AREA_KM2:
+            results = geocode(place_name, limit=PLACE_CANDIDATES)
+            if not results:
+                return place_not_found(place_name)
+            place = first_outlined_hit(results)
+            if place is not None and place["bbox"] is not None:
+                area_km2 = _place_area_km2(place["bbox"])
+                if area_km2 > MAX_PLACE_AREA_KM2:
                     return (
                         f"'{place_name}' covers {area_km2:,.0f} km2 and a full "
                         f"{data_type} download is capped at {MAX_PLACE_AREA_KM2} "
                         "km2. Pass a district-sized place_name, or radius_m to "
                         "search around its centre."
                     )
+            outline = _polygon_outline(place)
+            centre = (results[0]["lat"], results[0]["lon"])
+
+            # osmnx splits an oversized area into sub-queries and says so only in a
+            # warning, which is the difference between a fast call and a slow one
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
                 if dt == "roads":
-                    try:
-                        G = ox.graph_from_place(place_name, network_type="all")
-                    except Exception:
-                        lat, lon = ox.geocode(place_name)
+                    if outline is None:
                         G = ox.graph_from_point(
-                            (lat, lon), dist=DEFAULT_ROADS_RADIUS_M, network_type="all"
+                            centre, dist=DEFAULT_ROADS_RADIUS_M, network_type="all"
                         )
+                    else:
+                        G = ox.graph_from_polygon(outline, network_type="all")
                     gdf = ox.graph_to_gdfs(G, nodes=False).reset_index(drop=True)
                 else:
-                    try:
-                        gdf = ox.features_from_place(place_name, tags=tags)
-                    except Exception:
-                        lat, lon = ox.geocode(place_name)
+                    if outline is None:
                         gdf = ox.features_from_point(
-                            (lat, lon), tags=tags, dist=ADDRESS_FALLBACK_RADIUS_M
+                            centre, tags=tags, dist=ADDRESS_FALLBACK_RADIUS_M
                         )
+                    else:
+                        gdf = ox.features_from_polygon(outline, tags=tags)
                     if gdf.empty:
                         return f"No '{data_type}' features found in {place_name}."
                     # sub-queries overlap, so the same way comes back once per tile

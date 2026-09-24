@@ -15,6 +15,7 @@ from src.agents.tools._sites import resolve_sites
 from src.agents.tools.score_sites import score_sites
 from src.agents.tools.trade_area import trade_area
 from src.core import utils
+from tests.geokode_fakes import fake_platform
 from tests.test_tools import _cells_inside, _write_pop_raster
 
 LAT, LON = 52.6369, -1.1398  # Leicester
@@ -83,12 +84,7 @@ class _RecordingOsmnx:
         self.features = features
         self.polygon_calls = []
         self.point_calls = []
-        self.geocode_calls = []
         self.settings = SimpleNamespace(timeout=180, overpass_rate_limit=True)
-
-    def geocode(self, place_name):
-        self.geocode_calls.append(place_name)
-        return LAT, LON
 
     def features_from_polygon(self, polygon, tags=None):
         self.polygon_calls.append({"polygon": polygon, "tags": tags})
@@ -187,7 +183,6 @@ def test_trade_area_asks_each_service_once_and_counts_per_band(
         "shop": "supermarket",
         "amenity": "cafe",
     }
-    assert osmnx.geocode_calls == []
 
     rows = _read_output("bands").set_index("site")
     assert sorted(rows.index) == ["north depot", "town centre"]
@@ -307,11 +302,13 @@ def test_trade_area_refuses_a_competitor_string_that_is_neither(
     assert "Traceback" not in out
 
 
-def test_score_sites_reads_a_layer_without_geocoding_it(monkeypatch, stub_services):
-    osmnx = _RecordingOsmnx()
-    monkeypatch.setitem(sys.modules, "osmnx", osmnx)
+def test_score_sites_reads_a_layer_without_geocoding_it(
+    monkeypatch, stub_services, geokode_env
+):
+    monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx())
     gets = []
-    monkeypatch.setitem(sys.modules, "requests", _fake_opentopodata(gets))
+    platform = fake_platform(lambda query: [], others=_fake_opentopodata(gets))
+    monkeypatch.setitem(sys.modules, "requests", platform)
 
     sites_layer = _write_layer(_two_site_layer(), "candidates")
     from_layer = score_sites(
@@ -324,7 +321,7 @@ def test_score_sites_reads_a_layer_without_geocoding_it(monkeypatch, stub_servic
     )
     assert "Site scoring results" in from_layer, from_layer
     assert "Site scoring results" in from_names, from_names
-    assert osmnx.geocode_calls == []
+    assert platform.seen.geokode == []
 
     compared = ["lat", "lon", "rank", "total_score", "flood_risk_raw"]
     layer_rows = _read_output("from_layer").sort_values("rank")[compared]

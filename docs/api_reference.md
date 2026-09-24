@@ -226,7 +226,7 @@ The same header names the map `asset_readings` answers about, so a question abou
 
 41 tools live under [`src/agents/tools/`](../src/agents/tools/), one module each. They are loaded from disk on every manifest or execution request. Categories:
 
-**Data acquisition**: `geocode_place` (geokode, then Natural Earth populated places, then Nominatim), `batch_geocode`, `get_admin_boundary`, `download_natural_earth_dataset`, `download_osm_data` (refuses a place boundary over 50 km², `radius_m` searches around its centre instead), `download_population_grid`, `query_elevation`.
+**Data acquisition**: `geocode_place` (geokode, then Natural Earth populated places), `batch_geocode`, `get_admin_boundary`, `download_natural_earth_dataset`, `download_osm_data` (refuses a place boundary over 50 km², `radius_m` searches around its centre instead), `download_population_grid`, `query_elevation`.
 
 **Vector analysis**: `buffer_clip_dissolve`, `clip_layer`, `spatial_join`, `aggregate_by_region`, `cluster_points`, `voronoi`, `find_nearest`, `compare_layers`.
 
@@ -280,7 +280,7 @@ Adding a tool takes one module in `src/agents/tools/` exporting `TOOL_FUNCTION` 
 | `APP_BASE_URL` | `http://localhost:8080` | URL Playwright loads for `/export-pdf` and `/export-png`. |
 | `PTOLEMY_URL` | `http://ptolemy:3000` | Ptolemy geodatabase (`ptolemy_query`). |
 | `PTOLEMY_API_TOKEN` | unset | Service-account bearer for `ptolemy_query` when the caller sent none. Read only with `GEOLANG_ALLOW_UNAUTHENTICATED` set. |
-| `GEOKODE_URL` | unset | geokode endpoint. When set, `geocode_place` tries it first. |
+| `GEOKODE_URL` | unset | geokode endpoint, the only geocoder. Unset, `geocode_place` answers from Natural Earth and every other tool that takes a place name refuses it. |
 | `ITINERA_URL` | unset | itinera endpoint. When set, `compute_route` tries it first. |
 | `TILETOPIA_URL` | `http://tiletopia:3000` | TileTopia endpoint (`list_tilesets`). |
 | `GEODUKT_URL` | `http://geodukt:8080` | geodukt-server endpoint (`plan_workflow`, `run_workflow`, `list_workflow_operations`). |

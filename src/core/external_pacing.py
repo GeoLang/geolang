@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-# nominatim bans an address that sends more than one request a second
+# overpass answers 429 to an address that sends queries too quickly
 SECONDS_BETWEEN_REQUESTS = 1.1
 # every tool run is its own process, so the turn is kept in a file they all lock
 PACING_DIRECTORY = Path(tempfile.gettempdir()) / "geolang-external-pacing"
@@ -43,7 +43,7 @@ class PacedRequests(requests.auth.AuthBase):
         return request
 
 
-# osmnx sends every nominatim and overpass request with these keyword arguments
+# osmnx sends every overpass request with these keyword arguments
 def pace_osmnx_requests() -> None:
     import osmnx
 

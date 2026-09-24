@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import (
     caller_outputs_dir,
     tool_input_path_or_none,
@@ -52,11 +53,13 @@ def download_population_grid(
     outputs_dir = caller_outputs_dir()
 
     try:
-        import osmnx as ox
         import geopandas as gpd
         from shapely.geometry import box
 
-        lat, lon = ox.geocode(place_name)
+        location = geocode_point(place_name)
+        if location is None:
+            return place_not_found(place_name)
+        lat, lon = location
 
         # Convert radius to degrees (approximate)
         deg = radius_km / 111.0

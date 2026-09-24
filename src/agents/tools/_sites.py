@@ -1,5 +1,6 @@
 import re
 
+from src.core.place_lookup import GeocoderUnavailable, geocode_batch
 from src.core.utils import tool_input_path
 
 COORDINATE_PAIR = re.compile(r"^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$")
@@ -21,27 +22,26 @@ def resolve_sites(
 
 
 def _sites_from_names(sites: str) -> list[dict] | str:
-    import osmnx as ox
+    names = [part.strip() for part in sites.split(";") if part.strip()]
+    coordinates = {name: COORDINATE_PAIR.match(name) for name in names}
+    place_names = [name for name in names if not coordinates[name]]
+    try:
+        answers = dict(zip(place_names, geocode_batch(place_names), strict=True))
+    except GeocoderUnavailable as error:
+        return f"Could not geocode the sites: {error}"
 
     resolved = []
-    for name in (part.strip() for part in sites.split(";")):
-        if not name:
-            continue
-        coordinates = COORDINATE_PAIR.match(name)
-        if coordinates:
+    for name in names:
+        pair = coordinates[name]
+        if pair:
             resolved.append(
-                {
-                    "name": name,
-                    "lat": float(coordinates.group(1)),
-                    "lon": float(coordinates.group(2)),
-                }
+                {"name": name, "lat": float(pair.group(1)), "lon": float(pair.group(2))}
             )
             continue
-        try:
-            lat, lon = ox.geocode(name)
-        except Exception as error:
-            return f"Could not geocode '{name}': {error}"
-        resolved.append({"name": name, "lat": lat, "lon": lon})
+        hits = answers[name]
+        if not hits:
+            return f"Could not geocode '{name}': the platform geocoder found no match."
+        resolved.append({"name": name, "lat": hits[0]["lat"], "lon": hits[0]["lon"]})
     return resolved
 
 

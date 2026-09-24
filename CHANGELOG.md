@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-24: no tool calls Nominatim any more, directly or through osmnx.
+  Place names go to geokode at `GEOKODE_URL`, and the outline of a named
+  place or feature comes from Overpass by the OSM type and id geokode
+  returns. A geokode miss is a miss. `batch_geocode` sends 100 addresses per
+  request instead of one per second. `download_osm_data` checks the 50 km2
+  cap against the place's bounding box before any download. With
+  `GEOKODE_URL` unset, `geocode_place` answers from Natural Earth and the
+  other tools refuse a place name. The map search box on the API's own page
+  takes only `lat, lon`.
 - 2026-09-24: `download_natural_earth_dataset` uses a shapefile already in a
   Natural Earth directory instead of downloading it again. When the shared
   `natural_earth/<scale>` directory cannot be written, it downloads into the

@@ -12,8 +12,8 @@ from src.core.external_pacing import (
     PacedRequests,
     wait_for_turn,
 )
+from src.core.place_lookup import OVERPASS_URL
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 CALLERS = 3
 START_WAIT_SECONDS = 60
 
@@ -28,7 +28,7 @@ def take_turn_in_another_process(pacing_directory, ready, start, finished_at):
     external_pacing.PACING_DIRECTORY = pacing_directory
     ready.set()
     start.wait(START_WAIT_SECONDS)
-    wait_for_turn(NOMINATIM_URL)
+    wait_for_turn(OVERPASS_URL)
     finished_at.value = time.time()
 
 
@@ -46,7 +46,7 @@ def test_calls_from_two_processes_are_spaced_apart(pacing_directory):
 
     started_at = time.time()
     start.set()
-    wait_for_turn(NOMINATIM_URL)
+    wait_for_turn(OVERPASS_URL)
     ours_finished_at = time.time()
     other.join(START_WAIT_SECONDS)
 
@@ -58,7 +58,7 @@ def test_calls_from_two_processes_are_spaced_apart(pacing_directory):
 def test_calls_from_threads_line_up_one_interval_apart(pacing_directory):
     started_at = time.time()
     callers = [
-        threading.Thread(target=wait_for_turn, args=(NOMINATIM_URL,))
+        threading.Thread(target=wait_for_turn, args=(OVERPASS_URL,))
         for _ in range(CALLERS)
     ]
     for caller in callers:
@@ -76,7 +76,7 @@ def test_osmnx_requests_wait_their_turn_once_the_geo_stack_is_loaded(
 
     utils.preload_geo_stack()
     paced = osmnx.settings.requests_kwargs["auth"]
-    request = requests.Request("GET", NOMINATIM_URL).prepare()
+    request = requests.Request("GET", OVERPASS_URL).prepare()
     started_at = time.time()
     paced(request)
     paced(request)

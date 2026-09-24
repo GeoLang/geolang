@@ -978,9 +978,9 @@
     <div class="viz-content">
       <div id="map">
         <div id="map-search-wrap">
-          <input id="map-search-input" type="text" placeholder="Fly to place…" autocomplete="off"
+          <input id="map-search-input" type="text" placeholder="Fly to lat, lon…" autocomplete="off"
             onkeydown="if(event.key==='Enter') mapSearch()" />
-          <button id="map-search-btn" onclick="mapSearch()" title="Fly to place">⌕</button>
+          <button id="map-search-btn" onclick="mapSearch()" title="Fly to lat, lon">⌕</button>
         </div>
       </div>
 
@@ -2343,42 +2343,20 @@
   }
 
   // ── Map search box ─────────────────────────────
-  async function mapSearch() {
+  function mapSearch() {
     const input = document.getElementById('map-search-input');
     const q = input.value.trim();
     if (!q) return;
 
-    // Try lat,lon first
     const coordM = q.match(/^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$/);
-    if (coordM) {
-      const lat = parseFloat(coordM[1]), lon = parseFloat(coordM[2]);
-      if (map) map.setView([lat, lon], 13);
-      input.value = '';
+    if (!coordM) {
+      input.style.borderColor = '#ef4444';
+      setTimeout(() => { input.style.borderColor = ''; }, 1500);
       return;
     }
-
-    // Nominatim geocode
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
-      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
-      const data = await res.json();
-      if (data && data.length > 0) {
-        const { lat, lon, display_name } = data[0];
-        if (map) map.setView([parseFloat(lat), parseFloat(lon)], 13);
-        input.value = '';
-        // Brief marker
-        const marker = L.marker([parseFloat(lat), parseFloat(lon)])
-          .bindPopup(display_name.split(',').slice(0, 3).join(', '))
-          .addTo(map)
-          .openPopup();
-        setTimeout(() => map && map.removeLayer(marker), 4000);
-      } else {
-        input.style.borderColor = '#ef4444';
-        setTimeout(() => { input.style.borderColor = ''; }, 1500);
-      }
-    } catch (e) {
-      console.warn('Map search failed:', e);
-    }
+    const lat = parseFloat(coordM[1]), lon = parseFloat(coordM[2]);
+    if (map) map.setView([lat, lon], 13);
+    input.value = '';
   }
 
   // ── Attribute table ────────────────────────────

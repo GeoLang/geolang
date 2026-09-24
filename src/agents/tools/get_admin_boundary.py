@@ -1,6 +1,9 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import first_outlined_hit, geocode, osm_geometry
 from src.core.utils import tool_output_path
+
+BOUNDARY_CANDIDATES = 10
 
 
 class GetAdminBoundaryArgs(BaseModel):
@@ -38,12 +41,8 @@ def get_admin_boundary(
 
 
     try:
-        import osmnx as ox
         import geopandas as gpd
         import re
-
-        ox.settings.timeout = 60
-        ox.settings.overpass_rate_limit = False
 
         # Build safe filename stem
         safe_name = re.sub(r"[^\w]", "_", place_name.lower())[:24].strip("_")
@@ -55,89 +54,31 @@ def get_admin_boundary(
 
         output_path = tool_output_path("output_filename", f"{output_filename}.gpkg")
 
-        # Strategy 1: osmnx geocode_to_gdf — returns the OSM boundary polygon directly
-        gdf = None
-        try:
-            gdf = ox.geocode_to_gdf(place_name)
-            if gdf.empty:
-                gdf = None
-        except Exception:
-            gdf = None
-
-        # Strategy 2: Overpass query for named admin boundary
-        if gdf is None:
-            try:
-                import requests
-
-                from src.core.external_pacing import wait_for_turn
-
-                overpass_url = "https://overpass-api.de/api/interpreter"
-                level_filter = f'["admin_level"="{admin_level}"]' if admin_level else ""
-                query = f"""
-                [out:json][timeout:60];
-                relation["name"~"{place_name}",i]["boundary"="administrative"]{level_filter};
-                out geom;
-                """
-                wait_for_turn(overpass_url)
-                resp = requests.post(overpass_url, data={"data": query}, timeout=65)
-                data = resp.json()
-                elements = data.get("elements", [])
-
-                if elements:
-                    from shapely.geometry import Polygon
-                    from shapely.ops import unary_union
-
-                    polys = []
-                    for el in elements:
-                        members = el.get("members", [])
-                        outer_ways = [m for m in members if m.get("role") == "outer"]
-                        for way in outer_ways:
-                            coords = [
-                                (n["lon"], n["lat"]) for n in way.get("geometry", [])
-                            ]
-                            if len(coords) >= 3:
-                                try:
-                                    polys.append(Polygon(coords))
-                                except Exception:
-                                    pass
-
-                    if polys:
-                        merged = unary_union(polys)
-                        tags = elements[0].get("tags", {})
-                        gdf = gpd.GeoDataFrame(
-                            [
-                                {
-                                    "name": tags.get("name", place_name),
-                                    "admin_level": tags.get("admin_level", ""),
-                                    "geometry": merged,
-                                }
-                            ],
-                            crs="EPSG:4326",
-                        )
-            except Exception:
-                gdf = None
-
-        if gdf is None or gdf.empty:
+        results = geocode(place_name, limit=BOUNDARY_CANDIDATES)
+        boundaries = [hit for hit in results if hit["kind"] == "boundary"]
+        place = first_outlined_hit(boundaries or results, admin_level)
+        outline = osm_geometry(place["osm_type"], place["osm_id"]) if place else None
+        if outline is None or outline.geom_type not in ("Polygon", "MultiPolygon"):
             return (
                 f"Could not retrieve an administrative boundary for '{place_name}'. "
                 f"Try a more specific name, or check that the place has an OSM boundary relation. "
                 f"You can use geocode_place to get a point location instead."
             )
-
-        if gdf.crs and gdf.crs.to_epsg() != 4326:
-            gdf = gdf.to_crs("EPSG:4326")
+        gdf = gpd.GeoDataFrame(
+            [
+                {
+                    "name": place["name"] or place_name,
+                    "admin_level": place["admin_level"],
+                    "display_name": place["display_name"],
+                }
+            ],
+            geometry=[outline],
+            crs="EPSG:4326",
+        )
 
         # Compute area
         gdf_proj = gdf.to_crs("EPSG:3857")
         area_km2 = round(float(gdf_proj.geometry.area.sum()) / 1e6, 1)
-
-        # Keep only useful columns
-        keep_cols = [
-            c
-            for c in ("name", "admin_level", "display_name", "geometry")
-            if c in gdf.columns
-        ]
-        gdf = gdf[keep_cols]
 
         gdf.to_file(output_path, driver="GPKG")
 

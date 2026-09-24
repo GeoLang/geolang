@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import tool_output_path
 
 
@@ -46,13 +47,17 @@ def compute_route(
 
     try:
         import requests
-        import osmnx as ox
         import geopandas as gpd
         from shapely.geometry import LineString
 
         # Geocode origin and destination
-        orig_lat, orig_lon = ox.geocode(origin)
-        dest_lat, dest_lon = ox.geocode(destination)
+        origin_point = geocode_point(origin)
+        destination_point = geocode_point(destination)
+        for name, point in ((origin, origin_point), (destination, destination_point)):
+            if point is None:
+                return place_not_found(name)
+        orig_lat, orig_lon = origin_point
+        dest_lat, dest_lon = destination_point
 
         # platform itinera first (no alternates support, so skip when asked for them)
         itinera_url = os.environ.get("ITINERA_URL")
