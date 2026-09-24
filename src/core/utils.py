@@ -144,6 +144,9 @@ def preload_geo_stack() -> None:
         import geopandas
         import rasterio
 
+        from src.core.external_pacing import pace_osmnx_requests
+
+        pace_osmnx_requests()
         logger.info(
             f"Geo stack preloaded: geopandas {geopandas.__version__}, "
             f"rasterio {rasterio.__version__}"

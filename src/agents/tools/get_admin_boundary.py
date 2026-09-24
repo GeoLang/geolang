@@ -70,6 +70,8 @@ def get_admin_boundary(
             try:
                 import requests
 
+                from src.core.external_pacing import wait_for_turn
+
                 overpass_url = "https://overpass-api.de/api/interpreter"
                 level_filter = f'["admin_level"="{admin_level}"]' if admin_level else ""
                 query = f"""
@@ -77,6 +79,7 @@ def get_admin_boundary(
                 relation["name"~"{place_name}",i]["boundary"="administrative"]{level_filter};
                 out geom;
                 """
+                wait_for_turn(overpass_url)
                 resp = requests.post(overpass_url, data={"data": query}, timeout=65)
                 data = resp.json()
                 elements = data.get("elements", [])

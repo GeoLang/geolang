@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-23: Nominatim and Overpass requests wait their turn across every
+  tool run on the host, one request per host every 1.1 seconds, through a
+  locked file per host. osmnx's requests are paced the same way. Before, only
+  `batch_geocode` paced itself, and only within one call.
 - 2026-09-23: each share is a file of its own under `outputs/.shares/`, so
   creating or reading one no longer rewrites or reads every share. At startup
   the API moves the shares in the old `outputs/.shares.json` there and deletes

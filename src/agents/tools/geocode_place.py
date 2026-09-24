@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from src.core.utils import natural_earth_dataset_paths
 
+NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+
 
 class GeocodePlaceArgs(BaseModel):
     place_name: str = Field(
@@ -131,8 +133,11 @@ def _nominatim_fallback(place_name: str, geokode_street: str | None = None) -> s
     try:
         import requests
 
+        from src.core.external_pacing import wait_for_turn
+
+        wait_for_turn(NOMINATIM_SEARCH_URL)
         resp = requests.get(
-            "https://nominatim.openstreetmap.org/search",
+            NOMINATIM_SEARCH_URL,
             params={"q": place_name, "format": "json", "limit": 1},
             headers={"User-Agent": "geolang-gis-agent/1.0"},
             timeout=10,

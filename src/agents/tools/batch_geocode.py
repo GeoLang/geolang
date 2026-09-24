@@ -47,13 +47,14 @@ def batch_geocode(
     list or a CSV. Geocodes through Nominatim at one address per second, so a
     long list is slow.
     """
-    import time
     import traceback
 
     try:
         import requests
         import geopandas as gpd
         import pandas as pd
+
+        from src.core.external_pacing import wait_for_turn
         from shapely.geometry import Point
 
         records = []  # [{label, address}]
@@ -122,6 +123,7 @@ def batch_geocode(
         for rec in records:
             addr = rec["address"]
             try:
+                wait_for_turn(NOMINATIM_URL)
                 resp = requests.get(
                     NOMINATIM_URL,
                     params={"q": addr, "format": "json", "limit": 1},
@@ -142,7 +144,6 @@ def batch_geocode(
                     failed.append(addr)
             except Exception:
                 failed.append(addr)
-            time.sleep(1.1)  # Nominatim fair-use: max 1 req/sec
 
         if not results:
             return (

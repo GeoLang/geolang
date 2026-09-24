@@ -67,6 +67,9 @@ def _named_feature_gdf(feature_name: str, tags: dict):
     import requests
     from shapely.geometry import shape
 
+    from src.core.external_pacing import wait_for_turn
+
+    wait_for_turn(NOMINATIM_SEARCH_URL)
     resp = requests.get(
         NOMINATIM_SEARCH_URL,
         params={

@@ -195,6 +195,8 @@ PLATFORM_JWT_SECRET=<platform secret> CORS_ORIGINS=http://localhost:5174 \
 
 Inside the executor each call runs in its own worker process, started ahead of time and used once. A run that exceeds `GEOLANG_TOOL_MEMORY_LIMIT_MB` (default 3072) or `GEOLANG_TOOL_TIMEOUT_SECONDS` (default 840) has its worker killed, and the caller is told which limit which tool hit. `GEOLANG_TOOL_MAX_CONCURRENT` (default 2) caps the runs in flight, and a call past that is told the executor is busy instead of being queued. An oversized request fails only its own call.
 
+Requests to Nominatim and Overpass are paced across every tool run in the process that runs tools and its workers: at most one request per host every 1.1 seconds, Nominatim's published limit. The last request time sits in a locked file per host under the temp directory, because every tool run is its own process. That covers the tools' own requests and the ones osmnx sends.
+
 With no executor configured, tools run in the API process. That is fine for one tenant and is what the standalone stack and the test suite do. With the gate on and no executor, the API logs a warning at startup and keeps running.
 
 Outputs are split by caller. Each caller reads and writes their own directory under `outputs/`, named from the subject of their token. The executor is told which directory that is, since deriving it needs the signing secret, and it refuses a name that is not a single directory of the expected shape.

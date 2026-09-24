@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from src.core.utils import tool_input_path, tool_output_path
 
+NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+
 
 LOW_BAND_M = 5.0  # same bands query_elevation uses: below 5m high, below 10m moderate
 MID_BAND_M = 10.0
@@ -145,6 +147,8 @@ def assess_environmental_risk(
     try:
         import requests
         import osmnx as ox
+
+        from src.core.external_pacing import wait_for_turn
         import geopandas as gpd
         import numpy as np
         from shapely.geometry import Point
@@ -160,8 +164,9 @@ def assess_environmental_risk(
         else:
             lat, lon = None, None
             try:
+                wait_for_turn(NOMINATIM_SEARCH_URL)
                 _geo_resp = requests.get(
-                    "https://nominatim.openstreetmap.org/search",
+                    NOMINATIM_SEARCH_URL,
                     params={
                         "q": place_name,
                         "format": "json",
