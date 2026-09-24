@@ -205,6 +205,7 @@ ALLOWED_ALGORITHM_IDS = frozenset(
         "qgis:relief",
         "qgis:statisticsbycategories",
         "qgis:texttofloat",
+        "qgis:topologicalcoloring",
         "qgis:variabledistancebuffer",
     }
 )
