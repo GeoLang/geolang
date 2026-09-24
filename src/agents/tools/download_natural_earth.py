@@ -1,6 +1,13 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.utils import natural_earth_directory, tool_output_path
+import os
+import zipfile
+
+from src.core.utils import (
+    natural_earth_dirs,
+    natural_earth_download_directory,
+    tool_output_path,
+)
 
 GPKG_EXTENSION = ".gpkg"
 
@@ -34,6 +41,34 @@ class DownloadNaturalEarthArgs(BaseModel):
     )
 
 
+def download_into(output_dir: str, scale: str, dataset: str) -> str | None:
+    import requests
+
+    url = f"https://naturalearth.s3.amazonaws.com/{scale}_cultural/ne_{scale}_{dataset}.zip"
+    zip_path = os.path.join(output_dir, f"ne_{scale}_{dataset}.zip")
+    os.makedirs(output_dir, exist_ok=True)
+    response = requests.get(url, stream=True, timeout=60)
+    response.raise_for_status()
+
+    with open(zip_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    # extractall strips absolute paths and ".." segments from member names
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(output_dir)
+    os.remove(zip_path)
+
+    shp_path = os.path.join(output_dir, f"ne_{scale}_{dataset}.shp")
+    if os.path.exists(shp_path):
+        return shp_path
+    for root, _, files in os.walk(output_dir):
+        for f in files:
+            if f.endswith(".shp") and dataset in f:
+                return os.path.join(root, f)
+    return None
+
+
 def download_natural_earth_dataset(
     scale: str = "110m",
     dataset: str = "populated_places",
@@ -44,47 +79,28 @@ def download_natural_earth_dataset(
     Generic Natural Earth downloader. If filter_query is provided, the downloaded
     shapefile is filtered via pandas .query() and saved as a GPKG under outputs/.
     """
-    import os
-    import requests
-    import zipfile
-
     scale = scale.lower().strip()
     if scale not in ["10m", "50m", "110m"]:
         scale = "110m"
 
-    url = f"https://naturalearth.s3.amazonaws.com/{scale}_cultural/ne_{scale}_{dataset}.zip"
-    output_dir = str(natural_earth_directory(scale))
-    zip_path = os.path.join(output_dir, f"ne_{scale}_{dataset}.zip")
-
+    shapefile_name = f"ne_{scale}_{dataset}.shp"
     try:
-        os.makedirs(output_dir, exist_ok=True)
-        response = requests.get(url, stream=True, timeout=60)
-        response.raise_for_status()
-
-        with open(zip_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-        with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(output_dir)
-        os.remove(zip_path)
-
-        # Find the .shp matching this dataset
-        shp_path = os.path.join(output_dir, f"ne_{scale}_{dataset}.shp")
-        if not os.path.exists(shp_path):
-            for root, _, files in os.walk(output_dir):
-                for f in files:
-                    if f.endswith(".shp") and dataset in f:
-                        shp_path = os.path.join(root, f)
-                        break
-                if os.path.exists(shp_path):
-                    break
-
-        if not os.path.exists(shp_path):
-            return f"✅ Downloaded {scale} {dataset}, but no .shp found in {output_dir}"
+        present = [
+            path
+            for directory in natural_earth_dirs(scale)
+            if os.path.exists(path := os.path.join(directory, shapefile_name))
+        ]
+        if present:
+            verb, shp_path = "Found", present[0]
+        else:
+            verb = "Downloaded"
+            output_dir = str(natural_earth_download_directory(scale))
+            shp_path = download_into(output_dir, scale, dataset)
+            if not shp_path:
+                return f"✅ Downloaded {scale} {dataset}, but no .shp found in {output_dir}"
 
         if not filter_query:
-            return f"✅ Downloaded {scale} {dataset} → {shp_path}"
+            return f"✅ {verb} {scale} {dataset} → {shp_path}"
 
         # Filter step
         import geopandas as gpd
@@ -113,7 +129,7 @@ def download_natural_earth_dataset(
         out_path = tool_output_path("output_filename", out_name)
         filtered.to_file(out_path, driver="GPKG")
         return (
-            f"✅ Downloaded {scale} {dataset} and filtered to {len(filtered)} features "
+            f"✅ {verb} {scale} {dataset} and filtered to {len(filtered)} features "
             f"with {filter_query!r} → outputs/{out_name}"
         )
 

@@ -178,7 +178,7 @@ def resolve_under(names, search_dirs, roots) -> str | None:
 
 
 def natural_earth_directory(scale: str) -> Path:
-    """The writable mounted directory for one Natural Earth scale."""
+    """The shared directory for one Natural Earth scale."""
     if scale not in NATURAL_EARTH_SCALES:
         raise ValueError(f"unsupported Natural Earth scale: {scale}")
     return Path(EXEC_DIR) / NATURAL_EARTH_DIRECTORY_NAME / scale
@@ -188,8 +188,9 @@ def natural_earth_dirs(scale: str | None = None) -> list[str]:
     """The safe reference directories for one scale, or every downloaded set.
 
     New downloads use the mounted `natural_earth/<scale>` layout. The direct
-    `natural_earth_<scale>*` layout remains readable for existing datasets. A
-    symlinked set is skipped because it would widen the file boundary.
+    `natural_earth_<scale>*` layout remains readable for existing datasets. The
+    caller's own copy, downloaded when the shared layout is read-only, comes
+    last. A symlinked set is skipped because it would widen the file boundary.
     """
     scales = (scale,) if scale is not None else NATURAL_EARTH_SCALES
     for item in scales:
@@ -199,12 +200,35 @@ def natural_earth_dirs(scale: str | None = None) -> list[str]:
     directories = [natural_earth_directory(item) for item in scales]
     for item in scales:
         directories.extend(sorted(Path(EXEC_DIR).glob(f"natural_earth_{item}*")))
+    caller_outputs = Path(OUTPUTS_ROOT, current_caller_directory()).resolve()
+    directories.extend(
+        path
+        for path in map(caller_natural_earth_directory, scales)
+        if path.resolve().is_relative_to(caller_outputs)
+    )
 
     return [
         str(path)
         for path in directories
         if path.is_dir() and not path.is_symlink()
     ]
+
+
+def caller_natural_earth_directory(scale: str) -> Path:
+    return Path(OUTPUTS_ROOT, current_caller_directory(), NATURAL_EARTH_DIRECTORY_NAME, scale)
+
+
+def directory_can_be_written(path: Path) -> bool:
+    existing = next(item for item in (path, *path.parents) if item.exists())
+    return os.access(existing, os.W_OK)
+
+
+def natural_earth_download_directory(scale: str) -> Path:
+    shared = natural_earth_directory(scale)
+    if directory_can_be_written(shared):
+        return shared
+    # the shared sets are mounted read-only in the executor
+    return caller_natural_earth_directory(scale)
 
 
 def natural_earth_dataset_paths(dataset: str) -> list[str]:

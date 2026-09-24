@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-24: `download_natural_earth_dataset` uses a shapefile already in a
+  Natural Earth directory instead of downloading it again. When the shared
+  `natural_earth/<scale>` directory cannot be written, it downloads into the
+  caller's own `outputs/<caller>/natural_earth/<scale>`, which counts against
+  `GEOLANG_OUTPUT_MEGABYTES_PER_CALLER_PER_DAY` and the outputs retention.
+  Every Natural Earth lookup reads that copy after the shared sets.
 - 2026-09-23: Nominatim and Overpass requests wait their turn across every
   tool run on the host, one request per host every 1.1 seconds, through a
   locked file per host. osmnx's requests are paced the same way. Before, only

@@ -1,12 +1,15 @@
 """Natural Earth data uses its writable mount without widening file access."""
 
 import io
+import os
 import sys
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import geopandas as gpd
+import pytest
+import requests
 from shapely.geometry import Point
 
 from src.agents.tools.download_natural_earth import download_natural_earth_dataset
@@ -16,6 +19,7 @@ from src.core import utils
 
 def test_natural_earth_discovery_finds_mounted_and_direct_datasets(monkeypatch, tmp_path):
     monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
     mounted = tmp_path / "natural_earth" / "110m"
     direct = tmp_path / "natural_earth_50m"
     outside = tmp_path / "outside"
@@ -120,3 +124,107 @@ def test_a_filtered_download_named_without_an_extension_is_saved_as_gpkg(
     assert "outputs/europe_countries.gpkg" in result
     saved = Path(utils.caller_outputs_dir()) / "europe_countries.gpkg"
     assert len(gpd.read_file(saved)) == 1
+
+
+@pytest.fixture
+def natural_earth_server(monkeypatch, tmp_path):
+    exec_dir = tmp_path / "app"
+    exec_dir.mkdir()
+    monkeypatch.setattr(utils, "EXEC_DIR", str(exec_dir))
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(exec_dir / "outputs"))
+    monkeypatch.setattr(utils, "USER_DATA_ROOT", exec_dir / "user_data")
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zip_file:
+        zip_file.writestr("ne_110m_populated_places.shp", "shape")
+    requested = []
+
+    def get(url, **kwargs):
+        requested.append(url)
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            iter_content=lambda chunk_size: [archive.getvalue()],
+        )
+
+    monkeypatch.setattr(requests, "get", get)
+    return SimpleNamespace(exec_dir=exec_dir, requested=requested)
+
+
+def caller_copy(exec_dir: Path) -> Path:
+    return exec_dir / "outputs" / "anonymous" / "natural_earth" / "110m"
+
+
+def test_a_dataset_already_in_the_shared_directory_is_not_downloaded(
+    natural_earth_server,
+):
+    shared = natural_earth_server.exec_dir / "natural_earth" / "110m"
+    shared.mkdir(parents=True)
+    (shared / "ne_110m_populated_places.shp").write_text("present")
+
+    result = download_natural_earth_dataset()
+
+    assert natural_earth_server.requested == []
+    assert str(shared / "ne_110m_populated_places.shp") in result
+    assert not caller_copy(natural_earth_server.exec_dir).exists()
+
+
+def test_a_missing_dataset_downloads_into_a_writable_shared_directory(
+    natural_earth_server,
+):
+    shared = natural_earth_server.exec_dir / "natural_earth"
+    shared.mkdir()
+
+    result = download_natural_earth_dataset()
+
+    target = shared / "110m" / "ne_110m_populated_places.shp"
+    assert target.read_text() == "shape"
+    assert str(target) in result
+    assert len(natural_earth_server.requested) == 1
+    assert not caller_copy(natural_earth_server.exec_dir).exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes through a read-only chmod")
+def test_a_read_only_shared_directory_downloads_into_the_callers_own_copy(
+    natural_earth_server,
+):
+    exec_dir = natural_earth_server.exec_dir
+    shared = exec_dir / "natural_earth"
+    shared.mkdir()
+    shared.chmod(0o555)
+    try:
+        first = download_natural_earth_dataset()
+        second = download_natural_earth_dataset()
+    finally:
+        shared.chmod(0o755)
+
+    target = caller_copy(exec_dir) / "ne_110m_populated_places.shp"
+    assert target.read_text() == "shape"
+    assert str(target) in first
+    assert str(target) in second
+    assert len(natural_earth_server.requested) == 1
+    assert list(shared.iterdir()) == []
+    assert str(target) in utils.natural_earth_dataset_paths("populated_places")
+    assert str(target.parent) in utils.allowed_roots()
+    assert str(target.parent) in utils.layer_search_dirs()
+
+
+def test_the_shared_directory_is_listed_before_the_callers_copy(natural_earth_server):
+    exec_dir = natural_earth_server.exec_dir
+    shared = exec_dir / "natural_earth" / "110m"
+    shared.mkdir(parents=True)
+    caller_copy(exec_dir).mkdir(parents=True)
+
+    assert utils.natural_earth_dirs("110m") == [str(shared), str(caller_copy(exec_dir))]
+
+
+def test_a_missing_shared_directory_is_created_by_the_first_download(
+    natural_earth_server,
+):
+    exec_dir = natural_earth_server.exec_dir
+    assert not (exec_dir / "natural_earth").exists()
+
+    result = download_natural_earth_dataset()
+
+    target = exec_dir / "natural_earth" / "110m" / "ne_110m_populated_places.shp"
+    assert target.read_text() == "shape"
+    assert str(target) in result
+    assert not caller_copy(exec_dir).exists()
