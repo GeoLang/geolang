@@ -25,6 +25,7 @@ import os
 
 import httpx
 
+from src.api.tool_run_limits import ToolRunLimits
 from src.core.auth import exchange_tool_token, platform_secret, source_token_role
 from src.core.bound_document import current_bound_document
 from src.core.user_token import user_token_scope
@@ -111,6 +112,9 @@ def tool_execution_token(name: str, source_token: str | None) -> str | None:
     return downstream_token(source_token, required_tool_scopes(name))
 
 
+tool_runs = ToolRunLimits.from_environment()
+
+
 def execute_tool(
     name: str,
     func,
@@ -119,15 +123,16 @@ def execute_tool(
 ) -> str:
     """Run one already-validated tool call and answer with its result.
 
-    Raises what the tool raised, so both callers report a failure the way they
-    always have.
+    Raises ToolRunRefused past the caller's tool run limits, and otherwise what
+    the tool raised, so both callers report a failure the way they always have.
     """
     token = tool_execution_token(name, token)
     url = executor_url()
-    if url is None:
-        with user_token_scope(token):
-            return str(func(**args))
-    return _execute_remotely(url, name, args, token)
+    with tool_runs.run(token):
+        if url is None:
+            with user_token_scope(token):
+                return str(func(**args))
+        return _execute_remotely(url, name, args, token)
 
 
 def _execute_remotely(url: str, name: str, args: dict, token: str | None) -> str:

@@ -121,6 +121,8 @@ A tool is offered only where the packages it needs are installed. The tools impo
 ### `POST /tools/{name}`
 Request `{ "args": { "place_name": "Paris" } }`, response `{ "result": "<string>" }`. `404` for an unknown tool. A dotted name such as `layers.set_visible` gets a `404` whose detail says to run it through `viewer_control`. Bad arguments and tool exceptions come back as `200` with a `result` starting with ❌, so the agent can read the failure and recover. Calls can take minutes.
 
+A call past one of the caller's tool run limits gets `429` with the reason in `detail`, and the tool does not run. The limits are counted in `execute_tool`, which this route, `POST /workflow/approve` and the MCP `tools/call` all go through, so sibyl's tool calls count too, against the user whose bearer sibyl forwards. On MCP the refusal is an `isError` result. See the `GEOLANG_TOOL_RUNS_*` variables below.
+
 Add `"notify": true` and a `"thread_id"` when running a tool outside the model's turn, such as the viewer's plan approval calling `run_workflow`. The result, with its markers stripped, is appended to that sibyl session so the model can answer questions about it. Without a `thread_id` nothing is appended. sibyl never sets `notify`, so a run the model asked for is not reported back to it twice.
 
 `approve_workflow` is not dispatched here and is not in the manifest. It answers `404` like any unknown name. It records the user pressing approve, and a caller that could reach it through a tool route would not have to press anything. `POST /workflow/approve` below is the only way in.
@@ -257,6 +259,10 @@ Adding a tool takes one module in `src/agents/tools/` exporting `TOOL_FUNCTION` 
 | `GEOLANG_PUBLIC_URL` | `/agent` | Where a browser reaches this service, used to build the `/live-data/{token}` URLs written into a document. |
 | `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O. Holds the `outputs/` and `user_data/` roots, each one directory per caller. |
 | `GEOLANG_OUTPUTS_RETENTION_DAYS` | `30` | How long an output file is kept. The API server deletes older files from every caller directory at startup and once a day. `0` keeps everything. |
+| `GEOLANG_TOOL_RUNS_PER_DAY` | unset | Tool runs per UTC day, all callers together. Past it a tool call gets 429. Unset or `0` means no limit. Kept in memory. |
+| `GEOLANG_TOOL_RUNS_PER_CALLER_PER_DAY` | unset | Tool runs per UTC day for one token subject, chat tool calls included. Unset or `0` means no limit. Without the gate there is no subject, so only the global limit applies. |
+| `GEOLANG_TOOL_RUNS_AT_ONCE_PER_CALLER` | unset | Tool runs one token subject may have in flight. A call past it gets 429 instead of waiting. Unset or `0` means no limit. |
+| `GEOLANG_OUTPUT_MEGABYTES_PER_CALLER_PER_DAY` | unset | Megabytes a token subject's tool runs may add to their outputs directory per UTC day. Once over, the next tool call gets 429. Unset or `0` means no limit. |
 | `GEOLANG_UPLOAD_MAX_REQUEST_MEGABYTES` | unset | Largest `/upload` request body. Checked while the body is read, a larger one gets 413. Unset or `0` means no limit. |
 | `GEOLANG_UPLOAD_MAX_FILE_MEGABYTES` | unset | Largest uploaded file. A larger one gets 413 and is not written. Unset or `0` means no limit. |
 | `GEOLANG_UPLOAD_MAX_ZIP_ENTRIES` | unset | Most entries an uploaded `.zip` may hold. Checked before unzipping, a larger archive gets 413. Unset or `0` means no limit. |

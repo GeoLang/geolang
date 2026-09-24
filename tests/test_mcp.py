@@ -25,7 +25,8 @@ from websockets.asyncio.server import serve
 from src.agents.agent_manager import load_external_tools
 from src.api import mcp_server, server
 from src.api.live_document import DOCUMENT_HEADER
-from src.core import agora
+from src.api.tool_run_limits import CALLER_RUNS_SPENT_REPLY, ToolRunLimits
+from src.core import agora, tool_executor
 from src.core.auth import (
     MAXIMUM_MCP_TOKEN_LIFETIME_SECONDS,
     MCP_CLAIM,
@@ -495,6 +496,20 @@ def test_a_live_token_gets_through(gated, client):
     tools = result_of(call(client, "tools/list", {}, token=mcp_mint()))["tools"]
 
     assert len(tools) > 30
+
+
+def test_a_tool_call_counts_against_the_callers_daily_tool_runs(
+    gated, client, monkeypatch
+):
+    monkeypatch.setattr(tool_executor, "tool_runs", ToolRunLimits(None, 1, None, None))
+    params = {"name": "viewer_control", "arguments": VIEWER_ARGUMENTS}
+
+    first = call(client, "tools/call", params, token=mcp_mint())
+    second = call(client, "tools/call", params, token=mcp_mint())
+
+    assert result_of(first)["isError"] is False
+    assert result_of(second)["isError"] is True
+    assert CALLER_RUNS_SPENT_REPLY in text_of(second)
 
 
 def test_without_a_secret_a_tokenless_call_is_served(open_mode, client):

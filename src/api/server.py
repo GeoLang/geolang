@@ -56,6 +56,7 @@ from src.api.live_document import (
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.api.outputs_retention import sweep_outputs_periodically
+from src.api.tool_run_limits import ToolRunRefused
 from src.api.upload_limits import (
     UploadBudget,
     UploadLimits,
@@ -404,6 +405,8 @@ def run_tool(
     try:
         with bound_document_scope(document_id_of(document)):
             result = execute_tool(name, func, args, token)
+    except ToolRunRefused as e:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(e))
     except Exception as e:
         logger.exception(f"Tool {name} failed")
         result = f"❌ Tool execution failed: {e}"
@@ -464,6 +467,8 @@ def approve_workflow(
         result = execute_tool(
             APPROVAL_TOOL, func, {"manifest_toml": request.manifest_toml}, token
         )
+    except ToolRunRefused as e:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(e))
     except Exception as e:
         logger.exception("Recording a plan approval failed")
         result = f"❌ Approval failed: {e}"

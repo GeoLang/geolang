@@ -70,6 +70,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nights running.
 
 ### Added
+- 2026-09-23: tool run limits, each off when unset. `GEOLANG_TOOL_RUNS_PER_DAY`
+  and `GEOLANG_TOOL_RUNS_PER_CALLER_PER_DAY` cap tool runs per UTC day,
+  `GEOLANG_TOOL_RUNS_AT_ONCE_PER_CALLER` caps one user's runs in flight, and
+  `GEOLANG_OUTPUT_MEGABYTES_PER_CALLER_PER_DAY` caps how much a user's runs
+  add to their outputs directory per day. They are counted where every tool
+  call goes through, so `POST /tools/{name}`, `POST /workflow/approve`, MCP
+  and sibyl's chat tool calls all count, and a refused call gets 429.
 - 2026-09-23: `score_sites` writes a `<criterion>_weight` column beside
   each `<criterion>_score`, so the viewer's site weights panel starts from the
   weights the ranking used.
