@@ -1416,19 +1416,34 @@ def _sibyl_passthrough(response: httpx.Response) -> Response:
 
 
 @app.get("/models", dependencies=[Depends(platform_auth)])
-async def list_models():
-    """Sibyl's model profiles and which one is active."""
+async def list_models(request: Request):
+    """Sibyl's model profiles and which one is active for the caller."""
     return _sibyl_passthrough(
-        await sibyl_request("GET", "/models")
+        await sibyl_request("GET", "/models", request.headers.get("authorization"))
     )
 
 
 @app.put("/model", dependencies=[Depends(platform_auth)])
 async def set_model(request: Request):
-    """Switch sibyl's active model. 404 unknown profile, 409 not available."""
+    """Switch the caller's model. 404 unknown profile, 409 not available."""
     return _sibyl_passthrough(
         await sibyl_request(
-            "PUT", "/model", json=await request.json()
+            "PUT",
+            "/model",
+            request.headers.get("authorization"),
+            json=await request.json(),
+        )
+    )
+
+
+@app.put("/model/default", dependencies=[Depends(platform_auth)])
+async def set_default_model(request: Request):
+    return _sibyl_passthrough(
+        await sibyl_request(
+            "PUT",
+            "/model/default",
+            request.headers.get("authorization"),
+            json=await request.json(),
         )
     )
 

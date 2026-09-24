@@ -38,6 +38,36 @@ def test_setting_the_model_forwards_the_body_and_the_204():
     assert json.loads(route.calls.last.request.content) == {"id": "local"}
 
 
+def test_listing_and_switching_models_forward_the_bearer():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        listed = sibyl.get("/models").respond(200, json=PROFILES)
+        switched = sibyl.put("/model").respond(204)
+
+        client.get("/models", headers={"Authorization": "Bearer user-token"})
+        client.put(
+            "/model", json={"id": "local"}, headers={"Authorization": "Bearer user-token"}
+        )
+
+    assert listed.calls.last.request.headers["authorization"] == "Bearer user-token"
+    assert switched.calls.last.request.headers["authorization"] == "Bearer user-token"
+
+
+def test_setting_the_default_model_forwards_the_body_bearer_and_status():
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        route = sibyl.put("/model/default").respond(403, json={"detail": "admin only"})
+
+        response = client.put(
+            "/model/default",
+            json={"id": "local"},
+            headers={"Authorization": "Bearer user-token"},
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "admin only"}
+    assert json.loads(route.calls.last.request.content) == {"id": "local"}
+    assert route.calls.last.request.headers["authorization"] == "Bearer user-token"
+
+
 def test_unknown_profile_stays_a_404():
     with respx.mock(base_url=server.SIBYL_URL) as sibyl:
         sibyl.put("/model").respond(404, json={"detail": "no such profile"})

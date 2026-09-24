@@ -46,12 +46,13 @@ Sessions are stored in sibyl. These routes forward to it with the caller's beare
 
 ## Models
 
-The model profile routes, forwarded to sibyl with its status and body unchanged. Shapes and status codes are in [sibyl's README](https://github.com/GeoLang/sibyl#api).
+The model profile routes, forwarded to sibyl with the caller's bearer, and with sibyl's status and body unchanged. Shapes and status codes are in [sibyl's README](https://github.com/GeoLang/sibyl#api).
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/models` | Profiles, providers and the active profile. |
-| `PUT` | `/model` | Switch the active profile. |
+| `GET` | `/models` | Profiles, providers and the caller's active profile. |
+| `PUT` | `/model` | Switch the caller's active profile. |
+| `PUT` | `/model/default` | Set the profile a user starts on. Admin role only. |
 | `PUT` | `/model/cloud` | Set the default cloud provider's base, key and model list. Admin role only. |
 | `PUT` | `/model/providers` | Add or update a named cloud or local provider. Admin role only. |
 | `DELETE` | `/model/providers/{provider_id}` | Remove a provider and its profiles. Admin role only. |
