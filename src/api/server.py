@@ -112,6 +112,8 @@ logger = logging.getLogger(__name__)
 
 # sibyl owns the agent loop and session history, geolang runs the tools
 SIBYL_TIMEOUT = 30.0
+# their results name files from earlier runs, which no map of this run should load
+OUTPUT_LISTING_TOOLS = frozenset({"list_outputs"})
 
 
 def _slim_schema(node):
@@ -583,7 +585,8 @@ async def agent_event_stream(
             else:
                 assistant_texts.append(content)
 
-            all_content.append(content)
+            if event.get("name") not in OUTPUT_LISTING_TOOLS:
+                all_content.append(content)
 
             # UI spec from the emit_ui_spec tool
             if ui_spec is None and "__UI_SPEC__:" in content:
@@ -619,8 +622,6 @@ async def agent_event_stream(
     # a plan names output files that do not exist yet, and the inference below
     # cannot tell those from files a tool actually wrote
     if ui_spec is None and not planned:
-        import re as _re
-
         # Primary: infer from full content, filter to files the agent mentioned
         with user_token_scope(user_token):
             ui_spec = infer_ui_spec_from_text(" ".join(all_content))
@@ -632,28 +633,7 @@ async def agent_event_stream(
                 if layer["file"] in agent_text
                 or layer["file"].replace("outputs/", "") in agent_text
             ]
-            if filtered:
-                ui_spec["layers"] = filtered
-
-        # Fallback: scan tool returns for explicit "Saved to outputs/foo.gpkg" lines
-        if not ui_spec or not ui_spec.get("layers"):
-            saved = _re.findall(
-                r"[Ss]aved to outputs/([\w\-]+\.gpkg)", " ".join(all_content)
-            )
-            if saved:
-                seen = {}
-                for fname in saved:
-                    seen[fname] = {
-                        "name": fname.replace("_", " ").replace(".gpkg", ""),
-                        "file": f"outputs/{fname}",
-                    }
-                with user_token_scope(user_token):
-                    coord_spec = infer_ui_spec_from_text(" ".join(assistant_texts))
-                center = coord_spec.get("center") if coord_spec else None
-                ui_spec = {"type": "map", "layers": list(seen.values())}
-                if center:
-                    ui_spec["center"] = center
-                    ui_spec["zoom"] = 13
+            ui_spec = {**ui_spec, "layers": filtered} if filtered else None
     if ui_spec:
         yield ("ui_spec", ui_spec)
     if run_error is not None:

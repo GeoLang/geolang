@@ -71,3 +71,47 @@ def test_empty_map_note_still_yields_a_ui_spec():
         ("text", "Nothing to draw yet."),
         ("ui_spec", {"type": "map", "layers": []}),
     ]
+
+
+def _events_for(*run_events):
+    body = _ndjson(*run_events, {"kind": "done"})
+    with respx.mock(base_url=server.SIBYL_URL) as sibyl:
+        sibyl.post("/runs").respond(200, content=body)
+        return _collect()
+
+
+def _ui_specs(events):
+    return [payload for kind, payload in events if kind == "ui_spec"]
+
+
+def test_a_reply_naming_one_written_layer_maps_only_that_layer():
+    events = _events_for(
+        {"kind": "tool_return", "name": "clip_layer",
+         "content": "Saved to outputs/roads.gpkg. Saved to outputs/rivers.gpkg."},
+        {"kind": "text", "content": "Clipped the roads into roads.gpkg."},
+    )
+
+    assert _ui_specs(events) == [
+        {"type": "map", "layers": [{"name": "roads", "file": "outputs/roads.gpkg"}]}
+    ]
+
+
+def test_a_reply_naming_no_layer_sends_no_map():
+    events = _events_for(
+        {"kind": "tool_return", "name": "clip_layer",
+         "content": "Saved to outputs/roads.gpkg."},
+        {"kind": "text", "content": "Here is a summary of the roads."},
+    )
+
+    assert _ui_specs(events) == []
+
+
+def test_files_named_by_list_outputs_never_reach_the_map():
+    events = _events_for(
+        {"kind": "tool_return", "name": "list_outputs",
+         "content": "Output files (2):\n  outputs/old_buffer.gpkg (12 KB)\n"
+                    "  outputs/old_parks.gpkg (40 KB)"},
+        {"kind": "text", "content": "You have old_buffer.gpkg and old_parks.gpkg."},
+    )
+
+    assert _ui_specs(events) == []
