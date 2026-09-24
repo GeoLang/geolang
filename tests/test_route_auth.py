@@ -137,10 +137,6 @@ def open_mode(monkeypatch):
     monkeypatch.delenv(SECRET_ENV, raising=False)
 
 
-# shares a gated call would have written
-written = []
-
-
 @pytest.fixture(autouse=True)
 def stubs(monkeypatch, tmp_path):
     """Cut the gated handlers down to nothing: no browser, no sibyl, no writes."""
@@ -154,8 +150,7 @@ def stubs(monkeypatch, tmp_path):
         raise RuntimeError("no browser in tests")
 
     monkeypatch.setattr(server, "notify_agent", no_notify)
-    monkeypatch.setattr(server, "load_shares", lambda: {SHARE_ID: SHARE})
-    monkeypatch.setattr(server, "save_shares", lambda shares: written.append(shares))
+    utils.save_share(SHARE_ID, SHARE)
     monkeypatch.setitem(
         sys.modules,
         "playwright.async_api",
@@ -212,8 +207,6 @@ def test_a_forged_or_expired_token_is_rejected(gated, _name, method, path, kwarg
 
 
 def test_the_gate_runs_before_the_side_effect(gated, tmp_path):
-    written.clear()
-
     assert call("post", "/share", {"json": {}}).status_code == 401
     assert (
         call(
@@ -222,7 +215,7 @@ def test_the_gate_runs_before_the_side_effect(gated, tmp_path):
         == 401
     )
 
-    assert written == []
+    assert list(utils.shares_directory().iterdir()) == [utils.share_file(SHARE_ID)]
     assert not (tmp_path / "user_data").exists()
 
 
@@ -231,13 +224,9 @@ def test_an_open_route_stays_open(gated, _name, method, path, kwargs):
     assert call(method, path, kwargs).status_code == 200
 
 
-def test_a_new_share_id_is_long_enough_to_be_the_credential(gated, monkeypatch):
+def test_a_new_share_id_is_long_enough_to_be_the_credential(gated):
     """Nothing but the id stands between a stranger and a share, so it is the
     one thing here that has to be unguessable."""
-    store = {}
-    monkeypatch.setattr(server, "load_shares", lambda: store)
-    monkeypatch.setattr(server, "save_shares", store.update)
-
     created = call("post", "/share", {"json": {"title": "Coastline"}}, token=mint())
     share_id = created.json()["share_id"]
 
@@ -249,11 +238,23 @@ def test_a_new_share_id_is_long_enough_to_be_the_credential(gated, monkeypatch):
     assert client.get(f"/share/{share_id}").status_code == 200
 
 
-def test_two_shares_do_not_get_the_same_id(gated, monkeypatch):
-    store = {}
-    monkeypatch.setattr(server, "load_shares", lambda: store)
-    monkeypatch.setattr(server, "save_shares", store.update)
+def test_a_share_body_over_the_cap_gets_413_and_stores_nothing(gated):
+    oversized = {"summary": "x" * server.SHARE_MAX_BODY_BYTES}
 
+    response = call("post", "/share", {"json": oversized}, token=mint())
+
+    assert response.status_code == 413
+    assert list(utils.shares_directory().iterdir()) == [utils.share_file(SHARE_ID)]
+
+
+def test_a_share_body_that_is_not_a_share_gets_422(gated):
+    response = call("post", "/share", {"json": {"zoom": "far"}}, token=mint())
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["zoom"]
+
+
+def test_two_shares_do_not_get_the_same_id(gated):
     ids = {
         call("post", "/share", {"json": {}}, token=mint()).json()["share_id"]
         for _ in range(5)

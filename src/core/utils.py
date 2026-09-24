@@ -20,10 +20,13 @@ SIBYL_URL = os.environ.get("SIBYL_URL", "http://localhost:8090")
 # so the API works without TOOL_EXEC_DIR set regardless of checkout location.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 EXEC_DIR = os.environ.get("TOOL_EXEC_DIR", str(_REPO_ROOT))
-# one directory per caller, and the shares file beside them
+# one directory per caller, and the shares directory beside them
 OUTPUTS_ROOT = os.path.join(EXEC_DIR, "outputs")
 # the outputs volume is what survives a container rebuild
-SHARES_FILE = os.path.join(OUTPUTS_ROOT, ".shares.json")
+SHARES_DIRECTORY_NAME = ".shares"
+ALL_SHARES_FILE_NAME = ".shares.json"
+SHARE_FILE_SUFFIX = ".json"
+SHARE_ID_MAXIMUM_LENGTH = 64
 # layer data published to a live document, readable without a platform token by
 # whoever holds the file's token
 LIVE_DATA_DIR = Path(EXEC_DIR) / "live_data"
@@ -38,6 +41,7 @@ ANONYMOUS_OUTPUTS_DIRECTORY = "anonymous"
 DIRECTORY_NAME_CHARACTERS = "A-Za-z0-9_-"
 UNSAFE_SUBJECT_CHARACTERS = re.compile(f"[^{DIRECTORY_NAME_CHARACTERS}]")
 CALLER_DIRECTORY_NAME = re.compile(f"[{DIRECTORY_NAME_CHARACTERS}]+")
+SHARE_ID = re.compile(f"[{DIRECTORY_NAME_CHARACTERS}]{{1,{SHARE_ID_MAXIMUM_LENGTH}}}")
 READABLE_SUBJECT_LENGTH = 64
 SUBJECT_DIGEST_LENGTH = 32
 
@@ -375,19 +379,43 @@ def save_catalogue(catalogue: list) -> None:
     save_json(caller_catalogue_file(), catalogue)
 
 
-def load_shares() -> dict:
-    """Every share on this instance.
+def shares_directory() -> Path:
+    return Path(OUTPUTS_ROOT) / SHARES_DIRECTORY_NAME
 
-    A file that does not parse is left to raise rather than read as empty: an
-    empty one here is indistinguishable from no shares at all, and the next
-    save would write that back over every share the file still holds.
-    """
-    if not os.path.exists(SHARES_FILE):
-        return {}
-    with open(SHARES_FILE) as f:
+
+def share_file(share_id: str) -> Path:
+    if not SHARE_ID.fullmatch(share_id):
+        raise PathRefused(f"'{share_id}' is not a share id")
+    return shares_directory() / f"{share_id}{SHARE_FILE_SUFFIX}"
+
+
+def load_share(share_id: str) -> dict | None:
+    if not SHARE_ID.fullmatch(share_id):
+        return None
+    path = share_file(share_id)
+    if not path.is_file():
+        return None
+    with open(path) as f:
         return json.load(f)
 
 
-def save_shares(shares: dict) -> None:
-    os.makedirs(os.path.dirname(SHARES_FILE), exist_ok=True)
-    save_json(SHARES_FILE, shares)
+def save_share(share_id: str, share: dict) -> None:
+    path = share_file(share_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_json(path, share)
+
+
+# TODO: delete once every deployment has started with one file per share
+def split_all_shares_file() -> None:
+    all_shares_file = Path(OUTPUTS_ROOT) / ALL_SHARES_FILE_NAME
+    if not all_shares_file.exists():
+        return
+    with open(all_shares_file) as f:
+        shares = json.load(f)
+    for share_id, share in shares.items():
+        if not SHARE_ID.fullmatch(share_id):
+            logger.warning(f"dropped share {share_id!r}, it is not a share id")
+            continue
+        save_share(share_id, share)
+    all_shares_file.unlink()
+    logger.info(f"moved {len(shares)} shares to one file each")

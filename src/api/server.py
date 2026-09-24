@@ -24,6 +24,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -58,8 +59,10 @@ from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.api.outputs_retention import sweep_outputs_periodically
 from src.api.tool_run_limits import ToolRunRefused
 from src.api.upload_limits import (
+    BYTES_PER_MEGABYTE,
     UploadBudget,
     UploadLimits,
+    bounded_request,
     checked_unzipped_bytes,
     checked_upload_bytes,
     save_upload,
@@ -94,13 +97,14 @@ from src.core.utils import (
     caller_user_data_dir,
     layer_search_dirs,
     load_catalogue,
-    load_shares,
+    load_share,
     name_candidates,
     path_inside_directory,
     preload_geo_stack,
     resolve_under,
     save_catalogue,
-    save_shares,
+    save_share,
+    split_all_shares_file,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -190,6 +194,7 @@ mcp_app, mcp_session_manager = create_mcp_app(tool_manifest, layer_geojson)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Thread(target=preload_geo_stack, daemon=True).start()
+    split_all_shares_file()
     # not in the executor, which mounts the same volume: one deleter is enough
     retention = asyncio.create_task(sweep_outputs_periodically())
     try:
@@ -1494,22 +1499,32 @@ class ShareRequest(BaseModel):
     zoom: int = 12
 
 
+# a share is a title, a summary and layer names
+SHARE_MAX_BODY_BYTES = BYTES_PER_MEGABYTE
+
+
 @app.post("/share", dependencies=[Depends(platform_auth)])
-async def create_share(request: ShareRequest):
+async def create_share(request: Request):
     """Create a shareable snapshot of the current map state."""
+    body = await bounded_request(request, SHARE_MAX_BODY_BYTES).body()
+    try:
+        share = ShareRequest.model_validate_json(body)
+    except ValidationError as e:
+        raise RequestValidationError(e.errors())
     # reading a share needs no token, so the id is the credential and has to be
     # long enough that guessing one is hopeless
     share_id = secrets.token_urlsafe(16)
-    shares = load_shares()
-    shares[share_id] = {
-        "title": request.title,
-        "summary": request.summary,
-        "layers": request.layers,
-        "center": request.center,
-        "zoom": request.zoom,
-        "created_at": datetime.now().isoformat(),
-    }
-    save_shares(shares)
+    save_share(
+        share_id,
+        {
+            "title": share.title,
+            "summary": share.summary,
+            "layers": share.layers,
+            "center": share.center,
+            "zoom": share.zoom,
+            "created_at": datetime.now().isoformat(),
+        },
+    )
     return {"share_id": share_id, "url": f"/share/{share_id}"}
 
 
@@ -1520,17 +1535,16 @@ async def create_share(request: ShareRequest):
 @app.get("/share/{share_id}/data")
 async def get_share_data(share_id: str):
     """Return share metadata as JSON (for the client to reconstruct the view)."""
-    shares = load_shares()
-    if share_id not in shares:
+    share = load_share(share_id)
+    if share is None:
         raise HTTPException(status_code=404, detail="Share not found")
-    return shares[share_id]
+    return share
 
 
 @app.get("/share/{share_id}")
 async def view_share(share_id: str):
     """Serve the app so the client JS can load the share by reading the URL path."""
-    shares = load_shares()
-    if share_id not in shares:
+    if load_share(share_id) is None:
         raise HTTPException(status_code=404, detail="Share not found")
     static_dir = Path(__file__).parent.parent / "static"
     return FileResponse(str(static_dir / "index.html"))

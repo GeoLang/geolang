@@ -99,7 +99,7 @@ The export routes load `APP_BASE_URL` with the view in the query string and answ
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/share` | Store a view (`title`, `summary`, `layers`, `center`, `zoom`) and answer `{"share_id", "url"}`. |
+| `POST` | `/share` | Store a view (`title`, `summary`, `layers`, `center`, `zoom`) and answer `{"share_id", "url"}`. A body over 1 MB gets `413`. |
 | `GET` | `/share/{share_id}` | The static viewer page, which loads the share from its URL. Open. |
 | `GET` | `/share/{share_id}/data` | The stored view as JSON. Open. |
 | `GET` | `/live-data/{token}` | Features published to a live document. Open. See [writing to a live map](#writing-to-a-live-map). |

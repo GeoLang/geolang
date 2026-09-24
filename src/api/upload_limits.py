@@ -78,14 +78,17 @@ def receive_at_most(receive: Receive, byte_limit: int) -> Receive:
     return limited_receive
 
 
+def bounded_request(request: Request, byte_limit: int) -> Request:
+    declared = request.headers.get("content-length", "")
+    if declared.isdecimal() and int(declared) > byte_limit:
+        raise too_large("the request body", byte_limit)
+    return Request(request.scope, receive_at_most(request.receive, byte_limit))
+
+
 def upload_form(request: Request, limits: UploadLimits):
-    byte_limit = limits.max_request_bytes
     bounded = request
-    if byte_limit is not None:
-        declared = request.headers.get("content-length", "")
-        if declared.isdecimal() and int(declared) > byte_limit:
-            raise too_large("the request body", byte_limit)
-        bounded = Request(request.scope, receive_at_most(request.receive, byte_limit))
+    if limits.max_request_bytes is not None:
+        bounded = bounded_request(request, limits.max_request_bytes)
     return bounded.form(
         max_files=UPLOAD_FORM_FILE_LIMIT, max_fields=UPLOAD_FORM_FIELD_LIMIT
     )

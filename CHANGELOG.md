@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-23: each share is a file of its own under `outputs/.shares/`, so
+  creating or reading one no longer rewrites or reads every share. At startup
+  the API moves the shares in the old `outputs/.shares.json` there and deletes
+  that file. `POST /share` answers `413` to a body over 1 MB.
 - 2026-09-23: `run_qgis_algorithm` and `pyqgis_api` run only the QGIS
   algorithms on an allowlist of vector and raster processing, 169 of them, and
   `list_qgis_algorithms` shows only those. Anything that downloads, runs a

@@ -65,7 +65,7 @@ Because the reload happens on every request, **editing a file in `src/agents/too
 - **User datasets**: one directory per caller under `user_data/`, named for the token subject. `user_data/<caller>/catalogue.json` lists that caller's uploads and the files sit beside it.
 - **Outputs**: tool results (GeoJSON, GPKG, rendered images) are written to the caller's own directory under `outputs/` and served to that caller at `/outputs/{filename}`. [`outputs_retention.py`](../src/api/outputs_retention.py) sweeps every caller directory at API startup and once a day, deleting files older than `GEOLANG_OUTPUTS_RETENTION_DAYS`, default 30. Only the API server sweeps, since the executor mounts the same volume.
 - **Workflow plan records**: kept in memory for an hour, in the executor when one is configured, so a restart drops unapproved plans.
-- **Shares**: stored in `outputs/.shares.json`, beside the caller directories, so they survive a container rebuild. The retention sweep and the outputs routes only reach inside caller directories, and no caller directory name contains a dot.
+- **Shares**: one JSON file per share in `outputs/.shares/`, beside the caller directories, so they survive a container rebuild. The retention sweep and the outputs routes only reach inside caller directories, and no caller directory name contains a dot. At startup the API moves any shares left in the single file `outputs/.shares.json` into that directory and deletes the file.
 
 ## Surface boundaries
 

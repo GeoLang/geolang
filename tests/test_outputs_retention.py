@@ -102,9 +102,9 @@ def test_retention_of_zero_deletes_nothing(outputs, monkeypatch):
     assert (outputs / ALICE).is_dir()
 
 
-def test_the_shares_file_beside_the_caller_directories_is_kept(outputs):
-    shares = aged(outputs / Path(utils.SHARES_FILE).name, 900)
+def test_the_shares_beside_the_caller_directories_are_kept(outputs):
+    share = aged(utils.share_file("kXv3-2_QeR9tYuI0pAsDfg"), 900)
     aged(outputs / ALICE / "old.gpkg", 45)
 
     assert sweep_outputs() == (1, FILE_BYTES)
-    assert shares.exists()
+    assert share.exists()

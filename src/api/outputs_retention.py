@@ -78,9 +78,12 @@ def sweep_outputs() -> tuple[int, int]:
 
 
 def _caller_directories(root: Path) -> list[str]:
-    """The per-caller directories under the outputs root, symlinked ones skipped."""
+    """The per-caller directories under the outputs root, not symlinks, not the shares."""
     return [
-        entry.path for entry in _entries(root) if entry.is_dir(follow_symlinks=False)
+        entry.path
+        for entry in _entries(root)
+        if entry.is_dir(follow_symlinks=False)
+        and utils.valid_caller_directory_name(entry.name)
     ]
 
 
