@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from src.core.utils import tool_input_path, tool_output_path
 
+from ._attribute_filter import attribute_filter_mask
+
 # filter and proximity_analysis are branches below, read_file and sjoin are
 # looked up on the geopandas module. A name that is neither answers every call
 # with "Function not found".
@@ -90,7 +92,6 @@ def geopandas_api(
             dataset_path = tool_input_path("dataset_path", dataset_path)
             kwargs["dataset_path"] = dataset_path
 
-        # ─── filter: read → .query() → write ─────────────────────────────
         if func_name == "filter":
             if not dataset_path:
                 log.append("Error: Missing dataset_path for filter")
@@ -101,7 +102,7 @@ def geopandas_api(
 
             gdf = gpd.read_file(dataset_path)
             log.append(f"Loaded {len(gdf)} rows, columns: {list(gdf.columns)}")
-            filtered = gdf.query(filter_query)
+            filtered = gdf[attribute_filter_mask(gdf, filter_query)]
             log.append(f"After filter '{filter_query}': {len(filtered)} rows")
 
             output_name = output_path or "filtered.gpkg"
@@ -114,7 +115,6 @@ def geopandas_api(
                 f"\n\nRESULT: ✅ Filtered to {len(filtered)} features. "
                 f"Saved to outputs/{output_name}"
             )
-        # ─────────────────────────────────────────────────────────────────
 
         if func_name == "read_file":
             gdf = gpd.read_file(dataset_path)

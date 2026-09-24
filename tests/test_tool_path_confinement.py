@@ -300,6 +300,65 @@ def test_a_layer_parameter_keeps_the_suffix_that_names_its_table(tree):
     assert confined["INPUT"] == f"{mine}|layername=points"
 
 
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "subset=SELECT * FROM points",
+        "layername=points|subset=1=1",
+        "layerid=0",
+        "geometrytype=Point",
+        "layername=",
+        "layername=points x",
+        "layername=points\n",
+        "",
+    ],
+)
+def test_a_layer_suffix_other_than_a_plain_layername_is_refused(tree, suffix):
+    from src.agents.tools.pygis_api import confined_uri
+
+    layer(outputs_of(BOB) / "points.gpkg", "bob's")
+
+    with caller_directory_scope(BOB):
+        with pytest.raises(utils.PathRefused, match="layername="):
+            confined_parameters({"INPUT": f"points.gpkg|{suffix}"}, FIELD_CALCULATOR_TYPES)
+        with pytest.raises(utils.PathRefused, match="layername="):
+            confined_uri(f"points.gpkg|{suffix}")
+
+
+def test_pyqgis_api_keeps_a_plain_layername_suffix(tree):
+    from src.agents.tools.pygis_api import confined_uri
+
+    mine = layer(outputs_of(BOB) / "points.gpkg", "bob's")
+
+    with caller_directory_scope(BOB):
+        assert confined_uri("points.gpkg|layername=points_2") == f"{mine}|layername=points_2"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"source": {"type": 1, "val": "points.gpkg", "active": True}},
+        7,
+        True,
+        [{"source": "points.gpkg"}],
+    ],
+)
+@pytest.mark.parametrize("key", ["INPUT", "OUTPUT", "FAIL_OUTPUT"])
+def test_a_file_parameter_that_is_not_a_string_is_refused(tree, key, value):
+    with caller_directory_scope(BOB):
+        with pytest.raises(utils.PathRefused, match="names a file"):
+            confined_parameters({key: value}, EXTRACT_BY_ATTRIBUTE_TYPES)
+
+
+def test_a_value_parameter_that_is_not_a_string_is_kept(tree):
+    with caller_directory_scope(BOB):
+        confined = confined_parameters(
+            {"VALUE": 3, "FIELD": None, "INPUT": None}, EXTRACT_BY_ATTRIBUTE_TYPES
+        )
+
+    assert confined == {"VALUE": 3, "FIELD": None, "INPUT": None}
+
+
 def test_a_second_destination_lands_in_the_callers_own_outputs(tree):
     with caller_directory_scope(BOB):
         confined = confined_parameters(

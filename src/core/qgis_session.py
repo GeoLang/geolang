@@ -20,10 +20,17 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import threading
 
+from src.core import utils
+from src.core.errors import PathRefused
+
 logger = logging.getLogger(__name__)
+
+LAYER_SOURCE_SEPARATOR = "|"
+LAYER_NAME_OPTION = re.compile(r"layername=[A-Za-z0-9_]+")
 
 # the tool venv is isolated; the qgis bindings and the processing plugin live in
 # the system paths, so bridge them onto sys.path
@@ -221,6 +228,17 @@ class QgisUnavailable(RuntimeError):
 
 class AlgorithmNotAllowed(ValueError):
     pass
+
+
+def confined_layer_source(argument: str, value: str) -> str:
+    name, separator, option = value.partition(LAYER_SOURCE_SEPARATOR)
+    if separator and not LAYER_NAME_OPTION.fullmatch(option):
+        raise PathRefused(
+            f"{argument} can only name a table inside the file as "
+            f"'<file>|layername=<table>', with letters, digits and underscores "
+            f"in the table name, and nothing else after the '|': '{value}'"
+        )
+    return utils.tool_input_path(argument, name) + separator + option
 
 
 def require_allowed_algorithm(algorithm_id: str) -> None:

@@ -84,6 +84,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against 0.17 for the same tasks before the trim.
 
 ### Fixed
+- 2026-09-24: `filter_query` in `geopandas_api` and
+  `download_natural_earth_dataset` no longer goes to pandas `query`. It is
+  parsed and applied as column comparisons with ==, !=, <, <=, >, >=, in and
+  not in, joined with and, or and not, and anything else is refused. A QGIS
+  layer argument accepts only `|layername=<name>` after the file, and a file
+  parameter of `run_qgis_algorithm` must be a string. An upload named with no
+  stem, like `...zip`, is refused. `/export-png` and `/export-pdf` cap width
+  and height at 3840, run one export per caller and 2 at once, and stop a
+  render after 60 seconds.
 - 2026-09-23: chat answers about a layer's attributes come from the data.
   `geopandas_api` `read_file` returned `str(gdf)`, which for the 169-column
   Natural Earth countries table shows neither `NAME` nor `POP_EST`, so

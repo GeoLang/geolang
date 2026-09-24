@@ -9,6 +9,8 @@ from src.core.utils import (
     tool_output_path,
 )
 
+from ._attribute_filter import attribute_filter_mask
+
 GPKG_EXTENSION = ".gpkg"
 
 
@@ -77,7 +79,7 @@ def download_natural_earth_dataset(
 ) -> str:
     """
     Generic Natural Earth downloader. If filter_query is provided, the downloaded
-    shapefile is filtered via pandas .query() and saved as a GPKG under outputs/.
+    shapefile is cut to the matching features and saved as a GPKG under outputs/.
     """
     scale = scale.lower().strip()
     if scale not in ["10m", "50m", "110m"]:
@@ -107,7 +109,7 @@ def download_natural_earth_dataset(
 
         gdf = gpd.read_file(shp_path)
         try:
-            filtered = gdf.query(filter_query)
+            filtered = gdf[attribute_filter_mask(gdf, filter_query)]
         except Exception as e:
             cols = ", ".join(gdf.columns)
             return (

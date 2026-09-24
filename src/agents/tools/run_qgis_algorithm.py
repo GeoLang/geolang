@@ -5,10 +5,11 @@ from typing import Optional
 from src.core.qgis_session import (
     AlgorithmNotAllowed,
     QgisUnavailable,
+    confined_layer_source,
     qgis_session,
     require_allowed_algorithm,
 )
-from src.core.utils import PathRefused, tool_input_path, tool_output_path
+from src.core.utils import PathRefused, tool_output_path
 
 # the QGIS parameter types whose value names a file to read
 INPUT_FILE_TYPES = frozenset(
@@ -63,6 +64,12 @@ def confined_parameter(key, value, parameter_type):
         )
     if isinstance(value, list):
         return [confined_parameter(key, item, parameter_type) for item in value]
+    names_a_file = parameter_type in DESTINATION_TYPES or parameter_type in INPUT_FILE_TYPES
+    if names_a_file and value is not None and not isinstance(value, str):
+        raise PathRefused(
+            f"parameters.{key} names a file, so it must be a filename written as "
+            f"a string, not {type(value).__name__} {json.dumps(value)}"
+        )
     if not isinstance(value, str):
         return value
     if parameter_type in DESTINATION_TYPES:
@@ -71,9 +78,7 @@ def confined_parameter(key, value, parameter_type):
         return tool_output_path(f"parameters.{key}", value)
     if parameter_type not in INPUT_FILE_TYPES:
         return value
-    # a layer can carry a suffix that is not part of the name: "roads.gpkg|layername=x"
-    name, separator, suffix = value.partition("|")
-    return tool_input_path(f"parameters.{key}", name) + separator + suffix
+    return confined_layer_source(f"parameters.{key}", value)
 
 
 def confined_parameters(params, parameter_types, command_line_names=frozenset()):

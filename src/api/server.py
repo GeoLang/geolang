@@ -55,6 +55,7 @@ from src.api.live_document import (
     LIVE_DATA_PATH,
     LIVE_DATA_TOKEN_PATTERN,
 )
+from src.api.map_exports import MAXIMUM_EXPORT_SIDE_PIXELS, run_map_export
 from src.api.mcp_server import MCP_PATH, create_mcp_app
 from src.api.outputs_retention import sweep_periodically
 from src.api.tool_run_limits import ToolRunRefused
@@ -95,6 +96,7 @@ from src.core.utils import (
     allowed_roots,
     caller_outputs_dir,
     caller_user_data_dir,
+    current_caller_directory,
     layer_search_dirs,
     load_catalogue,
     load_share,
@@ -867,6 +869,9 @@ async def get_datasets(authorization: Annotated[str | None, Header()] = None):
         return load_catalogue()
 
 
+UNUSABLE_UPLOAD_STEMS = ("", ".", "..")
+
+
 @app.post("/upload", dependencies=[Depends(platform_auth)])
 async def upload_dataset(
     # not File(): that reads the whole body before the gate and the size limits run
@@ -892,6 +897,11 @@ async def upload_dataset(
                 )
             except PathRefused as e:
                 raise HTTPException(400, str(e))
+            if raw_path.stem in UNUSABLE_UPLOAD_STEMS:
+                raise HTTPException(
+                    400,
+                    f"the filename needs a name before its extension: '{raw_path.name}'",
+                )
             suffix = raw_path.suffix.lower()
             stem = raw_path.stem
             extract_dir = Path(user_data) / stem
@@ -1201,8 +1211,8 @@ class ExportPDFRequest(BaseModel):
     center: list = [20, 0]
     zoom: int = 10
     basemap: str = "osm"
-    width: int = 1280
-    height: int = 900
+    width: int = Field(1280, ge=1, le=MAXIMUM_EXPORT_SIDE_PIXELS)
+    height: int = Field(900, ge=1, le=MAXIMUM_EXPORT_SIDE_PIXELS)
 
 
 @app.post("/export-pdf", dependencies=[Depends(platform_auth)])
@@ -1210,12 +1220,12 @@ async def export_pdf(
     request: ExportPDFRequest, authorization: Annotated[str | None, Header()] = None
 ):
     """Generate a PDF report using a Playwright headless screenshot (captures real tile imagery)."""
-    from playwright.async_api import async_playwright
     from urllib.parse import quote
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     pdf_filename = f"report_{timestamp}.pdf"
     with user_token_scope(bearer_token(authorization)):
+        caller = current_caller_directory()
         pdf_path = os.path.join(caller_outputs_dir(), pdf_filename)
 
     base_url = os.environ.get("APP_BASE_URL", "http://localhost:8080")
@@ -1230,35 +1240,24 @@ async def export_pdf(
         + (f"&layers={layer_param}" if layer_param else "")
     )
 
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page(
-                viewport={"width": request.width, "height": request.height}
-            )
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(2500)
-            await page.pdf(
-                path=pdf_path,
-                width=f"{request.width}px",
-                height=f"{request.height}px",
-                print_background=True,
-            )
-            await browser.close()
+    async def write_pdf(page):
+        await page.pdf(
+            path=pdf_path,
+            width=f"{request.width}px",
+            height=f"{request.height}px",
+            print_background=True,
+        )
 
-        return {"pdf_filename": pdf_filename, "download_url": f"/download/{pdf_filename}"}
-
-    except Exception as e:
-        logger.error(f"PDF export failed: {e}")
-        raise HTTPException(status_code=500, detail=f"PDF export failed: {e}")
+    await run_map_export("PDF", caller, url, request.width, request.height, write_pdf)
+    return {"pdf_filename": pdf_filename, "download_url": f"/download/{pdf_filename}"}
 
 
 class ExportPNGRequest(BaseModel):
     center: list = [20, 0]
     zoom: int = 10
     layers: list = []
-    width: int = 1280
-    height: int = 800
+    width: int = Field(1280, ge=1, le=MAXIMUM_EXPORT_SIDE_PIXELS)
+    height: int = Field(800, ge=1, le=MAXIMUM_EXPORT_SIDE_PIXELS)
     basemap: str = "osm"
 
 
@@ -1266,11 +1265,10 @@ class ExportPNGRequest(BaseModel):
 async def export_png(
     request: ExportPNGRequest, authorization: Annotated[str | None, Header()] = None
 ):
-    from playwright.async_api import async_playwright
-
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     png_filename = f"map_{timestamp}.png"
     with user_token_scope(bearer_token(authorization)):
+        caller = current_caller_directory()
         png_path = os.path.join(caller_outputs_dir(), png_filename)
 
     base_url = os.environ.get("APP_BASE_URL", "http://localhost:8080")
@@ -1283,25 +1281,15 @@ async def export_png(
         + (f"&layers={layer_param}" if layer_param else "")
     )
 
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page(
-                viewport={"width": request.width, "height": request.height}
-            )
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(2500)
-            map_el = await page.query_selector("#map")
-            if map_el:
-                await map_el.screenshot(path=png_path)
-            else:
-                await page.screenshot(path=png_path, full_page=False)
-            await browser.close()
+    async def write_png(page):
+        map_el = await page.query_selector("#map")
+        if map_el:
+            await map_el.screenshot(path=png_path)
+        else:
+            await page.screenshot(path=png_path, full_page=False)
 
-        return {"png_filename": png_filename, "download_url": f"/download/{png_filename}"}
-    except Exception as e:
-        logger.error(f"PNG export failed: {e}")
-        raise HTTPException(status_code=500, detail=f"PNG export failed: {e}")
+    await run_map_export("PNG", caller, url, request.width, request.height, write_png)
+    return {"png_filename": png_filename, "download_url": f"/download/{png_filename}"}
 
 
 # ── Session management (proxied to sibyl) ────────────────────────────

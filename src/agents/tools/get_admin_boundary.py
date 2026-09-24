@@ -32,8 +32,7 @@ def get_admin_boundary(
     """
     Administrative boundary polygon for a country, region, city or district,
     from OpenStreetMap. Returns a polygon GPKG usable as a clip mask or analysis
-    area. Falls back to a convex hull around a geocoded point when OSM has no
-    boundary for the place.
+    area. Answers that nothing was found when OSM has no boundary for the place.
     """
     import traceback
 

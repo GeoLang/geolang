@@ -256,6 +256,19 @@ def test_a_zip_entry_that_climbs_out_is_refused(caller_directories, limits, entr
     assert written_files(caller_directories) == []
 
 
+@pytest.mark.parametrize("filename", ["..zip", "...zip", "...geojson"])
+def test_a_filename_with_no_name_before_its_extension_is_refused(
+    caller_directories, limits, filename
+):
+    limits()
+
+    response = upload("alice", filename, zipped([("parcels.shp", b"x")]))
+
+    assert response.status_code == 400
+    assert "needs a name before its extension" in response.json()["detail"]
+    assert written_files(caller_directories) == []
+
+
 def test_the_callers_upload_count_refuses_the_next_upload_with_429(
     caller_directories, budget
 ):

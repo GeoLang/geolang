@@ -2,8 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from src.core.errors import PathRefused
-from src.core.qgis_session import QgisUnavailable, qgis_session
-from src.core.utils import tool_input_path
+from src.core.qgis_session import QgisUnavailable, confined_layer_source, qgis_session
 
 
 class PyQGISArgs(BaseModel):
@@ -20,8 +19,7 @@ class PyQGISArgs(BaseModel):
 
 
 def confined_uri(uri: str) -> str:
-    name, separator, suffix = uri.partition("|")
-    return tool_input_path("uri", name) + separator + suffix
+    return confined_layer_source("uri", uri)
 
 
 def pyqgis_api(function_name: str, **kwargs) -> str:
