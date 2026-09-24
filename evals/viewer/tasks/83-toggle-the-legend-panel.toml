@@ -1,0 +1,8 @@
+id = "toggle-the-legend-panel"
+prompt = "toggle the legend panel"
+notes = "The snapshot does not say a panel is open, so the toggle opens the legend panel."
+
+[expect]
+action = "run"
+name = "panel.open"
+args = { panel = "legend" }

@@ -1,0 +1,8 @@
+id = "where-is-the-legend"
+prompt = "where is the legend"
+notes = "Chat mode shows no toolbar, so there is no button to point at. Opening the legend panel is the answer."
+
+[expect]
+action = "run"
+name = "panel.open"
+args = { panel = "legend" }

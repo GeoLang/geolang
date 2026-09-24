@@ -1,0 +1,18 @@
+id = "colour-each-country-differently"
+prompt = "colour each country a different colour"
+notes = "The layer is Natural Earth's 50 European countries from admin_0_countries. One colour per country is unique values symbology on the NAME column, not layers.set_color."
+
+[expect]
+action = "run"
+name = "layers.shade_by"
+args = { layer = "European countries", column = "NAME" }
+
+[snapshot]
+camera = { longitude = 10.0, latitude = 50.0, zoom = 4, pitch = 0, bearing = 0 }
+
+[[snapshot.layers]]
+id = "lyr_europe_countries"
+name = "European countries"
+kind = "agent"
+visible = true
+opacity = 1

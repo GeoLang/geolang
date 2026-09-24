@@ -1,0 +1,18 @@
+id = "choropleth-of-population"
+prompt = "make a choropleth of population"
+notes = "A choropleth is QGIS graduated symbology, layers.shade_by on a numeric column. Natural Earth keeps the population estimate in POP_EST."
+
+[expect]
+action = "run"
+name = "layers.shade_by"
+args = { layer = "European countries", column = "POP_EST" }
+
+[snapshot]
+camera = { longitude = 10.0, latitude = 50.0, zoom = 4, pitch = 0, bearing = 0 }
+
+[[snapshot.layers]]
+id = "lyr_europe_countries"
+name = "European countries"
+kind = "agent"
+visible = true
+opacity = 1
