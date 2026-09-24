@@ -170,7 +170,7 @@ Gated deployments must also name the browser origins allowed to call the API in 
 
 Open routes: `/health`, `GET /`, `/static/*`, `GET /tools` (sibyl fetches it before anyone has signed in), `GET /debug/tools` (every tool name), `GET /live-data/{token}` (reaches what its token names), and `GET /share/{id}` and `GET /share/{id}/data`. A share reader gets the view and the summary, not the layers behind them. `POST /mcp` and `POST /mcp/token` check a token themselves, see [MCP for outside agents](#mcp-for-outside-agents).
 
-A live token reaches a lot. `geopandas_api` evaluates a pandas query the caller writes, `run_qgis_algorithm` runs any QGIS algorithm with caller-chosen parameters, and `sql_query` sends caller-written SQL to the browser. Together they can read and write everything under the caller's own directories in `outputs/` and `user_data/`. Keep tokens short-lived and out of commits.
+A live token reaches a lot. `geopandas_api` evaluates a pandas query the caller writes, `run_qgis_algorithm` runs any allowlisted QGIS vector or raster algorithm with caller-chosen parameters, and `sql_query` sends caller-written SQL to the browser. Together they can read and write everything under the caller's own directories in `outputs/` and `user_data/`. Keep tokens short-lived and out of commits.
 
 `pyqgis_api` takes only `function_name`, `uri` and `layer_name`, so most processing algorithms fail for want of their parameters. Its `uri` goes through `tool_input_path` like every other input path.
 

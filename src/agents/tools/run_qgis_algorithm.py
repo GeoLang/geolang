@@ -2,7 +2,12 @@ import os
 import json
 from pydantic import BaseModel, Field
 from typing import Optional
-from src.core.qgis_session import QgisUnavailable, qgis_session
+from src.core.qgis_session import (
+    AlgorithmNotAllowed,
+    QgisUnavailable,
+    qgis_session,
+    require_allowed_algorithm,
+)
 from src.core.utils import PathRefused, tool_input_path, tool_output_path
 
 # the QGIS parameter types whose value names a file to read
@@ -122,13 +127,20 @@ def run_qgis_algorithm(
     parameters: str,
     output_filename: Optional[str] = None,
 ) -> str:
-    """Run any QGIS processing algorithm by ID with JSON parameters.
+    """Run a QGIS vector or raster processing algorithm by ID with JSON parameters.
+
+    Only the algorithms list_qgis_algorithms shows are allowed.
 
     DISTANCE and other length parameters are in the INPUT layer's CRS units.
     Layers here are usually EPSG:4326, where units are degrees: to buffer in
     metres, first reproject to EPSG:3857 ('native:reprojectlayer'), run the
     buffer, then reproject back to EPSG:4326 for display."""
     import traceback
+
+    try:
+        require_allowed_algorithm(algorithm_id)
+    except AlgorithmNotAllowed as e:
+        return f"❌ {e}"
 
     try:
         params = json.loads(parameters)
@@ -151,7 +163,6 @@ def run_qgis_algorithm(
             f"({session.processing_error}). Use GeoPandas-based tools instead "
             "(e.g. geopandas_api, spatial_join, clip_layer, buffer_clip_dissolve)."
         )
-    processing = session.processing
 
     try:
         # confinement needs the algorithm's parameter definitions, so it cannot
@@ -184,7 +195,7 @@ def run_qgis_algorithm(
                 "output_filename", f"{safe_name}_output.gpkg"
             )
 
-        result = processing.run(algorithm_id, params)
+        result = session.run(algorithm_id, params)
 
         # degrees-vs-metres mistakes produce coordinates far outside lon/lat
         # range and crash the viewer; catch them here so the model can retry

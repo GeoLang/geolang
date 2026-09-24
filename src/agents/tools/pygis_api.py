@@ -52,7 +52,7 @@ def pyqgis_api(function_name: str, **kwargs) -> str:
                     f"❌ '{function_name}' needs the QGIS processing module, which is "
                     f"not available ({session.processing_error})."
                 )
-            result = session.processing.run(function_name, kwargs)
+            result = session.run(function_name, kwargs)
             return str(result)
         elif function_name == "QgsVectorLayer":
             layer = QgsVectorLayer(

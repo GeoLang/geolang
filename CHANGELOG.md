@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-23: `run_qgis_algorithm` and `pyqgis_api` run only the QGIS
+  algorithms on an allowlist of vector and raster processing, 169 of them, and
+  `list_qgis_algorithms` shows only those. Anything that downloads, runs a
+  script or a command, reaches a database or takes a QGIS expression is off it,
+  `native:filedownloader` and `native:fieldcalculator` included, since an
+  expression's `load_layer()` can fetch a URL. A refusal names the id.
 - 2026-09-23: `/chat/agui` no longer counts chat runs.
   `GEOLANG_CHAT_RUNS_PER_DAY` and `GEOLANG_CHAT_RUNS_PER_CALLER_PER_DAY` are
   gone, sibyl caps runs and tokens per user in its database.

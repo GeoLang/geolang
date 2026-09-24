@@ -34,6 +34,181 @@ QGIS_SYSTEM_PATHS = (
 )
 QGIS_PREFIX_PATH = "/usr"
 
+# nothing that downloads, runs code or takes an expression: load_layer() in one fetches a url
+ALLOWED_ALGORITHM_IDS = frozenset(
+    {
+        "native:addfieldtoattributestable",
+        "native:adduniquevalueindexfield",
+        "native:addxyfields",
+        "native:affinetransform",
+        "native:antimeridiansplit",
+        "native:arrayoffsetlines",
+        "native:arraytranslatedfeatures",
+        "native:aspect",
+        "native:assignprojection",
+        "native:basicstatisticsforfields",
+        "native:boundary",
+        "native:boundingboxes",
+        "native:buffer",
+        "native:calculatevectoroverlaps",
+        "native:cellstatistics",
+        "native:centroids",
+        "native:checkvalidity",
+        "native:climbalongline",
+        "native:clip",
+        "native:collect",
+        "native:concavehull",
+        "native:convertgeometrytype",
+        "native:convexhull",
+        "native:countpointsinpolygon",
+        "native:createconstantrasterlayer",
+        "native:creategrid",
+        "native:createpointslayerfromtable",
+        "native:dbscanclustering",
+        "native:delaunaytriangulation",
+        "native:deletecolumn",
+        "native:deleteduplicategeometries",
+        "native:deleteholes",
+        "native:densifygeometries",
+        "native:densifygeometriesgivenaninterval",
+        "native:difference",
+        "native:dissolve",
+        "native:dropgeometries",
+        "native:dropmzvalues",
+        "native:explodehstorefield",
+        "native:explodelines",
+        "native:exportaddgeometrycolumns",
+        "native:extendlines",
+        "native:extenttolayer",
+        "native:extractbyattribute",
+        "native:extractbyextent",
+        "native:extractbylocation",
+        "native:extractspecificvertices",
+        "native:extractvertices",
+        "native:extractwithindistance",
+        "native:fillnodata",
+        "native:fillsinkswangliu",
+        "native:filterbygeometry",
+        "native:fixgeometries",
+        "native:forcerhr",
+        "native:generatepointspixelcentroidsinsidepolygons",
+        "native:hillshade",
+        "native:hublines",
+        "native:interpolatepoint",
+        "native:intersection",
+        "native:joinattributesbylocation",
+        "native:joinattributestable",
+        "native:joinbylocationsummary",
+        "native:joinbynearest",
+        "native:keepnbiggestparts",
+        "native:kmeansclustering",
+        "native:linedensity",
+        "native:lineintersections",
+        "native:linesubstring",
+        "native:meancoordinates",
+        "native:mergelines",
+        "native:mergevectorlayers",
+        "native:minimumenclosingcircle",
+        "native:multidifference",
+        "native:multiintersection",
+        "native:multiparttosingleparts",
+        "native:multiringconstantbuffer",
+        "native:multiunion",
+        "native:nearestneighbouranalysis",
+        "native:offsetline",
+        "native:orientedminimumboundingbox",
+        "native:orthogonalize",
+        "native:pixelstopoints",
+        "native:pixelstopolygons",
+        "native:pointonsurface",
+        "native:pointsalonglines",
+        "native:pointtolayer",
+        "native:poleofinaccessibility",
+        "native:polygonfromlayerextent",
+        "native:polygonize",
+        "native:polygonstolines",
+        "native:promotetomulti",
+        "native:randomextract",
+        "native:randompointsinextent",
+        "native:randompointsinpolygons",
+        "native:randompointsonlines",
+        "native:rasterbooleanand",
+        "native:rasterlayerproperties",
+        "native:rasterlayerstatistics",
+        "native:rasterlayeruniquevaluesreport",
+        "native:rasterlayerzonalstats",
+        "native:rasterlogicalor",
+        "native:rasterminmax",
+        "native:rastersampling",
+        "native:reclassifybylayer",
+        "native:reclassifybytable",
+        "native:rectanglesovalsdiamonds",
+        "native:removeduplicatesbyattribute",
+        "native:removeduplicatevertices",
+        "native:removenullgeometries",
+        "native:renametablefield",
+        "native:reprojectlayer",
+        "native:rescaleraster",
+        "native:retainfields",
+        "native:reverselinedirection",
+        "native:rotatefeatures",
+        "native:roundness",
+        "native:roundrastervalues",
+        "native:ruggednessindex",
+        "native:savefeatures",
+        "native:segmentizebymaxangle",
+        "native:segmentizebymaxdistance",
+        "native:serviceareafromlayer",
+        "native:serviceareafrompoint",
+        "native:setmfromraster",
+        "native:setmvalue",
+        "native:setzfromraster",
+        "native:setzvalue",
+        "native:shortestline",
+        "native:shortestpathlayertopoint",
+        "native:shortestpathpointtolayer",
+        "native:shortestpathpointtopoint",
+        "native:simplifygeometries",
+        "native:singlesidedbuffer",
+        "native:slope",
+        "native:smoothgeometry",
+        "native:snapgeometries",
+        "native:snappointstogrid",
+        "native:splitfeaturesbycharacter",
+        "native:splitlinesbylength",
+        "native:splitwithlines",
+        "native:stdbscanclustering",
+        "native:subdivide",
+        "native:sumlinelengths",
+        "native:swapxy",
+        "native:symmetricaldifference",
+        "native:transect",
+        "native:translategeometry",
+        "native:union",
+        "native:voronoipolygons",
+        "native:zonalhistogram",
+        "native:zonalminmaxpoint",
+        "native:zonalstatisticsfb",
+        "qgis:distancematrix",
+        "qgis:distancetonearesthublinetohub",
+        "qgis:distancetonearesthubpoints",
+        "qgis:heatmapkerneldensityestimation",
+        "qgis:knearestconcavehull",
+        "qgis:linestopolygons",
+        "qgis:listuniquevalues",
+        "qgis:minimumboundinggeometry",
+        "qgis:randomextractwithinsubsets",
+        "qgis:randompointsalongline",
+        "qgis:randompointsinlayerbounds",
+        "qgis:rastercalculator",
+        "qgis:regularpoints",
+        "qgis:relief",
+        "qgis:statisticsbycategories",
+        "qgis:texttofloat",
+        "qgis:variabledistancebuffer",
+    }
+)
+
 _start_lock = threading.Lock()
 _session: QgisSession | None = None
 _start_failure: QgisUnavailable | None = None
@@ -41,6 +216,18 @@ _start_failure: QgisUnavailable | None = None
 
 class QgisUnavailable(RuntimeError):
     """QGIS cannot run in this process, with the reason a tool can print."""
+
+
+class AlgorithmNotAllowed(ValueError):
+    pass
+
+
+def require_allowed_algorithm(algorithm_id: str) -> None:
+    if algorithm_id not in ALLOWED_ALGORITHM_IDS:
+        raise AlgorithmNotAllowed(
+            f"'{algorithm_id}' is not an allowed QGIS algorithm. Call "
+            "list_qgis_algorithms for the ones that are."
+        )
 
 
 class QgisSession:
@@ -59,10 +246,18 @@ class QgisSession:
         return QgsApplication.processingRegistry()
 
     def algorithms(self):
-        return self.registry().algorithms()
+        return [
+            algorithm
+            for algorithm in self.registry().algorithms()
+            if algorithm.id() in ALLOWED_ALGORITHM_IDS
+        ]
 
     def algorithm_by_id(self, algorithm_id: str):
         return self.registry().algorithmById(algorithm_id)
+
+    def run(self, algorithm_id: str, parameters: dict):
+        require_allowed_algorithm(algorithm_id)
+        return self.processing.run(algorithm_id, parameters)
 
 
 def _bridge_system_paths() -> None:
