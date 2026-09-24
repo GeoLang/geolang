@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import zipfile
 
 import pytest
@@ -298,6 +299,48 @@ def test_a_zip_is_charged_its_unzipped_size_against_the_daily_bytes(
     assert refused.json()["detail"] == CALLER_BYTES_SPENT_REPLY
     assert written_files(caller_directories) == []
 
+
+
+def draw(subject, name, padding=0):
+    return client.post(
+        "/draw",
+        json={"geojson": json.loads(geojson(padding=padding)), "name": name},
+        headers={"Authorization": f"Bearer {mint(sub=subject)}"},
+    )
+
+
+def test_a_drawing_over_the_body_limit_gets_413(caller_directories):
+    response = draw("alice", "plot", padding=server.DRAW_MAX_BODY_BYTES)
+
+    assert response.status_code == 413
+    assert written_files(caller_directories) == []
+
+
+def test_a_drawing_is_charged_its_written_size_against_the_callers_budget(
+    caller_directories, budget
+):
+    budget(files_per_caller_per_day=1, bytes_per_caller_per_day=UNZIPPED_LIMIT_BYTES)
+
+    assert draw("alice", "plot").status_code == 200
+    [written] = caller_directories.rglob("plot.gpkg")
+    assert server.upload_budget.byte_budget.spent_today_by_caller == {
+        "alice": written.stat().st_size
+    }
+    refused = draw("alice", "second")
+
+    assert refused.status_code == 429
+    assert refused.json()["detail"] == CALLER_FILES_SPENT_REPLY
+    assert not any(caller_directories.rglob("second.gpkg"))
+
+
+def test_a_drawing_over_the_callers_daily_bytes_is_not_written(caller_directories, budget):
+    budget(bytes_per_caller_per_day=SMALL_LIMIT_BYTES)
+
+    refused = draw("alice", "plot")
+
+    assert refused.status_code == 429
+    assert refused.json()["detail"] == CALLER_BYTES_SPENT_REPLY
+    assert written_files(caller_directories) == []
 
 @pytest.mark.parametrize("value", [None, "0", ""])
 def test_unset_or_zero_means_no_limit(monkeypatch, value):

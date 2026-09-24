@@ -1,4 +1,5 @@
 import inspect
+import io
 import json
 import logging
 import os
@@ -1140,35 +1141,51 @@ class DrawRequest(BaseModel):
     thread_id: str | None = None
 
 
+# a drawing is a few shapes placed by hand
+DRAW_MAX_BODY_BYTES = BYTES_PER_MEGABYTE
+
+
 @app.post("/draw", dependencies=[Depends(platform_auth)])
 async def save_drawn_area(
-    request: DrawRequest, authorization: Annotated[str | None, Header()] = None
+    request: Request, authorization: Annotated[str | None, Header()] = None
 ):
     """Save a GeoJSON feature drawn on the map to a GPKG in the caller's user_data."""
+    body = await bounded_request(request, DRAW_MAX_BODY_BYTES).body()
+    try:
+        drawing = DrawRequest.model_validate_json(body)
+    except ValidationError as e:
+        raise RequestValidationError(e.errors())
+    user_token = bearer_token(authorization)
     # every path here is the caller's own: the directory, the catalogue
-    with user_token_scope(bearer_token(authorization)):
+    with user_token_scope(user_token):
         import geopandas as gpd
         import re
 
         user_data = Path(caller_user_data_dir())
 
-        safe_name = re.sub(r"[^\w]", "_", request.name.strip())[:30] or "drawn_area"
+        safe_name = re.sub(r"[^\w]", "_", drawing.name.strip())[:30] or "drawn_area"
         gpkg_path = user_data / f"{safe_name}.gpkg"
 
         try:
             gdf = gpd.GeoDataFrame.from_features(
                 (
-                    request.geojson.get("features", [request.geojson])
-                    if request.geojson.get("type") == "FeatureCollection"
-                    else [request.geojson]
+                    drawing.geojson.get("features", [drawing.geojson])
+                    if drawing.geojson.get("type") == "FeatureCollection"
+                    else [drawing.geojson]
                 ),
                 crs="EPSG:4326",
             )
             if gdf.empty:
                 raise ValueError("No features in drawn GeoJSON")
-            gdf.to_file(gpkg_path, driver="GPKG")
+            gpkg = io.BytesIO()
+            gdf.to_file(gpkg, driver="GPKG")
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Could not save drawn area: {e}")
+
+        refusal = upload_budget.spend(token_subject(user_token), gpkg.getbuffer().nbytes)
+        if refusal is not None:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, refusal)
+        gpkg_path.write_bytes(gpkg.getvalue())
 
         relative_path = str(gpkg_path.relative_to(Path(EXEC_DIR)))
         geom_types = gdf.geometry.geom_type.dropna().value_counts()
@@ -1197,7 +1214,7 @@ async def save_drawn_area(
             f"[User drew a shape on the map] '{safe_name}': {metadata['geometry_type']}, "
             f"center lon={center_lon}, lat={center_lat}. "
             f"Filename for tools: {gpkg_path.name}",
-            request.thread_id,
+            drawing.thread_id,
             authorization,
         )
 
