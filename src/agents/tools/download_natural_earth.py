@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from src.core.utils import natural_earth_directory, tool_output_path
 
+GPKG_EXTENSION = ".gpkg"
+
 
 class DownloadNaturalEarthArgs(BaseModel):
     scale: str = Field(
@@ -104,7 +106,10 @@ def download_natural_earth_dataset(
                 f"CONTINENT={sorted(set(gdf['CONTINENT'])) if 'CONTINENT' in gdf.columns else 'N/A'}"
             )
 
-        out_name = output_filename or f"{dataset}_filtered.gpkg"
+        out_name = output_filename or f"{dataset}_filtered"
+        # QGIS cannot open the layer without it
+        if not out_name.endswith(GPKG_EXTENSION):
+            out_name += GPKG_EXTENSION
         out_path = tool_output_path("output_filename", out_name)
         filtered.to_file(out_path, driver="GPKG")
         return (

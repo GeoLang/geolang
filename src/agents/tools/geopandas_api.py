@@ -6,6 +6,8 @@ from src.core.utils import tool_input_path, tool_output_path
 # looked up on the geopandas module. A name that is neither answers every call
 # with "Function not found".
 ALLOWED_FUNCTIONS = {"read_file", "sjoin", "proximity_analysis", "filter"}
+# the 50m world countries layer has 242 rows
+READ_FILE_ROW_LIMIT = 300
 
 
 class GeopandasArgs(BaseModel):
@@ -32,6 +34,13 @@ class GeopandasArgs(BaseModel):
     output_path: Optional[str] = Field(
         None, description="Output filename for filter"
     )
+    columns: Optional[str] = Field(
+        None,
+        description=(
+            "read_file: comma-separated columns to return the rows of, e.g. "
+            "'NAME,POP_EST'. Without it read_file returns only the column names."
+        ),
+    )
 
 
 def geopandas_api(
@@ -43,18 +52,19 @@ def geopandas_api(
     predicate: Optional[str] = None,
     output_path: Optional[str] = None,
     filter_query: Optional[str] = None,
+    columns: Optional[str] = None,
 ) -> str:
     """
     Execute GeoPandas operations dynamically.
     """
+    kwargs = {
+        k: v for k, v in locals().items() if k != "function_name" and v is not None
+    }
+
     import os
     import traceback
     import geopandas as gpd
     from shapely.geometry import Point
-
-    kwargs = {
-        k: v for k, v in locals().items() if k != "function_name" and v is not None
-    }
 
     log = []
     log.append("=== GEOPANDAS_API EXECUTION ===")
@@ -106,6 +116,33 @@ def geopandas_api(
             )
         # ─────────────────────────────────────────────────────────────────
 
+        if func_name == "read_file":
+            gdf = gpd.read_file(dataset_path)
+            available = [c for c in gdf.columns if c != gdf.geometry.name]
+            log.append(f"Loaded {len(gdf)} rows")
+            summary = f"{len(gdf)} features. Columns: {', '.join(available)}"
+            wanted = [c.strip() for c in (columns or "").split(",") if c.strip()]
+            unknown = [c for c in wanted if c not in available]
+            if unknown:
+                log.append("\n=== FAILURE ===")
+                return "\n".join(log) + (
+                    f"\n\nRESULT: Error: no column {', '.join(unknown)} in this "
+                    f"file. {summary}"
+                )
+            log.append("\n=== SUCCESS ===")
+            if not wanted:
+                return "\n".join(log) + (
+                    f"\n\nRESULT: {summary}. No values were read: call read_file "
+                    "again with columns set to the ones you need."
+                )
+            rows = gdf[wanted].head(READ_FILE_ROW_LIMIT).to_csv(index=False)
+            cut = (
+                f" Only the first {READ_FILE_ROW_LIMIT} rows are shown."
+                if len(gdf) > READ_FILE_ROW_LIMIT
+                else ""
+            )
+            return "\n".join(log) + f"\n\nRESULT: {summary}.{cut}\n{rows}"
+
         if func_name == "proximity_analysis":
             point_coords = point_coords or [0.0, 0.0]
             distance_m = distance_m or 5000.0
@@ -152,17 +189,7 @@ def geopandas_api(
             log.append("\n=== FAILURE ===")
             return "\n".join(log) + "\n\nRESULT: Error: Function not found"
 
-        if func_name == "read_file" and not dataset_path:
-            log.append("Error: Missing dataset_path")
-            log.append("\n=== FAILURE ===")
-            return "\n".join(log) + "\n\nRESULT: Error: Missing dataset_path"
-
-        # Map dataset_path → correct parameter name for each function
-        call_kwargs = dict(kwargs)
-        if func_name == "read_file" and "dataset_path" in call_kwargs:
-            call_kwargs["filename"] = call_kwargs.pop("dataset_path")
-
-        result = func(**call_kwargs)
+        result = func(**kwargs)
         log.append(f"Executed {func_name}")
         log.append("\n=== SUCCESS ===")
         return "\n".join(log) + f"\n\nRESULT: {str(result)}"

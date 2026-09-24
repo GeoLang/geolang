@@ -49,3 +49,57 @@ def test_a_geodataframe_method_is_refused_by_name(outputs, function_name):
     result = geopandas_api(function_name=function_name)
 
     assert NOT_ALLOWED in result
+
+
+SWITZERLAND_POPULATION = 8574832
+
+
+@pytest.fixture
+def countries(outputs):
+    from shapely.geometry import Point
+
+    gpd.GeoDataFrame(
+        {
+            "NAME": ["Switzerland", "Austria"],
+            "POP_EST": [SWITZERLAND_POPULATION, 8877067],
+            "CONTINENT": ["Europe", "Europe"],
+        },
+        geometry=[Point(8.2, 46.8), Point(14.1, 47.6)],
+        crs="EPSG:4326",
+    ).to_file(outputs / "europe_countries.gpkg", driver="GPKG")
+    return "europe_countries.gpkg"
+
+
+def test_read_file_returns_the_rows_of_the_columns_asked_for(countries):
+    result = geopandas_api(
+        function_name="read_file", dataset_path=countries, columns="NAME, POP_EST"
+    )
+
+    assert f"Switzerland,{SWITZERLAND_POPULATION}" in result
+    assert "Columns: NAME, POP_EST, CONTINENT" in result
+
+
+def test_read_file_without_columns_reads_no_values(countries):
+    result = geopandas_api(function_name="read_file", dataset_path=countries)
+
+    assert "Columns: NAME, POP_EST, CONTINENT" in result
+    assert "Switzerland" not in result
+
+
+def test_read_file_names_a_column_the_file_lacks(countries):
+    result = geopandas_api(
+        function_name="read_file", dataset_path=countries, columns="NAME,POPULATION"
+    )
+
+    assert "Error: no column POPULATION" in result
+    assert "Switzerland" not in result
+
+
+def test_the_logged_arguments_are_only_the_ones_given(countries):
+    result = geopandas_api(
+        function_name="read_file", dataset_path=countries, columns="NAME"
+    )
+
+    arguments = next(line for line in result.splitlines() if line.startswith("Arguments:"))
+    assert "module" not in arguments
+    assert "'columns': 'NAME'" in arguments

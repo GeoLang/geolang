@@ -86,3 +86,37 @@ def test_image_creates_uid_1000_runtime_mounts_before_copying_source():
     assert f"mkdir -p {mount_targets}" in recipe
     assert f"chown 1000:1000 {mount_targets}" in recipe
     assert recipe.index("chown 1000:1000") < recipe.index("COPY src/ ./src/")
+
+
+def test_a_filtered_download_named_without_an_extension_is_saved_as_gpkg(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
+    monkeypatch.setattr(utils, "OUTPUTS_ROOT", str(tmp_path / "outputs"))
+    shapefile_dir = tmp_path / "shapefile"
+    shapefile_dir.mkdir()
+    gpd.GeoDataFrame(
+        {"CONTINENT": ["Europe", "Asia"]},
+        geometry=[Point(8.0, 47.0), Point(100.0, 30.0)],
+        crs="EPSG:4326",
+    ).to_file(shapefile_dir / "ne_50m_admin_0_countries.shp")
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zip_file:
+        for part in shapefile_dir.iterdir():
+            zip_file.write(part, part.name)
+    response = SimpleNamespace(
+        raise_for_status=lambda: None,
+        iter_content=lambda chunk_size: [archive.getvalue()],
+    )
+    monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: response))
+
+    result = download_natural_earth_dataset(
+        scale="50m",
+        dataset="admin_0_countries",
+        filter_query="CONTINENT == 'Europe'",
+        output_filename="europe_countries",
+    )
+
+    assert "outputs/europe_countries.gpkg" in result
+    saved = Path(utils.caller_outputs_dir()) / "europe_countries.gpkg"
+    assert len(gpd.read_file(saved)) == 1
