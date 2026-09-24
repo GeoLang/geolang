@@ -18,8 +18,11 @@ from src.api.outputs_retention import (
     DEFAULT_RETENTION_DAYS,
     RETENTION_DAYS_ENV,
     SECONDS_PER_DAY,
+    USER_DATA_RETENTION_DAYS_ENV,
     retention_days,
     sweep_outputs,
+    sweep_user_data,
+    user_data_retention_days,
 )
 from src.core import utils
 from src.core.utils import caller_directory_name
@@ -108,3 +111,31 @@ def test_the_shares_beside_the_caller_directories_are_kept(outputs):
 
     assert sweep_outputs() == (1, FILE_BYTES)
     assert share.exists()
+
+
+@pytest.fixture
+def user_data(tmp_path, monkeypatch):
+    root = tmp_path / "user_data"
+    root.mkdir()
+    monkeypatch.setattr(utils, "USER_DATA_ROOT", root)
+    return root
+
+
+def test_user_data_is_kept_forever_by_default(user_data, monkeypatch):
+    monkeypatch.delenv(USER_DATA_RETENTION_DAYS_ENV, raising=False)
+    stale = aged(user_data / ALICE / "parcels.gpkg", 900)
+
+    assert user_data_retention_days() == 0
+    assert sweep_user_data() == (0, 0)
+    assert stale.exists()
+
+
+def test_user_data_retention_reaches_into_an_unzipped_upload(user_data, monkeypatch):
+    monkeypatch.setenv(USER_DATA_RETENTION_DAYS_ENV, "30")
+    stale = aged(user_data / ALICE / "parcels" / "parcels.shp", 45)
+    fresh = aged(user_data / BOB / "roads.gpkg", 1)
+
+    assert sweep_user_data() == (1, FILE_BYTES)
+    assert not stale.exists()
+    assert not (user_data / ALICE).exists()
+    assert fresh.exists()

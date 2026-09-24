@@ -259,6 +259,7 @@ Adding a tool takes one module in `src/agents/tools/` exporting `TOOL_FUNCTION` 
 | `GEOLANG_PUBLIC_URL` | `/agent` | Where a browser reaches this service, used to build the `/live-data/{token}` URLs written into a document. |
 | `TOOL_EXEC_DIR` | repo root | Working directory for tool I/O. Holds the `outputs/` and `user_data/` roots, each one directory per caller. |
 | `GEOLANG_OUTPUTS_RETENTION_DAYS` | `30` | How long an output file is kept. The API server deletes older files from every caller directory at startup and once a day. `0` keeps everything. |
+| `GEOLANG_USER_DATA_RETENTION_DAYS` | `0` | How long an uploaded file in `user_data/` is kept, swept the same way. `0` or unset keeps everything. |
 | `GEOLANG_TOOL_RUNS_PER_DAY` | unset | Tool runs per UTC day, all callers together. Past it a tool call gets 429. Unset or `0` means no limit. Kept in memory. |
 | `GEOLANG_TOOL_RUNS_PER_CALLER_PER_DAY` | unset | Tool runs per UTC day for one token subject, chat tool calls included. Unset or `0` means no limit. Without the gate there is no subject, so only the global limit applies. |
 | `GEOLANG_TOOL_RUNS_AT_ONCE_PER_CALLER` | unset | Tool runs one token subject may have in flight. A call past it gets 429 instead of waiting. Unset or `0` means no limit. |

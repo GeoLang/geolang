@@ -110,15 +110,34 @@ def test_no_file_of_all_shares_is_nothing_to_split(outputs):
     assert not outputs.exists()
 
 
-def test_a_write_that_fails_leaves_the_uploads_the_catalogue_listed(
-    tmp_path, monkeypatch
-):
+@pytest.fixture
+def user_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(utils, "EXEC_DIR", str(tmp_path))
     monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
-
     with caller_directory_scope(BOB):
-        utils.save_catalogue([{"name": "roads"}])
+        yield Path(utils.caller_user_data_dir())
 
-        with pytest.raises(TypeError):
-            utils.save_catalogue([{"name": object()}])
 
-        assert utils.load_catalogue() == [{"name": "roads"}]
+def uploaded(user_data, name):
+    (user_data / name).write_text("{}")
+    return {"name": name, "relative_path": f"user_data/{BOB}/{name}"}
+
+
+def test_a_write_that_fails_leaves_the_uploads_the_catalogue_listed(user_data):
+    roads = uploaded(user_data, "roads.geojson")
+    utils.save_catalogue([roads])
+
+    with pytest.raises(TypeError):
+        utils.save_catalogue([{"name": object()}])
+
+    assert utils.load_catalogue() == [roads]
+
+
+def test_an_upload_whose_file_is_gone_is_not_listed(user_data):
+    roads = uploaded(user_data, "roads.geojson")
+    parcels = uploaded(user_data, "parcels.geojson")
+    utils.save_catalogue([roads, parcels])
+
+    (user_data / "parcels.geojson").unlink()
+
+    assert utils.load_catalogue() == [roads]

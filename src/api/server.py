@@ -56,7 +56,7 @@ from src.api.live_document import (
     LIVE_DATA_TOKEN_PATTERN,
 )
 from src.api.mcp_server import MCP_PATH, create_mcp_app
-from src.api.outputs_retention import sweep_outputs_periodically
+from src.api.outputs_retention import sweep_periodically
 from src.api.tool_run_limits import ToolRunRefused
 from src.api.upload_limits import (
     BYTES_PER_MEGABYTE,
@@ -196,7 +196,7 @@ async def lifespan(_app: FastAPI):
     Thread(target=preload_geo_stack, daemon=True).start()
     split_all_shares_file()
     # not in the executor, which mounts the same volume: one deleter is enough
-    retention = asyncio.create_task(sweep_outputs_periodically())
+    retention = asyncio.create_task(sweep_periodically())
     try:
         async with mcp_session_manager.run():
             yield

@@ -372,7 +372,13 @@ def load_catalogue() -> list:
     if not path.exists():
         return []
     with open(path) as f:
-        return json.load(f)
+        catalogue = json.load(f)
+    # the retention sweep deletes uploads without touching the catalogue
+    return [
+        entry
+        for entry in catalogue
+        if (Path(EXEC_DIR) / entry["relative_path"]).exists()
+    ]
 
 
 def save_catalogue(catalogue: list) -> None:

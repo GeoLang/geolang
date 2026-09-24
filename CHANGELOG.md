@@ -80,6 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nights running.
 
 ### Added
+- 2026-09-23: `GEOLANG_USER_DATA_RETENTION_DAYS`, off by default, deletes
+  uploads in `user_data/` last written longer ago than that, in the daily
+  outputs sweep. Both sweeps now reach files at any depth, so an unzipped
+  upload's folder goes too. An upload whose file is gone drops out of the
+  caller's catalogue.
 - 2026-09-23: tool run limits, each off when unset. `GEOLANG_TOOL_RUNS_PER_DAY`
   and `GEOLANG_TOOL_RUNS_PER_CALLER_PER_DAY` cap tool runs per UTC day,
   `GEOLANG_TOOL_RUNS_AT_ONCE_PER_CALLER` caps one user's runs in flight, and
