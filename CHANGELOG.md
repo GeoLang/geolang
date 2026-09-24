@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-23: `/chat/agui` no longer counts chat runs.
+  `GEOLANG_CHAT_RUNS_PER_DAY` and `GEOLANG_CHAT_RUNS_PER_CALLER_PER_DAY` are
+  gone, sibyl caps runs and tokens per user in its database.
 - 2026-09-23: `GET /models` and `PUT /model` forward the caller's bearer to
   sibyl, which keeps the active model per user. `PUT /model/default` sets the
   model a user starts on, admin only, checked by sibyl.

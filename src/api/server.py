@@ -48,7 +48,6 @@ import httpx
 
 from src.agents.agent_manager import approval_route_only, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
-from src.api.chat_budget import ChatRunBudget
 from src.api.live_document import (
     DOCUMENT_HEADER,
     LAYER_DATA_SUFFIX,
@@ -233,7 +232,6 @@ def cors_origins() -> list[str]:
 
 require_configuration()
 report_configuration()
-chat_run_budget = ChatRunBudget.from_environment()
 upload_limits = UploadLimits.from_environment()
 upload_budget = UploadBudget.from_environment()
 
@@ -724,10 +722,6 @@ async def agui_stream(events, thread_id: str, run_id: str, accept: str | None = 
         )
 
 
-async def budget_refusal_events(reply: str):
-    yield ("text", reply)
-
-
 def token_subject(token: str | None) -> str | None:
     return str((platform_claims(token) or {}).get("sub") or "") or None
 
@@ -748,17 +742,12 @@ async def chat_agui(input: RunAgentInput, request: Request):
         raise HTTPException(status_code=400, detail="No user message in input")
     prompt = user_messages[-1].content or ""
     document = document_id_of(request.headers.get(DOCUMENT_HEADER))
-    user_token = bearer_token(request.headers.get("authorization"))
-    refusal = chat_run_budget.spend(token_subject(user_token))
-    if refusal is None:
-        events = agent_event_stream(
-            prompt,
-            user_token=user_token,
-            thread_id=input.thread_id,
-            state=input.state,
-        )
-    else:
-        events = budget_refusal_events(refusal)
+    events = agent_event_stream(
+        prompt,
+        user_token=bearer_token(request.headers.get("authorization")),
+        thread_id=input.thread_id,
+        state=input.state,
+    )
 
     async def bound_stream():
         # the binding has to hold while the stream runs: the run request is
