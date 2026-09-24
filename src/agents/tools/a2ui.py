@@ -51,6 +51,16 @@ def recent_output_layers() -> list[tuple[str, str, str, str]]:
     ]
 
 
+def absent_column_note(file: str, path: str, column: str) -> str:
+    import geopandas as gpd
+
+    layer = gpd.read_file(path, rows=0)
+    columns = [name for name in layer.columns if name != layer.geometry.name]
+    if column in columns:
+        return ""
+    return f"{file} has no column {column}, its columns are {', '.join(columns)}."
+
+
 class EmitUISpecArgs(BaseModel):
     ui_type: str = Field(
         ...,
@@ -74,7 +84,8 @@ class EmitUISpecArgs(BaseModel):
             "Semicolon-separated layers for 'map', each 'name|file_path|color|"
             "shade_by', e.g. 'Cafes|outputs/cafes.gpkg|#ff0000'. color defaults to "
             "#3388ff. shade_by is one column of that file to shade by instead of "
-            "drawing the layer in one colour."
+            "drawing the layer in one colour: a text column gives unique values "
+            "(QGIS categorized), a numeric one a choropleth (QGIS graduated)."
         ),
     )
     image_path: Optional[str] = Field(
@@ -172,16 +183,27 @@ def emit_ui_spec(
                 )
             # the viewer fetches these by name, so a layer it could not read is
             # reported here rather than rendering as a blank map
-            missing = [
-                layer["file"]
+            resolved = {
+                layer["file"]: tool_input_path_or_none("layers", layer["file"])
                 for layer in layer_list
-                if not tool_input_path_or_none("layers", layer["file"])
-            ]
+            }
+            missing = [file for file, path in resolved.items() if not path]
             if missing:
                 return (
                     f"ERROR: layer file(s) not found: {', '.join(missing)}. "
                     "Run the analysis tools to create them first, or call "
                     "list_outputs to see what exists."
+                )
+            absent = [
+                absent_column_note(layer["file"], resolved[layer["file"]], layer["shade_by"])
+                for layer in layer_list
+                if layer.get("shade_by")
+            ]
+            absent = [note for note in absent if note]
+            if absent:
+                return (
+                    f"ERROR: nothing was drawn. {' '.join(absent)} Call emit_ui_spec "
+                    "again with one of those columns as the fourth part, or without it."
                 )
             spec = {"type": "map", "layers": layer_list}
             if center_lon is not None and center_lat is not None:

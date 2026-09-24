@@ -6,7 +6,9 @@ grok looped on that error too and the run was aborted with no map at all."""
 import json
 import pathlib
 
+import geopandas as gpd
 import pytest
+from shapely.geometry import Point
 
 from src.agents.tools.a2ui import emit_ui_spec
 from src.core import utils
@@ -21,7 +23,12 @@ def outputs(tmp_path, monkeypatch):
     monkeypatch.setattr(utils, "USER_DATA_ROOT", tmp_path / "user_data")
     # the caller's own directory, which is where a layer of theirs is looked up
     out = pathlib.Path(utils.caller_outputs_dir())
-    (out / "buffer.gpkg").write_bytes(b"stub")
+    # a real layer, since a shade_by column is looked up in it
+    gpd.GeoDataFrame(
+        {"gap_score": [0.4], "NAME": ["Lisbon"]},
+        geometry=[Point(-9.15, 38.74)],
+        crs="EPSG:4326",
+    ).to_file(out / "buffer.gpkg", driver="GPKG")
     return out
 
 
@@ -115,3 +122,11 @@ def test_missing_file_is_an_error(outputs):
     assert res.startswith("ERROR")
     assert "nope.gpkg" in res
     assert "list_outputs" in res
+
+
+def test_a_shade_by_column_the_file_lacks_is_an_error(outputs):
+    res = emit_ui_spec("map", layers="Countries|outputs/buffer.gpkg|#ff6b35|POP_EST")
+    assert res.startswith("ERROR")
+    assert "POP_EST" in res
+    # the columns it does have, so the model can pick one
+    assert "gap_score, NAME" in res
