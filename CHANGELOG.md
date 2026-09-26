@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- 2026-09-26: `calculate_isochrones` and `trade_area` ask itinera at
+  `ITINERA_URL` before any third party. A point inside the loaded extract
+  gets one `/isochrone` request per contour. A coverage refusal, or itinera
+  being unset or unreachable, still uses Valhalla for driving and a
+  downloaded road network for walking and cycling.
 - 2026-09-24: no tool calls Nominatim any more, directly or through osmnx.
   Place names go to geokode at `GEOKODE_URL`, and the outline of a named
   place or feature comes from Overpass by the OSM type and id geokode

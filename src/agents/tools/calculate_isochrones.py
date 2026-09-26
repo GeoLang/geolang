@@ -46,7 +46,9 @@ def calculate_isochrones(
 ) -> str:
     """
     Walk, cycle, or drive time isochrones (catchment areas) around a location,
-    over OpenStreetMap road networks. Returns one polygon per time threshold.
+    over the platform's itinera engine where the loaded OSM extract covers the
+    point, and OpenStreetMap otherwise: Valhalla for driving, a downloaded road
+    network for walking and cycling. Returns one polygon per time threshold.
     """
     import traceback
 
@@ -94,18 +96,24 @@ def calculate_isochrones(
         gdf.to_file(output_path, driver="GPKG")
 
         time_str = ", ".join(str(t) for t in sorted(times))
+        saved = (
+            f"{len(gdf)} zones saved to outputs/{output_filename}.gpkg. "
+            f"Center: lon={lon:.4f}, lat={lat:.4f}"
+        )
+        detail = features[0]["road_detail"]
+        if detail == "itinera":
+            return (
+                f"Computed {travel_mode} isochrones ({time_str} min) around {place_name} "
+                f"using itinera. {saved}"
+            )
         if driving:
             return (
                 f"Computed driving isochrones ({time_str} min) around {place_name} "
-                f"using Valhalla routing. "
-                f"{len(gdf)} zones saved to outputs/{output_filename}.gpkg. "
-                f"Center: lon={lon:.4f}, lat={lat:.4f}"
+                f"using Valhalla routing. {saved}"
             )
         return (
             f"Computed {travel_mode} isochrones ({time_str} min) around {place_name} "
-            f"using road_detail='{features[0]['road_detail']}'. "
-            f"{len(gdf)} zones saved to outputs/{output_filename}.gpkg. "
-            f"Center: lon={lon:.4f}, lat={lat:.4f}"
+            f"using road_detail='{detail}'. {saved}"
         )
 
     except Exception as e:

@@ -435,6 +435,108 @@ def test_driving_isochrones_ask_valhalla_once_for_every_contour(
     assert widths[15] > widths[10] > widths[5]
 
 
+def _itinera_ring():
+    """Open [lat, lon] ring around Leicester, the shape itinera returns."""
+    return [
+        [LAT, LON],
+        [LAT, LON + 0.02],
+        [LAT + 0.02, LON + 0.02],
+        [LAT + 0.02, LON],
+    ]
+
+
+def test_walking_isochrones_ask_itinera_once_per_contour(monkeypatch, stub_services):
+    calls = []
+
+    def get(url, params=None, **kwargs):
+        calls.append(params)
+        return SimpleNamespace(
+            status_code=200,
+            ok=True,
+            json=lambda: {"reachable_nodes": 12, "boundary": _itinera_ring()},
+        )
+
+    monkeypatch.setenv("ITINERA_URL", "http://itinera.test")
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        fake_platform(_answers_leicester, others=SimpleNamespace(get=get)),
+    )
+
+    class _NoGraph:
+        def graph_from_point(self, *args, **kwargs):
+            raise AssertionError("walking isochrone downloaded a road network")
+
+    monkeypatch.setitem(sys.modules, "osmnx", _NoGraph())
+
+    out = calculate_isochrones(
+        "Leicester",
+        travel_mode="walking",
+        time_minutes="5,10",
+        output_filename="walk_iso",
+    )
+    assert "using itinera" in out, out
+
+    # largest contour first, one request each, pedestrian for walking
+    assert [call["max_seconds"] for call in calls] == [600, 300]
+    assert [call["profile"] for call in calls] == ["pedestrian", "pedestrian"]
+    assert calls[0]["lat"] == LAT and calls[0]["lon"] == LON
+
+    gdf = _read_output("walk_iso")
+    assert sorted(gdf["minutes"]) == [5, 10]
+    assert set(gdf["road_detail"]) == {"itinera"}
+    # the ring is [lat, lon] and open. Swapping the axes would miss this point.
+    assert gdf.geometry.iloc[0].contains(Point(LON + 0.01, LAT + 0.01))
+
+
+def test_driving_isochrones_fall_back_when_itinera_refuses_coverage(
+    monkeypatch, stub_services
+):
+    posts = []
+
+    def get(url, params=None, **kwargs):
+        return SimpleNamespace(
+            status_code=400, ok=False, json=lambda: {"error": "outside the extract"}
+        )
+
+    def post(url, json=None, timeout=None):
+        posts.append(json)
+        features = [
+            {
+                "type": "Feature",
+                "properties": {"contour": float(contour["time"])},
+                "geometry": shapely_mapping(
+                    Point(LON, LAT).buffer(contour["time"] / 1000.0)
+                ),
+            }
+            for contour in json["contours"]
+        ]
+        return SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {"type": "FeatureCollection", "features": features},
+        )
+
+    monkeypatch.setenv("ITINERA_URL", "http://itinera.test")
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        fake_platform(
+            _answers_leicester, others=SimpleNamespace(get=get, post=post)
+        ),
+    )
+
+    out = calculate_isochrones(
+        "Leicester",
+        travel_mode="driving",
+        time_minutes="5",
+        output_filename="drive_fallback",
+    )
+    assert "Valhalla" in out, out
+    assert len(posts) == 1
+    assert _read_output("drive_fallback")["road_detail"].iloc[0] == "valhalla"
+
+
 def test_score_sites_asks_opentopodata_once_for_every_site(monkeypatch, stub_services):
     monkeypatch.setitem(sys.modules, "osmnx", _SettingsOsmnx())
     gets = []

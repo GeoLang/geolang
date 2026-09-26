@@ -17,6 +17,16 @@ VALHALLA_MAX_CONTOURS = 4
 
 VALHALLA_URL = "https://valhalla1.openstreetmap.de/isochrone"
 
+# itinera profile names. A mode absent here never asks itinera.
+ITINERA_PROFILES = {
+    "walking": "pedestrian",
+    "cycling": "bicycle",
+    "driving": "car",
+}
+
+# one contour per request, same budget compute_route gives a route
+ITINERA_TIMEOUT_SECONDS = 15
+
 # metres each road edge is widened by before the bands are drawn
 EDGE_BUFFER_M = {"walk": 80, "bike": 100}
 
@@ -32,12 +42,97 @@ NODE_BUFFER_DEGREES = 0.002
 def isochrone_polygons(
     lat: float, lon: float, travel_mode: str, times: list[int], road_detail: str
 ) -> list[dict] | str:
+    # platform itinera first. None means unset, unreachable, or the point is
+    # outside the loaded extract, and the caller falls through.
+    covered = _itinera_polygons(lat, lon, travel_mode, times)
+    if covered is not None:
+        return covered
     network_type, fallback_kph = MODE_NETWORKS.get(travel_mode.lower(), ("walk", 5.0))
     if network_type == "drive":
         return _valhalla_polygons(lat, lon, travel_mode, times)
     return _network_polygons(
         lat, lon, travel_mode, times, road_detail, network_type, fallback_kph
     )
+
+
+def _itinera_polygons(
+    lat: float, lon: float, travel_mode: str, times: list[int]
+) -> list[dict] | None:
+    import os
+
+    url = os.environ.get("ITINERA_URL")
+    profile = ITINERA_PROFILES.get(travel_mode.lower())
+    if not url or profile is None:
+        return None
+
+    import requests
+
+    features = []
+    answered = False
+    for t_min in sorted(times, reverse=True):
+        try:
+            resp = requests.get(
+                f"{url.rstrip('/')}/isochrone",
+                params={
+                    "lat": lat,
+                    "lon": lon,
+                    "max_seconds": t_min * 60,
+                    "profile": profile,
+                },
+                timeout=ITINERA_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            return features or None
+        # 400 is itinera's coverage refusal: the point is outside the extract
+        if resp.status_code == 400:
+            return features or None
+        if not resp.ok:
+            return features or None
+        answered = True
+        try:
+            boundary = resp.json().get("boundary") or []
+        except Exception:
+            return features or None
+        polygon = _polygon_from_itinera_boundary(boundary)
+        if polygon is None:
+            continue
+        features.append(
+            {
+                "geometry": polygon,
+                "minutes": int(t_min),
+                "mode": travel_mode,
+                "road_detail": "itinera",
+            }
+        )
+    # a covered point that produced no ring stays empty. Falling through would
+    # download the same neighbourhood from Overpass.
+    if answered:
+        return features
+    return None
+
+
+def _polygon_from_itinera_boundary(boundary):
+    """Itinera's boundary is an open ring of [lat, lon] pairs."""
+    from shapely.geometry import Point, Polygon
+
+    coords = []
+    for pair in boundary:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        lat, lon = pair
+        coords.append((float(lon), float(lat)))
+    if len(coords) >= 3:
+        if coords[0] != coords[-1]:
+            coords.append(coords[0])
+        polygon = Polygon(coords)
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if polygon.is_empty or polygon.geom_type not in ("Polygon", "MultiPolygon"):
+            return None
+        return polygon
+    if coords:
+        return Point(coords[0]).buffer(NODE_BUFFER_DEGREES)
+    return None
 
 
 def _valhalla_polygons(
