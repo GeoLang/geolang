@@ -8,14 +8,18 @@ from datetime import date, datetime, timezone
 logger = logging.getLogger(__name__)
 
 
-def whole_number_limit(name: str, unit: str) -> int | None:
+def whole_number_limit(name: str, unit: str, default: int | None = None) -> int | None:
     configured = os.environ.get(name, "").strip()
     if not configured:
-        return None
+        return default
     if not configured.isdecimal():
-        raise RuntimeError(
-            f"{name} must be a whole number of {unit}, got {configured!r}. "
+        meaning = (
             "Unset or 0 means no limit."
+            if default is None
+            else f"Unset means {default} {unit}, 0 means no limit."
+        )
+        raise RuntimeError(
+            f"{name} must be a whole number of {unit}, got {configured!r}. {meaning}"
         )
     return int(configured) or None
 

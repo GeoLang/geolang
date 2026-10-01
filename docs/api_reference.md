@@ -266,8 +266,8 @@ Adding a tool takes one module in `src/agents/tools/` exporting `TOOL_FUNCTION` 
 | `GEOLANG_OUTPUT_MEGABYTES_PER_CALLER_PER_DAY` | unset | Megabytes a token subject's tool runs may add to their outputs directory per UTC day. Once over, the next tool call gets 429. Unset or `0` means no limit. |
 | `GEOLANG_UPLOAD_MAX_REQUEST_MEGABYTES` | unset | Largest `/upload` request body. Checked while the body is read, a larger one gets 413. Unset or `0` means no limit. |
 | `GEOLANG_UPLOAD_MAX_FILE_MEGABYTES` | unset | Largest uploaded file. A larger one gets 413 and is not written. Unset or `0` means no limit. |
-| `GEOLANG_UPLOAD_MAX_ZIP_ENTRIES` | unset | Most entries an uploaded `.zip` may hold. Checked before unzipping, a larger archive gets 413. Unset or `0` means no limit. |
-| `GEOLANG_UPLOAD_MAX_UNZIPPED_MEGABYTES` | unset | Largest total unzipped size an uploaded `.zip` may declare. Checked before unzipping, a larger archive gets 413. Unset or `0` means no limit. |
+| `GEOLANG_UPLOAD_MAX_ZIP_ENTRIES` | `100` | Most entries an uploaded `.zip` may hold. Checked before unzipping, a larger archive gets 413. Unset or empty means `100`, `0` means no limit. |
+| `GEOLANG_UPLOAD_MAX_UNZIPPED_MEGABYTES` | `200` | Largest total unzipped size an uploaded `.zip` may declare. Checked before unzipping, a larger archive gets 413. Unzipping writes no more of an entry than it declares. Unset or empty means `200`, `0` means no limit. |
 | `GEOLANG_UPLOAD_FILES_PER_DAY` | unset | Uploads per UTC day, all callers together. Past it `/upload` answers 429. Unset or `0` means no limit. Kept in memory. |
 | `GEOLANG_UPLOAD_FILES_PER_CALLER_PER_DAY` | unset | Uploads per UTC day for one token subject. Unset or `0` means no limit. |
 | `GEOLANG_UPLOAD_MEGABYTES_PER_DAY` | unset | Megabytes uploaded per UTC day, all callers together. A zip counts as the larger of its size and its unzipped size. Unset or `0` means no limit. |

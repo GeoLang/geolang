@@ -98,6 +98,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against 0.17 for the same tasks before the trim.
 
 ### Fixed
+- 2026-10-01: an uploaded `.zip` is capped at 100 entries and 200 unzipped
+  megabytes when `GEOLANG_UPLOAD_MAX_ZIP_ENTRIES` and
+  `GEOLANG_UPLOAD_MAX_UNZIPPED_MEGABYTES` are unset or empty. Before, a stack
+  without them accepted any zip. Setting either to `0` still turns its cap off.
 - 2026-09-24: `POST /draw` answers `413` to a body over 1 MB and charges the written GPKG to the daily upload budget.
 - 2026-09-24: `filter_query` in `geopandas_api` and
   `download_natural_earth_dataset` no longer goes to pandas `query`. It is

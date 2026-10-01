@@ -21,6 +21,8 @@ UPLOAD_FILES_PER_DAY_ENV = "GEOLANG_UPLOAD_FILES_PER_DAY"
 UPLOAD_FILES_PER_CALLER_PER_DAY_ENV = "GEOLANG_UPLOAD_FILES_PER_CALLER_PER_DAY"
 UPLOAD_MEGABYTES_PER_DAY_ENV = "GEOLANG_UPLOAD_MEGABYTES_PER_DAY"
 UPLOAD_MEGABYTES_PER_CALLER_PER_DAY_ENV = "GEOLANG_UPLOAD_MEGABYTES_PER_CALLER_PER_DAY"
+DEFAULT_MAX_ZIP_ENTRIES = 100
+DEFAULT_MAX_UNZIPPED_MEGABYTES = 200
 
 BYTES_PER_MEGABYTE = 1024 * 1024
 UPLOAD_COPY_CHUNK_BYTES = BYTES_PER_MEGABYTE
@@ -36,8 +38,10 @@ CALLER_BYTES_SPENT_REPLY = (
 )
 
 
-def megabyte_limit(name: str, unit: str = "megabytes") -> int | None:
-    megabytes = whole_number_limit(name, unit)
+def megabyte_limit(
+    name: str, unit: str = "megabytes", default_megabytes: int | None = None
+) -> int | None:
+    megabytes = whole_number_limit(name, unit, default_megabytes)
     return None if megabytes is None else megabytes * BYTES_PER_MEGABYTE
 
 
@@ -59,8 +63,13 @@ class UploadLimits:
         return cls(
             megabyte_limit(UPLOAD_MAX_REQUEST_MEGABYTES_ENV),
             megabyte_limit(UPLOAD_MAX_FILE_MEGABYTES_ENV),
-            whole_number_limit(UPLOAD_MAX_ZIP_ENTRIES_ENV, "zip entries"),
-            megabyte_limit(UPLOAD_MAX_UNZIPPED_MEGABYTES_ENV),
+            whole_number_limit(
+                UPLOAD_MAX_ZIP_ENTRIES_ENV, "zip entries", DEFAULT_MAX_ZIP_ENTRIES
+            ),
+            megabyte_limit(
+                UPLOAD_MAX_UNZIPPED_MEGABYTES_ENV,
+                default_megabytes=DEFAULT_MAX_UNZIPPED_MEGABYTES,
+            ),
         )
 
 

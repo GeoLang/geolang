@@ -5,12 +5,15 @@ import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.datastructures import UploadFile
 
 from src.api import server
 from src.api.upload_limits import (
     BYTES_PER_MEGABYTE,
     CALLER_BYTES_SPENT_REPLY,
     CALLER_FILES_SPENT_REPLY,
+    DEFAULT_MAX_UNZIPPED_MEGABYTES,
+    DEFAULT_MAX_ZIP_ENTRIES,
     UPLOAD_FILES_PER_CALLER_PER_DAY_ENV,
     UPLOAD_FILES_PER_DAY_ENV,
     UPLOAD_MAX_FILE_MEGABYTES_ENV,
@@ -21,6 +24,7 @@ from src.api.upload_limits import (
     UPLOAD_MEGABYTES_PER_DAY_ENV,
     UploadBudget,
     UploadLimits,
+    checked_unzipped_bytes,
 )
 from src.core import utils
 from src.core.auth import SECRET_ENV
@@ -49,6 +53,10 @@ MANY_ZIP_ENTRIES = 50
 ZIP_ENTRY_LIMIT = 10
 UNZIPPED_LIMIT_BYTES = BYTES_PER_MEGABYTE
 BOMB_ENTRY_BYTES = 8 * BYTES_PER_MEGABYTE
+DEFAULT_UPLOAD_LIMITS = UploadLimits(
+    None, None, DEFAULT_MAX_ZIP_ENTRIES, DEFAULT_MAX_UNZIPPED_MEGABYTES * BYTES_PER_MEGABYTE
+)
+NO_UPLOAD_LIMITS = UploadLimits(None, None, None, None)
 
 
 def geojson(name="parcel", padding=0):
@@ -65,6 +73,30 @@ def zipped(entries):
         for name, content in entries:
             archive.writestr(name, content)
     return buffer.getvalue()
+
+
+def zipped_zero_megabytes(megabytes):
+    zero_megabyte = bytes(BYTES_PER_MEGABYTE)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        with archive.open("zeros.shp", "w") as entry:
+            for _ in range(megabytes):
+                entry.write(zero_megabyte)
+    return buffer.getvalue()
+
+
+def archive_with_too_many_entries():
+    entry_count = DEFAULT_MAX_ZIP_ENTRIES + 1
+    archive = zipped([(f"part_{index}.txt", b"x") for index in range(entry_count)])
+    return archive, entry_count
+
+
+def archive_too_large_unzipped():
+    megabytes = DEFAULT_MAX_UNZIPPED_MEGABYTES + 1
+    return zipped_zero_megabytes(megabytes), megabytes * BYTES_PER_MEGABYTE
+
+
+ARCHIVES_OVER_THE_DEFAULT_ZIP_CAPS = [archive_with_too_many_entries, archive_too_large_unzipped]
 
 
 @pytest.fixture(autouse=True)
@@ -342,15 +374,25 @@ def test_a_drawing_over_the_callers_daily_bytes_is_not_written(caller_directorie
     assert refused.json()["detail"] == CALLER_BYTES_SPENT_REPLY
     assert written_files(caller_directories) == []
 
-@pytest.mark.parametrize("value", [None, "0", ""])
-def test_unset_or_zero_means_no_limit(monkeypatch, value):
+
+def set_limit_environment(monkeypatch, value):
     for name in LIMIT_ENVIRONMENT_NAMES + BUDGET_ENVIRONMENT_NAMES:
         if value is None:
             monkeypatch.delenv(name, raising=False)
         else:
             monkeypatch.setenv(name, value)
 
-    assert UploadLimits.from_environment() == UploadLimits(None, None, None, None)
+
+@pytest.mark.parametrize(
+    ("value", "expected_limits"),
+    [(None, DEFAULT_UPLOAD_LIMITS), ("", DEFAULT_UPLOAD_LIMITS), ("0", NO_UPLOAD_LIMITS)],
+)
+def test_unset_means_the_default_and_zero_means_no_limit(
+    monkeypatch, value, expected_limits
+):
+    set_limit_environment(monkeypatch, value)
+
+    assert UploadLimits.from_environment() == expected_limits
     upload_budget = UploadBudget.from_environment()
     for daily_budget in (upload_budget.file_budget, upload_budget.byte_budget):
         assert daily_budget.limit_per_day is None
@@ -373,3 +415,43 @@ def test_an_invalid_limit_fails_startup(monkeypatch, name, value):
         UploadBudget.from_environment()
 
     assert name in str(raised.value)
+
+
+@pytest.mark.parametrize("build_archive", ARCHIVES_OVER_THE_DEFAULT_ZIP_CAPS)
+@pytest.mark.parametrize("value", [None, ""])
+def test_unset_zip_caps_refuse_archives_over_the_defaults(
+    caller_directories, monkeypatch, value, build_archive
+):
+    set_limit_environment(monkeypatch, value)
+    monkeypatch.setattr(server, "upload_limits", UploadLimits.from_environment())
+    archive, _ = build_archive()
+
+    response = upload("alice", "bomb.zip", archive)
+
+    assert response.status_code == 413
+    assert written_files(caller_directories) == []
+
+
+@pytest.mark.parametrize("build_archive", ARCHIVES_OVER_THE_DEFAULT_ZIP_CAPS)
+def test_zero_zip_caps_accept_archives_over_the_defaults(
+    monkeypatch, tmp_path, build_archive
+):
+    set_limit_environment(monkeypatch, "0")
+    archive, unzipped_bytes = build_archive()
+    upload_file = UploadFile(io.BytesIO(archive), filename="bomb.zip")
+    limits = UploadLimits.from_environment()
+
+    total = checked_unzipped_bytes(upload_file, tmp_path / "bomb", limits)
+
+    assert total == unzipped_bytes
+
+
+def test_an_invalid_zip_cap_names_its_default(monkeypatch):
+    monkeypatch.setenv(UPLOAD_MAX_ZIP_ENTRIES_ENV, "ten")
+
+    with pytest.raises(RuntimeError) as raised:
+        UploadLimits.from_environment()
+
+    assert f"Unset means {DEFAULT_MAX_ZIP_ENTRIES} zip entries, 0 means no limit." in str(
+        raised.value
+    )
