@@ -98,6 +98,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against 0.17 for the same tasks before the trim.
 
 ### Fixed
+- 2026-10-01: `/upload` accepts only `.geojson`, `.json`, `.gpkg`, `.zip` and
+  `.csv`, in any letter case, and answers `415` to any other suffix before
+  anything is written or charged. Before, any other suffix went to GDAL, and a
+  `.shz` skipped the zip caps. The API, the executor and its tool workers set
+  `GDAL_SKIP` to include `VRT` and `OGR_VRT`, in the image and at import of
+  `src`, so an uploaded VRT document no longer reads a local file outside the
+  caller's folder into a layer.
 - 2026-10-01: an uploaded `.zip` is capped at 100 entries and 200 unzipped
   megabytes when `GEOLANG_UPLOAD_MAX_ZIP_ENTRIES` and
   `GEOLANG_UPLOAD_MAX_UNZIPPED_MEGABYTES` are unset or empty. Before, a stack

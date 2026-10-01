@@ -57,6 +57,7 @@ DEFAULT_UPLOAD_LIMITS = UploadLimits(
     None, None, DEFAULT_MAX_ZIP_ENTRIES, DEFAULT_MAX_UNZIPPED_MEGABYTES * BYTES_PER_MEGABYTE
 )
 NO_UPLOAD_LIMITS = UploadLimits(None, None, None, None)
+VRT_MARKER = "vrt-marker-7f3a"
 
 
 def geojson(name="parcel", padding=0):
@@ -299,6 +300,83 @@ def test_a_filename_with_no_name_before_its_extension_is_refused(
 
     assert response.status_code == 400
     assert "needs a name before its extension" in response.json()["detail"]
+    assert written_files(caller_directories) == []
+
+
+def geopackage(directory):
+    import geopandas as gpd
+
+    package = directory / "parcels.gpkg"
+    gpd.read_file(io.BytesIO(geojson())).to_file(package, driver="GPKG")
+    content = package.read_bytes()
+    package.unlink()
+    return content
+
+
+UPLOAD_CONTENT_BY_SUFFIX = {
+    ".geojson": lambda directory: geojson(),
+    ".json": lambda directory: geojson(),
+    ".gpkg": geopackage,
+    ".zip": lambda directory: zipped([("parcels.gpkg", geopackage(directory))]),
+    ".csv": lambda directory: b"name,lat,lon\nparcel,2.0,1.0\n",
+}
+
+
+@pytest.mark.parametrize("suffix", [*server.UPLOAD_SUFFIXES, ".GeoJSON", ".ZIP"])
+def test_every_accepted_suffix_is_read(caller_directories, limits, suffix):
+    limits()
+    content = UPLOAD_CONTENT_BY_SUFFIX[suffix.lower()](caller_directories)
+
+    response = upload("alice", f"parcels{suffix}", content)
+
+    assert response.status_code == 200
+    assert response.json()["row_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        ("parcels.txt", geojson()),
+        ("parcels.vrt", geojson()),
+        ("parcels.kml", geojson()),
+        ("parcels.shz", zipped([("parcels.shp", b"x")])),
+        ("PARCELS.SHZ", zipped([("parcels.shp", b"x")])),
+        ("parcels", geojson()),
+    ],
+)
+def test_an_unlisted_suffix_gets_415_before_anything_is_written_or_charged(
+    caller_directories, limits, budget, filename, content
+):
+    limits()
+    budget(files_per_caller_per_day=1, bytes_per_caller_per_day=SMALL_LIMIT_BYTES)
+
+    response = upload("alice", filename, content)
+
+    assert response.status_code == 415
+    assert written_files(caller_directories) == []
+    assert server.upload_budget.file_budget.spent_today == 0
+    assert server.upload_budget.byte_budget.spent_today == 0
+
+
+def test_a_vrt_document_named_geojson_does_not_read_the_file_it_names(
+    caller_directories, limits, tmp_path_factory
+):
+    limits()
+    outside = tmp_path_factory.mktemp("outside")
+    named_file = outside / "named.csv"
+    named_file.write_text(f"name,lon,lat\n{VRT_MARKER},1.0,2.0\n")
+    document = (
+        "<OGRVRTDataSource><OGRVRTLayer name=\"named\">"
+        f"<SrcDataSource>{named_file}</SrcDataSource>"
+        "<GeometryType>wkbPoint</GeometryType>"
+        '<GeometryField encoding="PointFromColumns" x="lon" y="lat"/>'
+        "</OGRVRTLayer></OGRVRTDataSource>"
+    )
+
+    response = upload("alice", "parcels.geojson", document.encode())
+
+    assert response.status_code != 200
+    assert VRT_MARKER not in response.text
     assert written_files(caller_directories) == []
 
 

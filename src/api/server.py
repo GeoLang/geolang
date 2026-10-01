@@ -871,6 +871,7 @@ async def get_datasets(authorization: Annotated[str | None, Header()] = None):
 
 
 UNUSABLE_UPLOAD_STEMS = ("", ".", "..")
+UPLOAD_SUFFIXES = (".geojson", ".json", ".gpkg", ".zip", ".csv")
 
 
 @app.post("/upload", dependencies=[Depends(platform_auth)])
@@ -904,6 +905,12 @@ async def upload_dataset(
                     f"the filename needs a name before its extension: '{raw_path.name}'",
                 )
             suffix = raw_path.suffix.lower()
+            if suffix not in UPLOAD_SUFFIXES:
+                raise HTTPException(
+                    status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    f"'{raw_path.name}' is not a file type /upload reads. "
+                    f"Send one of {', '.join(UPLOAD_SUFFIXES)}",
+                )
             stem = raw_path.stem
             extract_dir = Path(user_data) / stem
 

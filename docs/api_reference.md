@@ -68,7 +68,7 @@ User-uploaded files for the tools to read. Uploads go into one directory per cal
 | `GET` | `/stats/{filename:path}` | Feature count, geometry type, polygon area, a category breakdown and numeric ranges for a vector layer. |
 | `GET` | `/geojson/{filename:path}` | A vector layer as GeoJSON in EPSG:4326. |
 
-`/upload` takes a `file` field and an optional `thread_id`. A `.zip` is unpacked and its first `.shp` or `.gpkg` used. A `.csv` needs lat and lon columns and is converted to GPKG. Every upload is reprojected to EPSG:4326. With a `thread_id`, a note naming the dataset and its columns is appended to that sibyl session.
+`/upload` takes a `file` field and an optional `thread_id`. The filename must end in `.geojson`, `.json`, `.gpkg`, `.zip` or `.csv`, in any letter case. Any other suffix, `.shz` included, gets 415 and nothing is written or charged. A file whose content is a VRT document is refused whatever its suffix, because GDAL's `VRT` and `OGR_VRT` drivers are skipped. A `.zip` is unpacked and its first `.shp` or `.gpkg` used. A `.csv` needs lat and lon columns and is converted to GPKG. Every upload is reprojected to EPSG:4326. With a `thread_id`, a note naming the dataset and its columns is appended to that sibyl session.
 
 ## Outputs and downloads
 
