@@ -1,11 +1,14 @@
 import json
 
 import geopandas as gpd
+import numpy as np
 import pytest
+import rasterio
+from rasterio.transform import from_origin
 from shapely.geometry import Point
 
 from src.core.errors import LayerFileRefused
-from src.core.layer_files import read_layer_file
+from src.core.layer_files import open_raster_file, read_layer_file
 
 NAMED_FILE_MARKER = "named-file-marker-4c1e"
 WRITE_DRIVER_BY_SUFFIX = {
@@ -99,3 +102,39 @@ def test_a_gdalg_document_does_not_read_the_file_it_names(tmp_path, suffix):
 def test_an_unlisted_suffix_is_refused_before_the_file_is_opened(tmp_path, name):
     with pytest.raises(LayerFileRefused):
         read_layer_file(tmp_path / name)
+
+
+def written_raster(path, driver):
+    with rasterio.open(
+        path,
+        "w",
+        driver=driver,
+        height=2,
+        width=2,
+        count=1,
+        dtype="uint8",
+        crs="EPSG:4326",
+        transform=from_origin(0, 2, 1, 1),
+    ) as raster:
+        raster.write(np.ones((2, 2), dtype="uint8"), 1)
+    return path
+
+
+@pytest.mark.parametrize("name", ["grid.tif", "grid.TIFF"])
+def test_a_geotiff_is_opened(tmp_path, name):
+    with open_raster_file(written_raster(tmp_path / name, "GTiff")) as raster:
+        assert raster.read(1).tolist() == [[1, 1], [1, 1]]
+
+
+def test_a_tif_holding_another_raster_format_is_not_opened(tmp_path):
+    path = written_raster(tmp_path / "grid.tif", "PNG")
+
+    with rasterio.open(path) as raster:
+        assert raster.driver == "PNG"
+    with pytest.raises(Exception):
+        open_raster_file(path)
+
+
+def test_a_raster_with_another_suffix_is_refused(tmp_path):
+    with pytest.raises(LayerFileRefused):
+        open_raster_file(written_raster(tmp_path / "grid.png", "PNG"))

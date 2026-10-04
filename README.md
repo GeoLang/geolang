@@ -213,7 +213,7 @@ Tool runs have their own limits, counted for every tool call whether it comes fr
 
 A tool argument that names a file is a filename, not a path. It is looked up in the caller's own outputs directory, their own `user_data/` directory, and the natural earth reference sets, the same places `/geojson` serves from. An absolute path is refused, and an output filename with a directory part is refused rather than trimmed, so two callers cannot be pointed at one file.
 
-`plan_workflow` and `run_workflow` rewrite each `[[source]]` and `[[sink]]` `path` into the caller's own directories before the manifest reaches geodukt: `outputs/foo.gpkg` becomes `outputs/<caller>/foo.gpkg`, which is what `list_outputs` and the download routes serve. An absolute path outside those directories is refused. geodukt has no confinement root of its own, so this rewrite is the only check.
+`plan_workflow` and `run_workflow` rewrite each `[[source]]` and `[[sink]]` `path` into the caller's own directories before the manifest reaches geodukt: `outputs/foo.gpkg` becomes `outputs/<caller>/foo.gpkg`, which is what `list_outputs` and the download routes serve. An absolute path outside those directories is refused. A manifest that writes a path as a quoted key or inside an inline table is refused, because the rewrite only reads `path = "<file>"` lines. geodukt checks the same paths itself when it is started with `--caller-root outputs --caller-root user_data`, as the platform compose file does.
 
 ### MCP for outside agents
 

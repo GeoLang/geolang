@@ -26,6 +26,7 @@ import threading
 
 from src.core import utils
 from src.core.errors import PathRefused
+from src.core.layer_files import require_file_matches_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +239,10 @@ def confined_layer_source(argument: str, value: str) -> str:
             f"'<file>|layername=<table>', with letters, digits and underscores "
             f"in the table name, and nothing else after the '|': '{value}'"
         )
-    return utils.tool_input_path(argument, name) + separator + option
+    path = utils.tool_input_path(argument, name)
+    # QGIS lets GDAL pick the driver from the file's content
+    require_file_matches_suffix(path)
+    return path + separator + option
 
 
 def require_allowed_algorithm(algorithm_id: str) -> None:

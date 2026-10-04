@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import open_raster_file
 from src.core.layer_files import read_layer_file
 from src.core.utils import (
     population_raster_path,
@@ -108,12 +109,11 @@ def query_zonal_population(
             from rasterstats import zonal_stats
         except ImportError:
             # Manual rasterio fallback
-            import rasterio
             from rasterio.mask import mask as rio_mask
             from shapely.geometry import mapping
 
             results = []
-            with rasterio.open(raster_path) as src:
+            with open_raster_file(raster_path) as src:
                 # Reproject polygon to raster CRS if needed
                 raster_crs = src.crs
                 gdf_proj = gdf.to_crs(raster_crs) if gdf.crs != raster_crs else gdf

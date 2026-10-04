@@ -1,3 +1,4 @@
+from src.core.layer_files import open_raster_file
 from src.core.utils import population_raster_path
 
 GHSL_SOURCE = "GHSL GHS-POP 2020 (zonal sum)"
@@ -28,11 +29,10 @@ def ghsl_sum(polygon) -> float | None:
         return None
     import geopandas as gpd
     import numpy as np
-    import rasterio
     from rasterio.mask import mask as rio_mask
     from shapely.geometry import mapping
 
-    with rasterio.open(raster_path) as src:
+    with open_raster_file(raster_path) as src:
         geom = gpd.GeoSeries([polygon], crs="EPSG:4326").to_crs(src.crs).iloc[0]
         nodata = src.nodata if src.nodata is not None else -9999
         out_image, _ = rio_mask(src, [mapping(geom)], crop=True, nodata=nodata)

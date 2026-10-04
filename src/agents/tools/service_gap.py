@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import open_raster_file
 from src.core.layer_files import read_layer_file
 from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import (
@@ -235,11 +236,10 @@ def service_gap(
             pop_tif = population_raster_path()
             if pop_tif:
                 try:
-                    import rasterio
                     from rasterio.transform import rowcol
                     from rasterio.warp import transform as rio_transform
 
-                    with rasterio.open(pop_tif) as src:
+                    with open_raster_file(pop_tif) as src:
                         # Transform grid centres from UTM to raster CRS
                         lons, lats = rio_transform(
                             metric_crs,

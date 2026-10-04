@@ -12,5 +12,5 @@ class PathRefused(ValueError):
     """A tool argument or a route named a file the caller is not allowed to name."""
 
 
-class LayerFileRefused(ValueError):
+class LayerFileRefused(PathRefused):
     pass

@@ -183,7 +183,22 @@ def confine_manifest(manifest_toml: str, parsed: dict) -> str:
                     f"{match.group(2)}{match.group(4)}{ending}"
                 )
         lines.append(line)
-    return "".join(lines)
+    confined_toml = "".join(lines)
+    require_paths_were_rewritten(confined_toml, parsed)
+    return confined_toml
+
+
+def require_paths_were_rewritten(confined_toml: str, confined: dict) -> None:
+    import tomllib
+
+    # the line rewrite misses a quoted key and an inline table
+    rewritten = tomllib.loads(confined_toml)
+    for kind in ("source", "sink"):
+        if rewritten.get(kind) != confined.get(kind):
+            raise PathRefused(
+                f"write each {kind} as a [[{kind}]] table with its path on a line "
+                'of its own, as path = "<file>"'
+            )
 
 
 def error_detail(resp) -> str:

@@ -289,6 +289,18 @@ def test_an_input_layer_parameter_refuses_another_callers_file(tree):
                 confined_parameters({"INPUT": attempt}, FIELD_CALCULATOR_TYPES)
 
 
+def test_an_input_file_holding_another_format_is_refused(tree):
+    geojson = '{"type": "FeatureCollection", "features": []}'
+    (outputs_of(BOB) / "points.gpkg").write_text(geojson)
+    (outputs_of(BOB) / "grid.tif").write_text(geojson)
+    (outputs_of(BOB) / "table.csv").write_text("name,lat,lon\nparcel,2.0,1.0\n")
+
+    with caller_directory_scope(BOB):
+        for name in ("points.gpkg", "grid.tif", "table.csv"):
+            with pytest.raises(utils.PathRefused, match=name):
+                confined_parameters({"INPUT": name}, FIELD_CALCULATOR_TYPES)
+
+
 def test_a_layer_parameter_keeps_the_suffix_that_names_its_table(tree):
     mine = layer(outputs_of(BOB) / "points.gpkg", "bob's")
 

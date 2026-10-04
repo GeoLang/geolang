@@ -106,6 +106,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller's folder into a layer, the same way the VRT document did. `GDAL_SKIP`
   now includes `GDALG`, which also covers the rasters and the QGIS algorithms.
   `ruff` refuses `geopandas.read_file` outside `src/core/layer_files.py`.
+- 2026-10-04: a raster is opened with the GTiff driver only and must be named
+  `.tif` or `.tiff`. A file named as a `run_qgis_algorithm` or `pyqgis_api`
+  input is opened with its suffix's driver before QGIS sees it, and refused
+  when that fails or when the suffix is none of `.geojson`, `.json`, `.gpkg`,
+  `.shp`, `.tif` and `.tiff`, a `.csv` included. `ruff` refuses
+  `rasterio.open` outside `src/core/layer_files.py`.
+- 2026-10-04: `plan_workflow`, `approve_workflow` and `run_workflow` refuse a
+  manifest whose source or sink path is written as a quoted key or inside an
+  inline table. The path rewrite skipped those forms, so the path reached
+  geodukt as the caller wrote it.
 - 2026-10-01: `/upload` accepts only `.geojson`, `.json`, `.gpkg`, `.zip` and
   `.csv`, in any letter case, and answers `415` to any other suffix before
   anything is written or charged. Before, any other suffix went to GDAL, and a

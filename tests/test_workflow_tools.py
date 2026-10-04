@@ -341,6 +341,40 @@ def test_unparseable_toml_never_reaches_geodukt(monkeypatch):
     assert "__PLAN__" not in res
 
 
+UNREWRITTEN_PATH_MANIFESTS = {
+    "a quoted key": MANIFEST.replace('path = "outputs/depots', '"path" = "outputs/depots'),
+    "a dotted quoted key": MANIFEST.replace(
+        'path = "outputs/depot_catchment', "'path' = \"outputs/depot_catchment"
+    ),
+    "an inline table": """
+source = [{ name = "depots", format = "geojson", path = "outputs/depots.geojson" }]
+
+[project]
+name = "depot-catchment"
+
+[[sink]]
+name = "out"
+input = "depots"
+format = "gpkg"
+path = "outputs/depot_catchment.gpkg"
+""",
+}
+
+
+@pytest.mark.parametrize("manifest", UNREWRITTEN_PATH_MANIFESTS.values(), ids=UNREWRITTEN_PATH_MANIFESTS)
+def test_a_path_the_rewrite_misses_never_reaches_geodukt(monkeypatch, manifest):
+    monkeypatch.setitem(sys.modules, "requests", _NoHttp())
+
+    planned = plan_workflow(manifest)
+    approve(MANIFEST)
+    ran = run_workflow(manifest)
+
+    assert "path on a line of its own" in planned
+    assert "__PLAN__" not in planned
+    assert "path on a line of its own" in ran
+    assert "__RUN__" not in ran
+
+
 def test_plan_emits_the_structured_plan(geodukt):
     fake = geodukt(validate=(200, VALIDATED))
 
