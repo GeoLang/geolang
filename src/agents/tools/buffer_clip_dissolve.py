@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 WGS84 = "EPSG:4326"
@@ -90,7 +91,7 @@ def buffer_clip_dissolve(
             )
 
         # Load and reproject input layer
-        gdf = gpd.read_file(input_full)
+        gdf = read_layer_file(input_full)
         if gdf.crs is None:
             gdf = gdf.set_crs(WGS84)
         gdf = gdf.to_crs(metric_crs)

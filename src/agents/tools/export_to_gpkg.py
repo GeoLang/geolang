@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -16,7 +17,6 @@ def export_to_gpkg(
     layer_name: str = "layer",
 ) -> str:
     """Reliable GPKG export using GeoPandas."""
-    import geopandas as gpd
 
     # Ensure .gpkg extension
     if not output_filename.lower().endswith(".gpkg"):
@@ -25,7 +25,7 @@ def export_to_gpkg(
     resolved = tool_input_path("dataset_path", dataset_path)
 
     try:
-        gdf = gpd.read_file(resolved)
+        gdf = read_layer_file(resolved)
         gdf.to_file(output_path, driver="GPKG", layer=layer_name)
         return f"✅ Exported to GPKG successfully!\nPath: {output_path}\nFeatures: {len(gdf)}\nLayer name: {layer_name}"
     except Exception as e:

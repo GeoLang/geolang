@@ -48,6 +48,7 @@ from ag_ui.encoder import EventEncoder
 
 import httpx
 
+from src.core.layer_files import read_layer_file
 from src.agents.agent_manager import approval_route_only, load_external_tools
 from src.agents.workflows import get_progress_text, infer_ui_spec_from_text
 from src.api.live_document import (
@@ -180,14 +181,13 @@ def layer_geojson(filename: str) -> dict | None:
     and the live document bridge both read through it, so what may be read
     cannot drift between them.
     """
-    import geopandas as gpd
 
     path = resolve_under(
         name_candidates(filename), layer_search_dirs(), allowed_roots()
     )
     if not path:
         return None
-    gdf = gpd.read_file(path)
+    gdf = read_layer_file(path)
     if gdf.crs and gdf.crs.to_epsg() != 4326:
         gdf = gdf.to_crs("EPSG:4326")
     return json.loads(gdf.to_json())
@@ -970,7 +970,7 @@ async def upload_dataset(
 
         # Read metadata
         try:
-            gdf = gpd.read_file(data_path)
+            gdf = read_layer_file(data_path)
             if gdf.crs and gdf.crs.to_epsg() != 4326:
                 gdf = gdf.to_crs("EPSG:4326")
                 gdf.to_file(data_path, driver="GPKG")
@@ -1015,7 +1015,6 @@ async def get_stats(
     filename: str, authorization: Annotated[str | None, Header()] = None
 ):
     """Return summary statistics for a vector layer."""
-    import geopandas as gpd
 
     with user_token_scope(bearer_token(authorization)):
         search_dirs = layer_search_dirs()
@@ -1027,7 +1026,7 @@ async def get_stats(
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
     try:
-        gdf = gpd.read_file(path)
+        gdf = read_layer_file(path)
         if gdf.crs and gdf.crs.to_epsg() != 4326:
             gdf = gdf.to_crs("EPSG:4326")
 

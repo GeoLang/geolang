@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -57,8 +58,8 @@ def find_nearest(
         orig_full = tool_input_path("origins_path", origins_path)
         targ_full = tool_input_path("targets_path", targets_path)
 
-        gdf_orig = gpd.read_file(orig_full)
-        gdf_targ = gpd.read_file(targ_full)
+        gdf_orig = read_layer_file(orig_full)
+        gdf_targ = read_layer_file(targ_full)
 
         if gdf_orig.empty:
             return f"Origins layer is empty: {origins_path}"

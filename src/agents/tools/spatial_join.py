@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -51,8 +52,8 @@ def spatial_join(
         pts_full = tool_input_path("points_path", points_path)
         poly_full = tool_input_path("polygons_path", polygons_path)
 
-        gdf_pts = gpd.read_file(pts_full)
-        gdf_poly = gpd.read_file(poly_full)
+        gdf_pts = read_layer_file(pts_full)
+        gdf_poly = read_layer_file(poly_full)
 
         if gdf_pts.empty:
             return f"Features layer is empty: {points_path}"

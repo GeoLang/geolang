@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 from ._osm_tags import features_matching_tags, merge_tags, tags_for_category
@@ -145,7 +146,7 @@ def score_sites(
         competitor_metric = None
         competitor_crs = None
         if competitors_path:
-            competitor_frame = gpd.read_file(
+            competitor_frame = read_layer_file(
                 tool_input_path("competitors_path", competitors_path)
             )
             if competitor_frame.empty:

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -67,7 +68,7 @@ def cluster_points(
 
         full_path = tool_input_path("input_path", input_path)
 
-        gdf = gpd.read_file(full_path)
+        gdf = read_layer_file(full_path)
         if gdf.empty:
             return f"Layer is empty: {input_path}"
 

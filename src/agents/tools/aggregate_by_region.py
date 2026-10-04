@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -69,8 +70,8 @@ def aggregate_by_region(
         reg_full = tool_input_path("regions_path", regions_path)
         feat_full = tool_input_path("features_path", features_path)
 
-        gdf_reg = gpd.read_file(reg_full)
-        gdf_feat = gpd.read_file(feat_full)
+        gdf_reg = read_layer_file(reg_full)
+        gdf_feat = read_layer_file(feat_full)
 
         if gdf_reg.empty:
             return f"Regions layer is empty: {regions_path}"

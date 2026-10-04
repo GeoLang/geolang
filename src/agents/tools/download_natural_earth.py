@@ -3,6 +3,7 @@ from typing import Optional
 import os
 import zipfile
 
+from src.core.layer_files import read_layer_file
 from src.core.utils import (
     natural_earth_dirs,
     natural_earth_download_directory,
@@ -105,9 +106,8 @@ def download_natural_earth_dataset(
             return f"✅ {verb} {scale} {dataset} → {shp_path}"
 
         # Filter step
-        import geopandas as gpd
 
-        gdf = gpd.read_file(shp_path)
+        gdf = read_layer_file(shp_path)
         try:
             filtered = gdf[attribute_filter_mask(gdf, filter_query)]
         except Exception as e:

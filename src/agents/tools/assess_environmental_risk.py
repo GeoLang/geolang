@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.place_lookup import geocode, place_not_found
 from src.core.utils import tool_input_path, tool_output_path
 
@@ -166,7 +167,7 @@ def assess_environmental_risk(
         # Build analysis area
         if polygon_path:
             poly_file = tool_input_path("polygon_path", polygon_path)
-            area_gdf = gpd.read_file(poly_file)
+            area_gdf = read_layer_file(poly_file)
             if area_gdf.crs and area_gdf.crs.to_epsg() != 4326:
                 area_gdf = area_gdf.to_crs("EPSG:4326")
             analysis_poly = area_gdf.union_all()

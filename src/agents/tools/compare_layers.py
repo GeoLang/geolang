@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -53,8 +54,8 @@ def compare_layers(
         a_full = tool_input_path("layer_a_path", layer_a_path)
         b_full = tool_input_path("layer_b_path", layer_b_path)
 
-        gdf_a = gpd.read_file(a_full)
-        gdf_b = gpd.read_file(b_full)
+        gdf_a = read_layer_file(a_full)
+        gdf_b = read_layer_file(b_full)
 
         if gdf_a.empty:
             return f"Layer A is empty: {layer_a_path}"

@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
     TOOL_EXEC_DIR=/app/geolang \
     QT_QPA_PLATFORM=offscreen \
     QGIS_PREFIX_PATH=/usr \
-    GDAL_SKIP="VRT OGR_VRT" \
+    GDAL_SKIP="VRT OGR_VRT GDALG" \
     PATH=/opt/venv/bin:$PATH
 
 # Build tools for the geo stack's C extensions, QGIS, locales, curl for healthchecks.

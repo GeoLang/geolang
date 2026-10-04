@@ -1,5 +1,6 @@
 import re
 
+from src.core.layer_files import read_layer_file
 from src.core.place_lookup import GeocoderUnavailable, geocode_batch
 from src.core.utils import tool_input_path
 
@@ -46,9 +47,8 @@ def _sites_from_names(sites: str) -> list[dict] | str:
 
 
 def _sites_from_layer(sites_path: str, name_column: str | None) -> list[dict] | str:
-    import geopandas as gpd
 
-    frame = gpd.read_file(tool_input_path("sites_path", sites_path))
+    frame = read_layer_file(tool_input_path("sites_path", sites_path))
     if frame.empty:
         return f"Sites layer is empty: {sites_path}"
     if frame.crs is None:

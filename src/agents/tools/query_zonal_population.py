@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import (
     population_raster_path,
     tool_input_path,
@@ -54,7 +55,7 @@ def query_zonal_population(
 
         poly_path = tool_input_path("polygon_path", polygon_path)
 
-        gdf = gpd.read_file(poly_path)
+        gdf = read_layer_file(poly_path)
         if gdf.crs and gdf.crs.to_epsg() != 4326:
             gdf = gdf.to_crs("EPSG:4326")
 

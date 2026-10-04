@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -52,7 +53,6 @@ def generate_heatmap(
 
     try:
         import numpy as np
-        import geopandas as gpd
         import matplotlib
 
         matplotlib.use("Agg")
@@ -61,7 +61,7 @@ def generate_heatmap(
 
         input_full = tool_input_path("input_path", input_path)
 
-        gdf = gpd.read_file(input_full)
+        gdf = read_layer_file(input_full)
         if gdf.empty:
             return f"Layer is empty: {input_path}"
 

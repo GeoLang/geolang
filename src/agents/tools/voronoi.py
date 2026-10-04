@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -54,7 +55,7 @@ def voronoi(
 
         full_path = tool_input_path("input_path", input_path)
 
-        gdf = gpd.read_file(full_path)
+        gdf = read_layer_file(full_path)
         if gdf.empty:
             return f"Layer is empty: {input_path}"
         if len(gdf) < 3:
@@ -90,7 +91,7 @@ def voronoi(
         # Load or build clip boundary
         if boundary_path:
             bnd_full = tool_input_path("boundary_path", boundary_path)
-            bnd_gdf = gpd.read_file(bnd_full).to_crs(metric_crs)
+            bnd_gdf = read_layer_file(bnd_full).to_crs(metric_crs)
             clip_poly = bnd_gdf.union_all()
         else:
             # Convex hull + 10% padding

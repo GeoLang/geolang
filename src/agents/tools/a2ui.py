@@ -5,6 +5,7 @@ import time
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from src.core.layer_files import read_layer_file
 from src.core.utils import caller_outputs_dir, tool_input_path_or_none
 
 # a shade-by part has to be one column name, or the viewer has nothing to look
@@ -52,9 +53,8 @@ def recent_output_layers() -> list[tuple[str, str, str, str]]:
 
 
 def absent_column_note(file: str, path: str, column: str) -> str:
-    import geopandas as gpd
 
-    layer = gpd.read_file(path, rows=0)
+    layer = read_layer_file(path, rows=0)
     columns = [name for name in layer.columns if name != layer.geometry.name]
     if column in columns:
         return ""

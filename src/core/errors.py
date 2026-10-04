@@ -10,3 +10,7 @@ caught. Nothing here is reloaded, so there is only ever one of each.
 
 class PathRefused(ValueError):
     """A tool argument or a route named a file the caller is not allowed to name."""
+
+
+class LayerFileRefused(ValueError):
+    pass

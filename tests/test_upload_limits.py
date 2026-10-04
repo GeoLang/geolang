@@ -380,6 +380,28 @@ def test_a_vrt_document_named_geojson_does_not_read_the_file_it_names(
     assert written_files(caller_directories) == []
 
 
+@pytest.mark.parametrize("filename", ["parcels.geojson", "parcels.json", "parcels.gpkg"])
+def test_a_gdalg_document_does_not_read_the_file_it_names(
+    caller_directories, limits, tmp_path_factory, filename
+):
+    limits()
+    outside = tmp_path_factory.mktemp("outside")
+    named_file = outside / "named.csv"
+    named_file.write_text(f"name,lon,lat\n{VRT_MARKER},1.0,2.0\n")
+    document = json.dumps(
+        {
+            "type": "gdal_streamed_alg",
+            "command_line": f"gdal vector pipeline ! read {named_file}",
+        }
+    )
+
+    response = upload("alice", filename, document.encode())
+
+    assert response.status_code != 200
+    assert VRT_MARKER not in response.text
+    assert written_files(caller_directories) == []
+
+
 def test_the_callers_upload_count_refuses_the_next_upload_with_429(
     caller_directories, budget
 ):

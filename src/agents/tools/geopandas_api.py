@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 from ._attribute_filter import attribute_filter_mask
@@ -100,7 +101,7 @@ def geopandas_api(
                 log.append("Error: Missing filter_query for filter")
                 return "\n".join(log) + "\n\nRESULT: Error: Missing filter_query"
 
-            gdf = gpd.read_file(dataset_path)
+            gdf = read_layer_file(dataset_path)
             log.append(f"Loaded {len(gdf)} rows, columns: {list(gdf.columns)}")
             filtered = gdf[attribute_filter_mask(gdf, filter_query)]
             log.append(f"After filter '{filter_query}': {len(filtered)} rows")
@@ -117,7 +118,7 @@ def geopandas_api(
             )
 
         if func_name == "read_file":
-            gdf = gpd.read_file(dataset_path)
+            gdf = read_layer_file(dataset_path)
             available = [c for c in gdf.columns if c != gdf.geometry.name]
             log.append(f"Loaded {len(gdf)} rows")
             summary = f"{len(gdf)} features. Columns: {', '.join(available)}"
@@ -154,7 +155,7 @@ def geopandas_api(
 
             point = Point(point_coords[0], point_coords[1])
             gdf_point = gpd.GeoDataFrame(geometry=[point], crs="EPSG:4326")
-            cities = gpd.read_file(dataset_path)
+            cities = read_layer_file(dataset_path)
 
             gdf_point = gdf_point.to_crs("EPSG:32610")
             cities = cities.to_crs("EPSG:32610")

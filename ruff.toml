@@ -1,4 +1,11 @@
 # pinned to ruff's classic default set so a ruff upgrade cannot turn CI red on
 # style rules nobody opted into
 [lint]
-select = ["E4", "E7", "E9", "F"]
+select = ["E4", "E7", "E9", "F", "TID251"]
+
+[lint.flake8-tidy-imports.banned-api]
+"geopandas.read_file".msg = "GDAL picks the driver from file content. Use src.core.layer_files.read_layer_file."
+
+[lint.per-file-ignores]
+"src/core/layer_files.py" = ["TID251"]
+"tests/*" = ["TID251"]

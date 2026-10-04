@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from src.core.layer_files import read_layer_file
 from src.core.place_lookup import GeocoderUnavailable, geocode
 from src.core.utils import natural_earth_dataset_paths
 
@@ -32,14 +33,13 @@ def geocode_place(place_name: str) -> str:
         # held back so the place sources answer a query with no house number first
         geokode_street = _format_geokode(results[0], place_name) if results else None
 
-        import geopandas as gpd
 
         search_paths = natural_earth_dataset_paths("populated_places")
 
         gdf = None
         for path in search_paths:
             if os.path.exists(path):
-                gdf = gpd.read_file(path)
+                gdf = read_layer_file(path)
                 break
 
         if gdf is None:

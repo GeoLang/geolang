@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_input_path_or_none, tool_output_path
 
 from ._isochrones import MODE_NETWORKS, isochrone_polygons
@@ -186,7 +187,7 @@ def trade_area(
         if competitors:
             competitor_file = tool_input_path_or_none("competitors", competitors)
             if competitor_file:
-                competitor_frame = gpd.read_file(competitor_file)
+                competitor_frame = read_layer_file(competitor_file)
                 if competitor_frame.crs is None:
                     competitor_frame = competitor_frame.set_crs("EPSG:4326")
                 competitor_frame = competitor_frame.to_crs("EPSG:4326")
@@ -229,7 +230,7 @@ def trade_area(
             if not wanted_figures:
                 return "demographics_columns named no columns, e.g. 'population:sum'."
 
-            demographics = gpd.read_file(
+            demographics = read_layer_file(
                 tool_input_path("demographics_path", demographics_path)
             )
             absent = [

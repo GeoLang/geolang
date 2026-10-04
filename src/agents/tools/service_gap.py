@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import (
     population_raster_path,
@@ -82,7 +83,7 @@ def service_gap(
         # ── Study area ──────────────────────────────────────────────────────────
         if boundary_path:
             bnd_full = tool_input_path("boundary_path", boundary_path)
-            bnd_gdf = gpd.read_file(bnd_full).to_crs("EPSG:4326")
+            bnd_gdf = read_layer_file(bnd_full).to_crs("EPSG:4326")
             study_poly = bnd_gdf.union_all()
             centroid = study_poly.centroid
             lat, lon = centroid.y, centroid.x
@@ -135,7 +136,7 @@ def service_gap(
 
         svc_full = tool_input_path_or_none("service_path", service_path)
         if svc_full:
-            gdf_svc = gpd.read_file(svc_full)
+            gdf_svc = read_layer_file(svc_full)
         else:
             # Try OSM download
             key = service_path.lower().strip()

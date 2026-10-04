@@ -98,6 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against 0.17 for the same tasks before the trim.
 
 ### Fixed
+- 2026-10-04: every vector layer the API and the tools read is opened with
+  the one GDAL driver its suffix names: GeoJSON for `.geojson` and `.json`,
+  GPKG for `.gpkg`, and a `.shp` must start with the shapefile file code. Any
+  other suffix is refused. Before, GDAL chose the driver from file content,
+  and a GDALG document uploaded as `.geojson` read a local file outside the
+  caller's folder into a layer, the same way the VRT document did. `GDAL_SKIP`
+  now includes `GDALG`, which also covers the rasters and the QGIS algorithms.
+  `ruff` refuses `geopandas.read_file` outside `src/core/layer_files.py`.
 - 2026-10-01: `/upload` accepts only `.geojson`, `.json`, `.gpkg`, `.zip` and
   `.csv`, in any letter case, and answers `415` to any other suffix before
   anything is written or charged. Before, any other suffix went to GDAL, and a

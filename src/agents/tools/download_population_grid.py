@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from src.core.layer_files import read_layer_file
 from src.core.place_lookup import geocode_point, place_not_found
 from src.core.utils import (
     caller_outputs_dir,
@@ -72,7 +73,7 @@ def download_population_grid(
         if clip_layer_path:
             clip_path = tool_input_path_or_none("clip_layer_path", clip_layer_path)
             if clip_path:
-                clip_gdf = gpd.read_file(clip_path)
+                clip_gdf = read_layer_file(clip_path)
                 if clip_gdf.crs and clip_gdf.crs.to_epsg() != 4326:
                     clip_gdf = clip_gdf.to_crs("EPSG:4326")
             else:
@@ -101,7 +102,7 @@ def download_population_grid(
                     break
 
             if ne_path:
-                ne = gpd.read_file(ne_path)
+                ne = read_layer_file(ne_path)
                 if ne.crs and ne.crs.to_epsg() != 4326:
                     ne = ne.to_crs("EPSG:4326")
                 # Clip to the queried area (clip polygon when given, else radius bbox)

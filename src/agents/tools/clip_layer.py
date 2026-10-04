@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from src.core.layer_files import read_layer_file
 from src.core.utils import tool_input_path, tool_output_path
 
 
@@ -30,8 +31,8 @@ def clip_layer(input_path: str, clip_path: str, output_filename: str) -> str:
         input_full = tool_input_path("input_path", input_path)
         clip_full = tool_input_path("clip_path", clip_path)
 
-        gdf = gpd.read_file(input_full)
-        clip_gdf = gpd.read_file(clip_full)
+        gdf = read_layer_file(input_full)
+        clip_gdf = read_layer_file(clip_full)
 
         if gdf.empty:
             return "Input layer is empty."
