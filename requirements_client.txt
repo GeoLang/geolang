@@ -4,7 +4,7 @@ uvicorn[standard]
 python-multipart
 playwright
 httpx
-ag-ui-protocol==0.1.19
+ag-ui-protocol==0.1.22
 PyJWT==2.13.0
 mcp>=2.0.0,<3
 websockets>=17,<18
