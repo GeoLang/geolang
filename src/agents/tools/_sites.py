@@ -8,6 +8,8 @@ COORDINATE_PAIR = re.compile(r"^\s*(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)\s*$")
 
 SITE_NAME_COLUMNS = ("name", "NAME", "Name", "site", "label", "address")
 
+PTOLEMY_ID_COLUMN = "ptolemy_id"
+
 
 def resolve_sites(
     sites: str | None, sites_path: str | None, name_column: str | None = None
@@ -73,7 +75,10 @@ def _sites_from_layer(sites_path: str, name_column: str | None) -> list[dict] | 
             continue
         point = geometry if geometry.geom_type == "Point" else geometry.centroid
         name = str(row[chosen]) if chosen else f"site {position}"
-        resolved.append({"name": name, "lat": float(point.y), "lon": float(point.x)})
+        site = {"name": name, "lat": float(point.y), "lon": float(point.x)}
+        if PTOLEMY_ID_COLUMN in frame.columns:
+            site["feature_id"] = str(row[PTOLEMY_ID_COLUMN])
+        resolved.append(site)
     if not resolved:
         return f"No site has a geometry in {sites_path}."
     return resolved

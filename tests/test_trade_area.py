@@ -454,3 +454,59 @@ def test_population_inside_says_unavailable_when_no_source_answers(
 
     assert count is None
     assert source == "unavailable"
+
+
+def test_score_sites_rows_carry_the_ptolemy_id_of_an_exported_site(
+    monkeypatch, stub_services
+):
+    from src.agents.tools.ptolemy_query import ptolemy_query
+
+    export = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": feature_id,
+                "properties": {"name": name},
+                "geometry": shapely_mapping(Point(lon, lat)),
+            }
+            for feature_id, name, (lat, lon) in [
+                ("f-town", "town centre", SITE_A),
+                ("f-depot", "north depot", SITE_B),
+            ]
+        ],
+    }
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        SimpleNamespace(
+            get=lambda url, params=None, headers=None, timeout=None: SimpleNamespace(
+                json=lambda: export, raise_for_status=lambda: None
+            )
+        ),
+    )
+    exported = ptolemy_query("export", branch_id="branch-1", output_filename="parcels")
+    assert "Exported 2 features" in exported, exported
+
+    monkeypatch.setitem(sys.modules, "requests", _fake_opentopodata([]))
+    out = score_sites(
+        sites_path="parcels.gpkg", criteria="flood_risk", output_filename="exported"
+    )
+    assert "Site scoring results" in out, out
+
+    rows = _read_output("exported").set_index("name")
+    assert rows.loc["town centre", "feature_id"] == "f-town"
+    assert rows.loc["north depot", "feature_id"] == "f-depot"
+
+
+def test_sites_from_names_carry_no_feature_id(monkeypatch, stub_services):
+    monkeypatch.setitem(sys.modules, "osmnx", _RecordingOsmnx())
+    monkeypatch.setitem(sys.modules, "requests", _fake_opentopodata([]))
+
+    score_sites(
+        sites=f"{SITE_A[0]}, {SITE_A[1]}; {SITE_B[0]}, {SITE_B[1]}",
+        criteria="flood_risk",
+        output_filename="named",
+    )
+
+    assert "feature_id" not in _read_output("named").columns

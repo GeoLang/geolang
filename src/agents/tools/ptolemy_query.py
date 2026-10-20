@@ -111,6 +111,12 @@ def ptolemy_query(
             features = fc.get("features", [])
             if not features:
                 return f"Branch {branch_id} has no features."
+            # from_features drops each feature's top-level id
+            for feature in features:
+                feature["properties"] = {
+                    **(feature.get("properties") or {}),
+                    "ptolemy_id": feature.get("id"),
+                }
             gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
             name = output_filename or f"ptolemy_{branch_id[:8]}"
             if name.lower().endswith(".gpkg"):

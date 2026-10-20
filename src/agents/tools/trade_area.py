@@ -319,6 +319,8 @@ def trade_area(
                 "population_source": population_source,
                 "competitors": _count_intersecting(competitor_source, polygon),
             }
+            if "feature_id" in site:
+                row["feature_id"] = site["feature_id"]
             for category in anchor_categories:
                 row[f"anchor_{category}"] = _count_intersecting(
                     anchor_subsets.get(category), polygon

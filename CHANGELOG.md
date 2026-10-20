@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- 2026-10-19: `score_sites` and `trade_area` rows carry `feature_id` when their
+  sites come from a ptolemy layer. `ptolemy_query` export keeps each feature's
+  id as `ptolemy_id`, the way `query_bbox` already did, and `resolve_sites`
+  passes it on.
+
 ### Changed
 - 2026-09-26: `calculate_isochrones` and `trade_area` ask itinera at
   `ITINERA_URL` before any third party. A point inside the loaded extract

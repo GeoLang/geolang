@@ -358,6 +358,8 @@ def score_sites(
                 "total_score": totals[i],
                 "rank": 0,  # filled after sorting
             }
+            if "feature_id" in site:
+                row["feature_id"] = site["feature_id"]
             for criterion, weight in zip(criteria_list, weight_vals):
                 row[f"{criterion}_raw"] = round(raw_scores[criterion][i], 1)
                 row[f"{criterion}_score"] = norm_scores[criterion][i]
