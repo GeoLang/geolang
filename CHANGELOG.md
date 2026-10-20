@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- 2026-10-19: the map tool's column check reads a layer's field names with
+  `pyogrio.read_info` instead of reading every row, which `rows=0` still did.
+
 ### Added
 - 2026-10-19: `score_sites` and `trade_area` rows carry `feature_id` when their
   sites come from a ptolemy layer. `ptolemy_query` export keeps each feature's

@@ -3,9 +3,10 @@ import os
 import re
 import time
 from pydantic import BaseModel, Field
+from pyogrio import read_info
 from typing import Optional
 
-from src.core.layer_files import read_layer_file
+from src.core.layer_files import single_driver_source
 from src.core.utils import caller_outputs_dir, tool_input_path_or_none
 
 # a shade-by part has to be one column name, or the viewer has nothing to look
@@ -54,8 +55,8 @@ def recent_output_layers() -> list[tuple[str, str, str, str]]:
 
 def absent_column_note(file: str, path: str, column: str) -> str:
 
-    layer = read_layer_file(path, rows=0)
-    columns = [name for name in layer.columns if name != layer.geometry.name]
+    # rows=0 on read_file still reads every row
+    columns = list(read_info(single_driver_source(path))["fields"])
     if column in columns:
         return ""
     return f"{file} has no column {column}, its columns are {', '.join(columns)}."
